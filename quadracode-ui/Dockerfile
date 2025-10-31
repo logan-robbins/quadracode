@@ -18,11 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy sibling packages required for editable installs
+# Copy sibling package required for editable installs
 COPY quadracode-contracts/ quadracode-contracts/
 RUN cd quadracode-contracts && uv pip install --system -e .
 
-# Copy UI project files
+# Prepare UI workspace
+RUN mkdir -p /app/quadracode-ui
+WORKDIR /app/quadracode-ui
+
 COPY quadracode-ui/pyproject.toml ./pyproject.toml
 COPY quadracode-ui/uv.lock ./uv.lock
 COPY quadracode-ui/src ./src
@@ -32,4 +35,4 @@ RUN uv sync --frozen --no-dev || uv pip install --system -e .
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "quadracode_ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+CMD ["streamlit", "run", "src/quadracode_ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
