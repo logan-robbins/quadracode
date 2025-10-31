@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "quadracode-runtime"
 version = "0.1.0"
 description = "Shared runtime core for Quadracode orchestrator and agent"
-readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "langchain",

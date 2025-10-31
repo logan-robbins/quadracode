@@ -24,6 +24,7 @@ RUN cd quadracode-contracts && uv pip install --system -e .
 
 # Copy UI project files
 COPY quadracode-ui/pyproject.toml ./pyproject.toml
+COPY quadracode-ui/uv.lock ./uv.lock
 COPY quadracode-ui/src ./src
 
 # Install project dependencies
