@@ -35,4 +35,4 @@ RUN uv sync --frozen --no-dev || uv pip install --system -e .
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "src/quadracode_ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+CMD ["uv", "run", "streamlit", "run", "src/quadracode_ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
