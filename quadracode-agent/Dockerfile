@@ -36,7 +36,6 @@ WORKDIR /app/quadracode-agent
 COPY quadracode-agent/pyproject.toml ./pyproject.toml
 COPY quadracode-agent/uv.lock ./uv.lock
 COPY quadracode-agent/langgraph-docker.json ./langgraph-docker.json
-COPY quadracode-agent/AGENTS.md ./AGENTS.md
 COPY .env ./.env
 COPY quadracode-agent/src/quadracode_agent ./quadracode_agent
 
