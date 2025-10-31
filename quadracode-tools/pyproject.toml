@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quadracode-tools"
+version = "0.3.0"
+description = "Shared tool definitions for Quadracode agents and orchestrator"
+authors = [{ name = "Quadracode Team" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "langchain-core",
+    "httpx"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

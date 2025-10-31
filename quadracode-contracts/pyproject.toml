@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quadracode-contracts"
+version = "0.2.0"
+description = "Contracts and schemas for Quadracode agent-orchestrator communication"
+authors = [{ name = "Quadracode Team" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.6",
+    "typing-extensions>=4.9"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

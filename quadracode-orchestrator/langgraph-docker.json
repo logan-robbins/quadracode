@@ -1,0 +1,9 @@
+{
+    "dependencies": [
+        "pyproject.toml"
+    ],
+    "graphs": {
+        "orchestrator": "./quadracode_orchestrator/graph.py:graph"
+    },
+    "env": "./.env"
+}

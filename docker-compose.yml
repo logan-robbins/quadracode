@@ -1,0 +1,190 @@
+version: "3.9"
+
+x-python-service: &python-service
+  env_file:
+    - .env
+    - .env.docker
+  volumes:
+    - shared-data:/shared
+    - mcp-remote-cache:/var/lib/mcp-remote
+  restart: unless-stopped
+
+x-orchestrator-base: &orchestrator-base
+  <<: *python-service
+  build:
+    context: .
+    dockerfile: quadracode-orchestrator/Dockerfile
+  environment:
+    QUADRACODE_ID: orchestrator
+  depends_on:
+    redis:
+      condition: service_healthy
+    redis-mcp:
+      condition: service_healthy
+    agent-registry:
+      condition: service_started
+  volumes:
+    - shared-data:/shared
+    - mcp-remote-cache:/var/lib/mcp-remote
+    - ./.env.docker:/app/quadracode-orchestrator/.env:ro
+
+x-agent-base: &agent-base
+  <<: *python-service
+  build:
+    context: .
+    dockerfile: quadracode-agent/Dockerfile
+  environment:
+    QUADRACODE_ID: agent-compose
+  depends_on:
+    redis:
+      condition: service_healthy
+    redis-mcp:
+      condition: service_healthy
+  volumes:
+    - shared-data:/shared
+    - mcp-remote-cache:/var/lib/mcp-remote
+    - ./.env.docker:/app/quadracode-agent/.env:ro
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  redis-mcp:
+    image: mcp/redis:latest
+    command:
+      [
+        "uv",
+        "run",
+        "python",
+        "-c",
+        "from src.common.server import mcp; mcp.settings.host='0.0.0.0'; mcp.run('streamable-http')"
+      ]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  agent-registry:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: quadracode-agent-registry/Dockerfile
+    environment:
+      QUADRACODE_ID: agent-registry
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-mcp:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    volumes:
+      - shared-data:/shared
+      - mcp-remote-cache:/var/lib/mcp-remote
+      - ./.env.docker:/app/.env:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  orchestrator:
+    <<: *orchestrator-base
+    ports:
+      - "8123:8123"
+
+  orchestrator-runtime:
+    <<: *orchestrator-base
+    command: ["uv", "run", "python", "-m", "quadracode_orchestrator"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 5s
+      retries: 1
+      start_period: 5s
+
+  agent:
+    <<: *agent-base
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-mcp:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+    ports:
+      - "8124:8123"
+
+  agent-runtime:
+    <<: *agent-base
+    environment:
+      QUADRACODE_ID: agent-runtime
+
+    command: ["uv", "run", "python", "-m", "quadracode_agent"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 5s
+      retries: 1
+      start_period: 5s
+
+  ui:
+    build:
+      context: .
+      dockerfile: quadracode-ui/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      agent-registry:
+        condition: service_started
+      orchestrator-runtime:
+        condition: service_started
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      AGENT_REGISTRY_URL: http://agent-registry:8090
+      UI_POLL_INTERVAL_MS: "2000"
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  shared-data:
+  mcp-remote-cache:

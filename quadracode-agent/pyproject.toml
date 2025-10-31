@@ -1,0 +1,22 @@
+[project]
+name = "quadracode-agent"
+version = "0.1.0"
+description = "Quadracode agent runtime (Redis MCP mailbox consumer)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "dotenv",
+    "langchain-anthropic",
+    "langchain-openai",
+    "langgraph",
+    "langgraph-cli[inmem]",
+    "quadracode-tools",
+    "quadracode-runtime",
+    "langchain-mcp-adapters"
+]
+
+[tool.uv.sources]
+# Use the local sibling repository as the source for the dependency.
+quadracode-tools = { path = "../quadracode-tools" }
+quadracode-contracts = { path = "../quadracode-contracts" }
+quadracode-runtime = { path = "../quadracode-runtime" }

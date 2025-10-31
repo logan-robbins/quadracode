@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quadracode-runtime"
+version = "0.1.0"
+description = "Shared runtime core for Quadracode orchestrator and agent"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "langchain",
+    "langchain-anthropic",
+    "langchain-openai",
+    "langgraph",
+    "langgraph-cli[inmem]",
+    "quadracode-tools",
+    "langchain-mcp-adapters",
+    "quadracode-contracts"
+]
+
+[tool.uv.sources]
+quadracode-tools = { path = "../quadracode-tools" }
+quadracode-contracts = { path = "../quadracode-contracts" }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,9 @@
+{
+    "dependencies": [
+        "pyproject.toml"
+    ],
+    "graphs": {
+        "agent": "./src/quadracode_agent/graph.py:graph"
+    },
+    "env": "../.env"
+}

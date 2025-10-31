@@ -1,0 +1,20 @@
+[project]
+name = "quadracode-agent-registry"
+version = "1.0.0"
+description = "Agent Registry for Quadracode - Service discovery and monitoring"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+quadracode-agent-registry = "agent_registry.main:main"
