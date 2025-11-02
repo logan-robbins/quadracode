@@ -28,6 +28,7 @@ from quadracode_contracts.messaging import mailbox_key
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 AGENT_REGISTRY_URL = os.environ.get("AGENT_REGISTRY_URL", "")
+UI_BARE = os.environ.get("UI_BARE", "0") == "1"
 
 MAILBOX_ORCHESTRATOR = mailbox_key(ORCHESTRATOR_RECIPIENT)
 MAILBOX_HUMAN = mailbox_key(HUMAN_RECIPIENT)
@@ -45,7 +46,6 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("chat_id", None)
     st.session_state.setdefault("history", [])  # type: ignore[attr-defined]
     st.session_state.setdefault("last_seen_id", "0-0")
-    st.session_state.setdefault("selected_reply_to", None)
     st.session_state.setdefault("chat_selector", None)
 
 
@@ -151,8 +151,7 @@ def _render_history() -> None:
 def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> str:
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
-    if reply_to:
-        payload["reply_to"] = reply_to
+    # Orchestrator owns routing. The UI does not set reply_to.
 
     envelope = MessageEnvelope(
         sender=HUMAN_RECIPIENT,
@@ -167,7 +166,8 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
 def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
     last_id = st.session_state.last_seen_id
     try:
-        responses = client.xread({MAILBOX_HUMAN: last_id}, block=0, count=50)
+        # Non-blocking read: omit BLOCK to avoid hanging the Streamlit render thread.
+        responses = client.xread({MAILBOX_HUMAN: last_id}, count=50)
     except redis.RedisError as exc:  # noqa: BLE001
         st.warning(f"Redis read error: {exc}")
         return []
@@ -197,6 +197,8 @@ def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
 
 @st.cache_data(ttl=5.0, show_spinner=False)
 def _registry_snapshot() -> Dict[str, Any]:
+    if UI_BARE:
+        return {"agents": [], "stats": None, "error": "bare mode"}
     if not AGENT_REGISTRY_URL:
         return {"agents": [], "stats": None, "error": "AGENT_REGISTRY_URL not set"}
 
@@ -297,12 +299,15 @@ def _queue_session_rerun() -> None:
 
 
 def _ensure_mailbox_watcher(client: redis.Redis) -> None:
+    if UI_BARE:
+        return
     thread: Thread | None = st.session_state.get("_mailbox_watcher_thread")  # type: ignore[attr-defined]
     stop_event: Event | None = st.session_state.get("_mailbox_watcher_stop")  # type: ignore[attr-defined]
 
     if thread and thread.is_alive():
         return
 
+    # Ensure there is an active Streamlit run context before wiring the watcher
     ctx = get_script_run_ctx()
     if ctx is None:
         return
@@ -312,7 +317,6 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
         st.session_state["_mailbox_watcher_stop"] = stop_event  # type: ignore[attr-defined]
 
     def _watch() -> None:
-        add_script_run_ctx(ctx)
         known_chat: str | None = st.session_state.get("chat_id")
         last_id: str = st.session_state.get("last_seen_id", "0-0")
 
@@ -354,6 +358,9 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
                 _queue_session_rerun()
 
     watcher = Thread(target=_watch, name="mailbox-watcher", daemon=True)
+    # Attach the current ScriptRunContext to the background thread so it can
+    # safely interact with Streamlit runtime (session_state, rerun requests).
+    add_script_run_ctx(watcher)
     watcher.start()
     st.session_state["_mailbox_watcher_thread"] = watcher  # type: ignore[attr-defined]
 
@@ -447,24 +454,6 @@ def main() -> None:
         if error:
             st.warning(error)
 
-        agent_ids = [a.get("agent_id") for a in agents if isinstance(a, dict) and a.get("agent_id")]
-
-        def _agent_label(value: str | None) -> str:
-            return "Automatic" if value in (None, "") else str(value)
-
-        agent_options = [None, *agent_ids]
-        current_reply = st.session_state.get("selected_reply_to")
-        index = agent_options.index(current_reply) if current_reply in agent_options else 0
-        selected = st.selectbox(
-            "Route via agent",
-            options=agent_options,
-            index=index,
-            format_func=_agent_label,
-            key="agent_select",
-        )
-
-        st.session_state.selected_reply_to = selected
-
     with chat_tab:
         st.title("Quadracode Assistant")
         st.caption(
@@ -474,8 +463,7 @@ def main() -> None:
         _render_history()
 
         if prompt := st.chat_input("Ask the orchestrator..."):
-            reply_target = st.session_state.get("selected_reply_to")
-            ticket = _send_message(client, prompt, reply_to=reply_target)
+            ticket = _send_message(client, prompt, reply_to=None)
             _append_history("human", prompt, ticket_id=ticket)
             st.rerun()
 

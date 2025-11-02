@@ -164,25 +164,25 @@ services:
       retries: 1
       start_period: 5s
 
-  ui:
-    build:
-      context: .
-      dockerfile: quadracode-ui/Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-      agent-registry:
-        condition: service_started
-      orchestrator-runtime:
-        condition: service_started
-    environment:
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      AGENT_REGISTRY_URL: http://agent-registry:8090
-      UI_POLL_INTERVAL_MS: "2000"
-    ports:
-      - "8501:8501"
-    restart: unless-stopped
+  # ui:
+  #   build:
+  #     context: .
+  #     dockerfile: quadracode-ui/Dockerfile
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     agent-registry:
+  #       condition: service_started
+  #     orchestrator-runtime:
+  #       condition: service_started
+  #   environment:
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: "6379"
+  #     AGENT_REGISTRY_URL: http://agent-registry:8090
+  #     UI_POLL_INTERVAL_MS: "2000"
+  #   ports:
+  #     - "8501:8501"
+  #   restart: unless-stopped
 
 volumes:
   redis-data:

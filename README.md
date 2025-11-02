@@ -8,7 +8,7 @@ Quadracode is an always-on, LangGraph-native orchestration platform for asynchro
 - **LangGraph runtimes** (orchestrator and agents) consume their mailbox, execute a stateful graph, and publish responses back onto the fabric.
 - **Agent Registry** (FastAPI on port `8090`) tracks agent identities, health, and ports, enabling dynamic routing.
 - **Redis-MCP proxy** exposes the Redis transport to MCP-compatible clients so LangChain/MCP adapters can be loaded at runtime.
-- **Streamlit UI** (`8501`) acts as a technical control plane with multi-chat management, routing controls, and live stream inspection.
+- **Streamlit UI** (`8501`) acts as a technical control plane with multi-chat management and live stream inspection. Routing is decided by the orchestrator at runtime.
 
 Every envelope is a simple record: `timestamp`, `sender`, `recipient`, `message`, and `payload` (JSON). The payload carries threading metadata, correlation ids, tool outputs, and routing hints.
 
@@ -34,16 +34,29 @@ Because checkpoints are bound to `chat_id`, both orchestrator and agents can rec
 - **Chat sidebar**: ChatGPT-style list of conversations (new chat, rename, switch). Each chat persists its history and baseline stream offset.
 - **Chat view**: Real-time conversation with trace expanders that reveal `payload.messages` for every response.
 - **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display.
-- **Registry panel**: Summaries of total/healthy agents plus a routing selector to pin `reply_to` to a specific agent.
+- **Registry panel**: Summaries of total/healthy agents; the orchestrator determines routing (no manual override in the UI).
 
 The UI writes `chat_id` and a `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope for the active chat arrives it queues a Streamlit rerun. The main script simply renders state and never schedules timer-based reruns, so the interface remains responsive even when no traffic is flowing.
 
 ## Deployment
 
-Bring up the full stack with Docker Compose:
+Bring up the core services with Docker Compose (UI runs locally during dev):
 
 ```bash
-docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime ui
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+```
+
+Run the UI locally against those services:
+
+```bash
+REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
+  uv run streamlit run quadracode-ui/src/quadracode_ui/app.py
+```
+
+Optional: to containerize the UI, uncomment the `ui` service in `docker-compose.yml` and run:
+
+```bash
+docker compose up -d ui
 ```
 
 Endpoints:
@@ -105,6 +118,8 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 
 - **Runtime memory regression**: `python -m pytest tests/test_runtime_memory.py` (verifies `chat_id`→`thread_id` binding and checkpoint persistence with a fake LangGraph graph).
 - **End-to-end**: `uv run pytest tests/e2e -m e2e` (orchestrates Docker Compose, validates registry/tool invocation, and ensures round-trip chat).
+ - **UI integration (live Redis, no stubs)**: with Redis running locally, `uv run pytest quadracode-ui/tests -m integration -q`. These tests run the real Streamlit app in-process via AppTest and exercise Redis Streams.
+ - **UI E2E (full stack, UI local)**: with docker compose already running `redis`, `agent-registry`, `orchestrator-runtime`, and `agent-runtime`, run `uv run pytest quadracode-ui/tests -m e2e -q`. The UI is executed locally via Streamlit AppTest (not containerized) and interacts with the live orchestrator/agent/LLM. Do not start the `ui` service for this test; the harness runs the UI in‑process.
 
 ## Observability and Ops
 
