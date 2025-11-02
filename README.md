@@ -1,72 +1,72 @@
 # Quadracode
 
-Quadracode is an always-on, LangGraph-native orchestration platform for asynchronous, long-running AI workloads. The system binds Redis Streams, LangGraph checkpoints, and MCP-aware tooling into a coherent runtime that can ingest work continuously, delegate it to arbitrary agents, and resume in-flight tasks after restarts.
+**An always-on, LangGraph-native orchestration platform for asynchronous, long-running AI workloads.**
 
-## System Overview
+Quadracode is a production-ready framework that enables AI agents to handle complex, multi-step tasks that span minutes, hours, or days—without blocking, without losing state, and without manual intervention. Built on Redis Streams, LangGraph checkpointing, and MCP-aware tooling, Quadracode provides the infrastructure you need to deploy resilient, distributed AI agent systems.
 
-- **Redis Streams** (`qc:mailbox/<recipient>`) provide durable, ordered mailboxes for every participant.
-- **LangGraph runtimes** (orchestrator and agents) consume their mailbox, execute a stateful graph, and publish responses back onto the fabric.
-- **Agent Registry** (FastAPI on port `8090`) tracks agent identities, health, and ports, enabling dynamic routing.
-- **Redis-MCP proxy** exposes the Redis transport to MCP-compatible clients so LangChain/MCP adapters can be loaded at runtime.
-- **Streamlit UI** (`8501`) acts as a technical control plane with multi-chat management and live stream inspection. Routing is decided by the orchestrator at runtime.
+## Why Quadracode?
 
-Every envelope is a simple record: `timestamp`, `sender`, `recipient`, `message`, and `payload` (JSON). The payload carries threading metadata, correlation ids, tool outputs, and routing hints.
+Most AI agent frameworks are designed for synchronous, short-lived interactions. Quadracode is purpose-built for **real-world automation** where:
 
-## Runtime Model
+- **Tasks take time**: Code reviews, data analysis, multi-service deployments, research synthesis
+- **Failures happen**: Network issues, rate limits, service restarts—your work should survive them
+- **Delegation is essential**: One orchestrator coordinates multiple specialized agents, each with their own tools and responsibilities
+- **Observability matters**: Every decision, tool call, and message is traced and inspectable
 
-- Each runtime polls its mailbox, processes a batch, emits outgoing envelopes, then deletes the consumed entries.
-- Payload fields `chat_id` (UI generated) and `thread_id` (runtime populated) identify the logical conversation. The orchestrator maps `chat_id` to LangGraph `configurable.thread_id`, so the graph checkpoint store aligns 1:1 with chat threads.
-- LangGraph graphs are compiled with a shared `MemorySaver` checkpointer. Invocations run as `graph.invoke(state, config={"configurable": {"thread_id": chat_id, "checkpoint_ns": ""}})`. Checkpoints and pending writes persist in memory and can be swapped for a durable backend without touching business logic.
-- Responses echo the input payload (minus control fields) and append the serialized LangChain message trace at `payload.messages`. All downstream systems can therefore replay or audit full agent conversations.
-- Delegation is async by construction: if `payload.reply_to` is present, the orchestrator routes to that agent first and only emits a human response when the delegated work completes.
+### Key Features
 
-## Asynchronous Task Lifecycle
+- **Persistent State**: LangGraph checkpoints keyed by conversation ID survive process restarts and resume exactly where they left off
+- **Async-First**: Orchestrator never blocks on agent work; long-running jobs emit incremental updates over Redis Streams
+- **Multi-Agent Coordination**: Built-in service registry, dynamic routing, and agent health tracking
+- **MCP Integration**: Standardized tool interfaces via Model Context Protocol for seamless agent capability sharing
+- **Full Observability**: Streamlit control plane with conversation management, real-time stream inspection, and message tracing
+- **Production Ready**: Docker Compose deployment, comprehensive E2E tests, structured message contracts
 
-1. A producer (Streamlit UI, CLI, CI pipeline, etc.) pushes a message to `qc:mailbox/orchestrator` with a `chat_id` and optional `reply_to` target.
-2. The orchestrator loads the latest checkpoint for that `chat_id`, runs its LangGraph (LLM driver → tool loop), and publishes new envelopes. Delegation targets receive work on their own mailbox.
-3. Agents execute tools (LangChain, MCP, custom) and push results back to the orchestrator mailbox.
-4. The orchestrator emits human-facing updates to `qc:mailbox/human`. Long-running jobs can emit multiple updates; each envelope carries `chat_id`/`thread_id` so consumers can stitch the stream together.
+## Architecture Overview
 
-Because checkpoints are bound to `chat_id`, both orchestrator and agents can recover mid-task after a restart simply by replaying the stream: the LangGraph runtime rehydrates state automatically.
-
-## Streamlit Control Plane
-
-- **Chat sidebar**: ChatGPT-style list of conversations (new chat, rename, switch). Each chat persists its history and baseline stream offset.
-- **Chat view**: Real-time conversation with trace expanders that reveal `payload.messages` for every response.
-- **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display.
-- **Registry panel**: Summaries of total/healthy agents; the orchestrator determines routing (no manual override in the UI).
-
-The UI writes `chat_id` and a `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope for the active chat arrives it queues a Streamlit rerun. The main script simply renders state and never schedules timer-based reruns, so the interface remains responsive even when no traffic is flowing.
-
-## Deployment
-
-Bring up the core services with Docker Compose (UI runs locally during dev):
-
-```bash
-docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+```
+┌─────────────┐      ┌──────────────────┐      ┌─────────────┐
+│  Streamlit  │◄────►│ Redis Streams    │◄────►│ Orchestrator│
+│     UI      │      │  (Event Fabric)  │      │   Runtime   │
+└─────────────┘      └──────────────────┘      └─────────────┘
+                              ▲                        │
+                              │                        ▼
+                     ┌────────┴────────┐      ┌─────────────┐
+                     │  Agent Registry │      │    Agent    │
+                     │   (FastAPI)     │      │   Runtime   │
+                     └─────────────────┘      └─────────────┘
 ```
 
-Run the UI locally against those services:
+### Core Components
 
-```bash
-REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
-  uv run streamlit run quadracode-ui/src/quadracode_ui/app.py
-```
+- **Redis Streams** (`qc:mailbox/<recipient>`) provide durable, ordered mailboxes for every participant
+- **LangGraph runtimes** consume their mailbox, execute stateful graphs, and publish responses back onto the fabric
+- **Agent Registry** (FastAPI on port `8090`) tracks agent identities, health, and ports for dynamic routing
+- **Redis-MCP proxy** exposes the Redis transport to MCP-compatible clients for runtime tool loading
+- **Streamlit UI** (`8501`) provides multi-chat management, live stream inspection, and trace visualization
 
-Optional: to containerize the UI, uncomment the `ui` service in `docker-compose.yml` and run:
+Every message is a simple envelope: `timestamp`, `sender`, `recipient`, `message`, and `payload` (JSON). The payload carries threading metadata, correlation IDs, tool outputs, and routing hints.
 
-```bash
-docker compose up -d ui
-```
+## How It Works
 
-Endpoints:
+### 1. Asynchronous Task Lifecycle
 
-- UI: http://localhost:8501
-- Agent registry: http://localhost:8090
-- Redis commands: `docker compose exec -T redis redis-cli ...`
-- Stream tailer: `bash scripts/tail_streams.sh`
+1. A producer (UI, CLI, CI pipeline) pushes a message to `qc:mailbox/orchestrator` with a `chat_id` and optional `reply_to` target
+2. The orchestrator loads the latest checkpoint for that `chat_id`, runs its LangGraph (LLM driver → tool loop), and publishes new envelopes
+3. Agents execute tools (LangChain, MCP, custom) and push results back to the orchestrator mailbox
+4. The orchestrator emits human-facing updates to `qc:mailbox/human`
 
-## Message Schema
+Because checkpoints are bound to `chat_id`, both orchestrator and agents recover mid-task after restarts by automatically rehydrating state from the checkpoint store.
+
+### 2. Runtime Model
+
+- Each runtime polls its mailbox, processes a batch, emits outgoing envelopes, then deletes consumed entries
+- `chat_id` (UI-generated) and `thread_id` (runtime-populated) identify the logical conversation
+- LangGraph graphs use a shared checkpointer: `graph.invoke(state, config={"configurable": {"thread_id": chat_id}})`
+- Responses echo the input payload and append the serialized LangChain message trace at `payload.messages`
+- Delegation is async by construction: if `payload.reply_to` is present, the orchestrator routes to that agent first
+
+### 3. Message Schema
 
 ```text
 timestamp    ISO-8601 UTC
@@ -83,119 +83,199 @@ payload {
 }
 ```
 
-All services treat payload fields as opaque except for the threading/routing attributes above.
+All services treat payload fields as opaque except for threading/routing attributes.
 
-## Local Development
+## Quick Start
 
-0. We use uv for environments and commands
-   - Install uv: see https://docs.astral.sh/uv/getting-started/installation/
-     - macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-     - Or via pipx: `pipx install uv`
-   - Optional shared venv: `uv venv --python 3.12` (kept at repo root `.venv`). You can either activate it once (`source .venv/bin/activate`) or skip activation and prefix commands with `uv run`.
+### Prerequisites
 
-1. Install dependencies once from the repo root (recommended):
-   ```bash
-   uv sync
-   ```
-   This uses the root `pyproject.toml` to install all workspace packages in editable mode via `[tool.uv.sources]`.
-   Alternatively, sync per-package:
-   ```bash
-   for pkg in quadracode-runtime quadracode-orchestrator quadracode-agent \
-              quadracode-agent-registry quadracode-tools quadracode-ui; do
-       (cd "$pkg" && uv sync)
-   done
-   ```
-2. Run LangGraph dev servers locally:
+- **Docker** and **Docker Compose**
+- **uv** (Python package manager): [Installation](https://docs.astral.sh/uv/getting-started/installation/)
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+### 1. Launch Services
 
 ```bash
+# Bring up Redis, registry, orchestrator, and agent runtimes
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+
+# Verify services are healthy
+docker compose ps
+```
+
+### 2. Run the UI
+
+```bash
+# Create virtual environment (one-time setup)
+uv venv --python 3.12
+source .venv/bin/activate  # Optional: or use 'uv run' prefix
+
+# Install dependencies
+uv sync
+
+# Launch Streamlit UI
+REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
+  uv run streamlit run quadracode-ui/src/quadracode_ui/app.py
+```
+
+### 3. Access the UI
+
+Open http://localhost:8501 and start a conversation. The orchestrator will delegate work to agents, and you'll see real-time updates as the system processes your request.
+
+**Optional**: Containerize the UI by uncommenting the `ui` service in `docker-compose.yml`:
+
+```bash
+docker compose up -d ui
+```
+
+### Endpoints
+
+- **UI**: http://localhost:8501
+- **Agent registry**: http://localhost:8090
+- **Redis CLI**: `docker compose exec -T redis redis-cli ...`
+- **Stream tailer**: `bash scripts/tail_streams.sh`
+
+## Use Cases
+
+### Code Review Automation
+Delegate pull requests to specialized agents: one for style/lint checks, one for security analysis, one for test coverage—all coordinated by the orchestrator, all resumable after restarts.
+
+### Data Pipeline Orchestration
+Trigger long-running ETL jobs, data quality checks, and report generation. The orchestrator tracks progress, handles retries, and notifies humans when intervention is needed.
+
+### Research Synthesis
+Ingest documents, dispatch research tasks to multiple agents (summarization, fact-checking, citation extraction), aggregate results, and produce a final report—all while maintaining full audit trails.
+
+### Multi-Service Deployments
+Coordinate deployments across microservices: run tests, deploy to staging, run smoke tests, promote to production—with checkpoints at every stage so failures don't lose progress.
+
+## Streamlit Control Plane
+
+- **Chat sidebar**: ChatGPT-style conversation list (new chat, rename, switch). Each chat persists its history and baseline stream offset
+- **Chat view**: Real-time conversation with trace expanders revealing `payload.messages` for every response
+- **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display
+- **Registry panel**: Summaries of total/healthy agents; orchestrator determines routing dynamically
+
+The UI writes `chat_id` and `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope arrives, it triggers a Streamlit rerun. The interface remains responsive even when no traffic is flowing.
+
+## Development
+
+### Local Development Setup
+
+```bash
+# Create virtual environment at repo root
+uv venv --python 3.12
+source .venv/bin/activate  # Optional
+
+# Install all workspace packages in editable mode
+uv sync
+```
+
+### Run LangGraph Dev Servers
+
+```bash
+# Terminal 1: Orchestrator
 uv run langgraph dev orchestrator --config quadracode-orchestrator/langgraph-local.json
+
+# Terminal 2: Agent
 uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 ```
 
-3. Use the Streamlit UI or raw `redis-cli XADD` commands to drive payloads into the orchestrator.
+### Testing
 
-## Testing
+```bash
+# Runtime memory regression (checkpoint persistence)
+uv run pytest tests/test_runtime_memory.py
 
-- **Runtime memory regression**: `python -m pytest tests/test_runtime_memory.py` (verifies `chat_id`→`thread_id` binding and checkpoint persistence with a fake LangGraph graph).
-- **End-to-end**: `uv run pytest tests/e2e -m e2e` (orchestrates Docker Compose, validates registry/tool invocation, and ensures round-trip chat).
- - **UI integration (live Redis, no stubs)**: with Redis running locally, `uv run pytest quadracode-ui/tests -m integration -q`. These tests run the real Streamlit app in-process via AppTest and exercise Redis Streams.
- - **UI E2E (full stack, UI local)**: with docker compose already running `redis`, `agent-registry`, `orchestrator-runtime`, and `agent-runtime`, run `uv run pytest quadracode-ui/tests -m e2e -q`. The UI is executed locally via Streamlit AppTest (not containerized) and interacts with the live orchestrator/agent/LLM. Do not start the `ui` service for this test; the harness runs the UI in‑process.
+# End-to-end (orchestrates Docker Compose, validates registry/tools/chat)
+uv run pytest tests/e2e -m e2e
 
-## Observability and Ops
+# UI integration (live Redis, no stubs)
+uv run pytest quadracode-ui/tests -m integration -q
 
-- Redis stream stats: `redis-cli XINFO STREAM qc:mailbox/<recipient>`
-- Logs: `docker compose logs <service>`
-- Streamlit stream viewer: inspect raw payloads, including `payload.messages` traces.
-- Checkpoint introspection: from within a runtime process, call `CHECKPOINTER.get_tuple({"configurable": {"thread_id": chat_id, "checkpoint_ns": ""}})` to review persisted state.
+# UI E2E (full stack, UI runs locally via AppTest)
+# Prerequisite: docker compose up redis agent-registry orchestrator-runtime agent-runtime
+uv run pytest quadracode-ui/tests -m e2e -q
+```
 
 ## Repository Layout
 
-- `quadracode-runtime/` — shared runtime core, LangGraph graph builder, checkpointer wiring, Redis messaging.
-- `quadracode-orchestrator/` — orchestrator profile, prompts, CLI entry.
-- `quadracode-agent/` — agent profile and prompts.
-- `quadracode-agent-registry/` — FastAPI service for agent registration and health.
-- `quadracode-contracts/` — Pydantic envelope contracts and mailbox helpers.
-- `quadracode-tools/` — reusable MCP / LangChain tool wrappers.
-- `quadracode-ui/` — Streamlit chat client with multi-thread controls and stream inspection.
-- `scripts/` — operational scripts (stream tailer, agent launcher).
-- `tests/` — unit and integration suites (including checkpoint reuse tests).
+```
+quadracode/
+├── quadracode-runtime/        # Shared runtime core, LangGraph builder, Redis messaging
+├── quadracode-orchestrator/   # Orchestrator profile, prompts, CLI entry
+├── quadracode-agent/          # Agent profile and prompts
+├── quadracode-agent-registry/ # FastAPI service for agent registration and health
+├── quadracode-contracts/      # Pydantic envelope contracts and mailbox helpers
+├── quadracode-tools/          # Reusable MCP / LangChain tool wrappers
+├── quadracode-ui/             # Streamlit chat client with multi-thread controls
+├── scripts/                   # Operational scripts (stream tailer, agent launcher)
+├── tests/                     # Unit and integration test suites
+└── docker-compose.yml         # Production deployment configuration
+```
 
-## AI Coding Agents Quickstart
+## Configuration
 
-Automated coding assistants should work inside `/tmp/quadracode-gh`. Follow the steps below to gain full coverage of the stack:
+Environment variables control runtime behavior:
 
-1. **Create a virtual environment with uv** (Python 3.12) at the repo root:
-   ```bash
-   uv venv --python 3.12
-   # optional: activate once if you prefer
-   source .venv/bin/activate
-   ```
-   Notes:
-   - Keep the environment in the repo root so all packages share it during development.
-   - Activation is optional; you can also run commands with `uv run <command>` without activating.
+- `QUADRACODE_ID` — runtime identity (overrides profile default)
+- `AGENT_REGISTRY_URL` — FastAPI registry endpoint
+- `REDIS_HOST`, `REDIS_PORT` — Redis connection
+- `SHARED_PATH` — shared volume for MCP transport
+- `.env`, `.env.docker` — shared environment definitions for Compose services
 
-2. **Install dependencies from the repo root** (preferred):
-   ```bash
-   uv sync
-   ```
-   This installs all workspace packages declared in the root `pyproject.toml`.
-   Alternative (per-package):
-   ```bash
-   for pkg in quadracode-runtime quadracode-orchestrator quadracode-agent \
-              quadracode-agent-registry quadracode-tools quadracode-ui; do
-       (cd "$pkg" && uv sync)
-   done
-   ```
+## Observability & Operations
 
-3. **Know where to edit**:
-   - LangGraph flows and shared messaging live in `quadracode-runtime/src`.
-   - Orchestrator- and agent-specific prompts/configs sit under `quadracode-orchestrator/` and `quadracode-agent/`.
-   - The Streamlit control plane is `quadracode-ui/src/quadracode_ui/app.py`; background mailbox watching happens there.
-   - REST registry endpoints are in `quadracode-agent-registry/src` (FastAPI mounted on port 8090).
-   - Contracts and envelope models reside in `quadracode-contracts/src`.
-
-4. **Run services locally**:
-   - Launch Redis (`redis-server` or `docker compose up redis`).
-   - Start LangGraph runtimes with `uv run langgraph dev orchestrator --config quadracode-orchestrator/langgraph-local.json` and the analogous agent command.
-   - Run the UI with `uv run streamlit run quadracode-ui/src/quadracode_ui/app.py` and environment variables `REDIS_HOST`, `REDIS_PORT`, `AGENT_REGISTRY_URL` pointing at your running services.
-
-5. **Execute tests**. Use `uv run pytest` within each package. The UI ships with Streamlit AppTest coverage in `quadracode-ui/tests`.
-
-6. **Observe Redis traffic**. Tail `scripts/tail_streams.sh` or run `redis-cli monitor` while the UI is active. The watcher thread only calls `XREAD` when a chat is selected; this is expected behavior.
-
-Following the steps above keeps tool runs repeatable and ensures any AI coding agent has the full repository context available.
-
-## Configuration Surface
-
-- `QUADRACODE_ID` — runtime identity (overrides profile default).
-- `AGENT_REGISTRY_URL`, `REDIS_HOST`, `REDIS_PORT`, `SHARED_PATH`, MCP transport vars — required for tool discovery.
-- `.env`, `.env.docker` — shared environment definitions consumed by Compose services.
+- **Redis stream stats**: `redis-cli XINFO STREAM qc:mailbox/<recipient>`
+- **Service logs**: `docker compose logs <service>`
+- **Streamlit stream viewer**: Inspect raw payloads and message traces
+- **Checkpoint introspection**: From within a runtime, call:
+  ```python
+  CHECKPOINTER.get_tuple({"configurable": {"thread_id": chat_id, "checkpoint_ns": ""}})
+  ```
 
 ## Guarantees
 
-- **Persistence**: LangGraph checkpoints keyed by `chat_id` survive process restarts and are reused on the next invocation.
-- **Parallelism**: Orchestrator never blocks on agent work; long-running jobs emit incremental envelopes, and the human mailbox receives a stream of updates.
-- **Extensibility**: Shared MCP adapters + local tools ensure the orchestrator and agents share capabilities automatically.
-- **Transparency**: `payload.messages` carries the full reasoning trace; the UI exposes both the human-facing response and the underlying traffic.
+- **Persistence**: LangGraph checkpoints keyed by `chat_id` survive process restarts and resume on next invocation
+- **Parallelism**: Orchestrator never blocks on agent work; long-running jobs emit incremental envelopes
+- **Extensibility**: Shared MCP adapters + local tools ensure orchestrator and agents share capabilities automatically
+- **Transparency**: `payload.messages` carries full reasoning traces; UI exposes both human responses and underlying traffic
 
-Quadracode is designed to operate as the control plane for “always-on” AI automation—accepting requests continuously, delegating them across a fleet of agents, and resuming mid-task without manual babysitting.
+## Contributing
+
+Quadracode is designed to operate as the control plane for "always-on" AI automation—accepting requests continuously, delegating them across a fleet of agents, and resuming mid-task without manual babysitting.
+
+We welcome contributions! Whether you're building new agents, adding tool integrations, or improving the core runtime, please open an issue or submit a pull request.
+
+## AI Coding Agents: Development Notes
+
+Automated coding assistants working on this codebase should:
+
+1. **Use uv for all Python operations**: `uv venv --python 3.12`, `uv sync`, `uv run <command>`
+2. **Install from repo root**: `uv sync` installs all workspace packages in editable mode
+3. **Know the architecture**:
+   - LangGraph flows and messaging: `quadracode-runtime/src`
+   - Orchestrator/agent prompts: `quadracode-orchestrator/`, `quadracode-agent/`
+   - Streamlit UI: `quadracode-ui/src/quadracode_ui/app.py`
+   - Registry API: `quadracode-agent-registry/src` (FastAPI on port 8090)
+   - Contracts: `quadracode-contracts/src`
+4. **Run tests with uv**: `uv run pytest` (package-specific or from repo root)
+5. **Observe Redis traffic**: `scripts/tail_streams.sh` or `redis-cli monitor`
+
+This workflow ensures repeatable builds and full repository context for AI-assisted development.
+
+## License
+
+[Add your license here]
+
+## Learn More
+
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+- [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
+- [Redis Streams](https://redis.io/docs/data-types/streams/)
+
+---
+
+**Quadracode**: Build AI agent systems that work when you sleep.

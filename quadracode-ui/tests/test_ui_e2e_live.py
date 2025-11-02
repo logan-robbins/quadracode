@@ -92,6 +92,5 @@ def test_ui_round_trip_with_full_stack(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Also verify Streams tab renders entries without error
     assert tester.tabs
-    tester.tabs[0].click(1)  # Switch to Streams tab (index 1)
-    tester.run()
-    assert tester.expander, "Expected stream entries to render under expanders"
+    streams_tab = tester.tabs[1]  # Access the Streams tab (index 1)
+    assert streams_tab.expander, "Expected stream entries to render under expanders"
