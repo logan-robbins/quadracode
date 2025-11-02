@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
+from threading import Event, Thread
 from typing import Any, Dict, List, Optional
 
 import httpx
 import redis
 import streamlit as st
+from streamlit.runtime.scriptrunner_utils.script_run_context import (
+    add_script_run_ctx,
+    get_script_run_ctx,
+)
+from streamlit.runtime.scriptrunner_utils.script_requests import RerunData
 
 from quadracode_contracts import (
     HUMAN_RECIPIENT,
@@ -20,7 +27,6 @@ from quadracode_contracts.messaging import mailbox_key
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
-POLL_INTERVAL_MS = int(os.environ.get("UI_POLL_INTERVAL_MS", "2000"))
 AGENT_REGISTRY_URL = os.environ.get("AGENT_REGISTRY_URL", "")
 
 MAILBOX_ORCHESTRATOR = mailbox_key(ORCHESTRATOR_RECIPIENT)
@@ -39,10 +45,6 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("chat_id", None)
     st.session_state.setdefault("history", [])  # type: ignore[attr-defined]
     st.session_state.setdefault("last_seen_id", "0-0")
-    st.session_state.setdefault("poll_interval_ms", POLL_INTERVAL_MS)
-    st.session_state.setdefault("auto_refresh_enabled", POLL_INTERVAL_MS > 0)
-    st.session_state.setdefault("stream_auto_refresh", False)
-    st.session_state.setdefault("stream_refresh_ms", 2000)
     st.session_state.setdefault("selected_reply_to", None)
     st.session_state.setdefault("chat_selector", None)
 
@@ -95,7 +97,7 @@ def _create_chat(client: redis.Redis, *, title: Optional[str] = None) -> str:
     entry = {
         "id": chat_id,
         "title": title or "New chat",
-        "created": datetime.utcnow().isoformat(timespec="seconds"),
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     st.session_state.chats = [entry, *st.session_state.chats]  # type: ignore[attr-defined]
     st.session_state.chat_histories[chat_id] = []  # type: ignore[attr-defined]
@@ -164,12 +166,8 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
 
 def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
     last_id = st.session_state.last_seen_id
-    auto_refresh = bool(st.session_state.get("auto_refresh_enabled", True))
-    interval = int(st.session_state.get("poll_interval_ms", POLL_INTERVAL_MS))
-    block_ms = max(100, interval if auto_refresh and interval > 0 else 100)
-
     try:
-        responses = client.xread({MAILBOX_HUMAN: last_id}, block=block_ms, count=50)
+        responses = client.xread({MAILBOX_HUMAN: last_id}, block=0, count=50)
     except redis.RedisError as exc:  # noqa: BLE001
         st.warning(f"Redis read error: {exc}")
         return []
@@ -246,7 +244,7 @@ def _render_stream_view(client: redis.Redis) -> None:
         key="stream_select",
     )
 
-    cols = st.columns([1, 1, 1])
+    cols = st.columns([1, 1])
     with cols[0]:
         count = st.slider(
             "Entries",
@@ -263,28 +261,9 @@ def _render_stream_view(client: redis.Redis) -> None:
             options=["Newest to oldest", "Oldest to newest"],
             key="stream_order",
         )
-    with cols[2]:
-        stream_auto = st.checkbox(
-            "Auto-refresh",
-            value=bool(st.session_state.get("stream_auto_refresh", False)),
-            key="stream_auto_refresh_checkbox",
-        )
-        st.session_state.stream_auto_refresh = stream_auto
-        if stream_auto:
-            refresh_ms = st.slider(
-                "Interval (ms)",
-                min_value=1000,
-                max_value=10000,
-                step=500,
-                value=int(st.session_state.get("stream_refresh_ms", 2000)),
-                key="stream_refresh_slider",
-            )
-            st.session_state.stream_refresh_ms = refresh_ms
-        else:
-            st.session_state.stream_refresh_ms = 0
 
     if st.button("Refresh stream", type="primary"):
-        st.experimental_rerun()
+        st.rerun()
 
     try:
         entries = client.xrevrange(selected_stream, count=count)
@@ -304,6 +283,81 @@ def _render_stream_view(client: redis.Redis) -> None:
             st.json(fields)
 
 
+def _queue_session_rerun() -> None:
+    ctx = get_script_run_ctx()
+    if ctx is None or ctx.script_requests is None:
+        return
+
+    rerun_data = RerunData(
+        query_string=ctx.query_string,
+        page_script_hash=ctx.page_script_hash,
+        is_auto_rerun=True,
+    )
+    ctx.script_requests.request_rerun(rerun_data)
+
+
+def _ensure_mailbox_watcher(client: redis.Redis) -> None:
+    thread: Thread | None = st.session_state.get("_mailbox_watcher_thread")  # type: ignore[attr-defined]
+    stop_event: Event | None = st.session_state.get("_mailbox_watcher_stop")  # type: ignore[attr-defined]
+
+    if thread and thread.is_alive():
+        return
+
+    ctx = get_script_run_ctx()
+    if ctx is None:
+        return
+
+    if stop_event is None:
+        stop_event = Event()
+        st.session_state["_mailbox_watcher_stop"] = stop_event  # type: ignore[attr-defined]
+
+    def _watch() -> None:
+        add_script_run_ctx(ctx)
+        known_chat: str | None = st.session_state.get("chat_id")
+        last_id: str = st.session_state.get("last_seen_id", "0-0")
+
+        while not stop_event.is_set():
+            active_chat = st.session_state.get("chat_id")
+            if not active_chat:
+                time.sleep(0.25)
+                continue
+
+            if active_chat != known_chat:
+                last_id = st.session_state.get("last_seen_id", "0-0")
+                known_chat = active_chat
+
+            try:
+                responses = client.xread({MAILBOX_HUMAN: last_id}, block=5000, count=50)
+            except redis.RedisError:
+                time.sleep(1.0)
+                continue
+
+            if not responses:
+                continue
+
+            newest_id = last_id
+            has_update = False
+            for stream_key, entries in responses:
+                if stream_key != MAILBOX_HUMAN:
+                    continue
+                for entry_id, fields in entries:
+                    envelope = MessageEnvelope.from_stream_fields(fields)
+                    payload = envelope.payload or {}
+                    if payload.get("chat_id") != active_chat:
+                        continue
+                    has_update = True
+                    if entry_id > newest_id:
+                        newest_id = entry_id
+
+            if has_update:
+                last_id = newest_id
+                _queue_session_rerun()
+
+    watcher = Thread(target=_watch, name="mailbox-watcher", daemon=True)
+    watcher.start()
+    st.session_state["_mailbox_watcher_thread"] = watcher  # type: ignore[attr-defined]
+
+
 def main() -> None:
     st.set_page_config(page_title="Quadracode UI", layout="wide")
     _ensure_session_defaults()
@@ -320,6 +374,8 @@ def main() -> None:
     else:
         active_id = st.session_state.chat_id or st.session_state.chats[0]["id"]  # type: ignore[attr-defined]
         _set_active_chat(active_id, client=client)
+
+    _ensure_mailbox_watcher(client)
 
     updates = _poll_updates(client)
     for envelope in updates:
@@ -338,7 +394,7 @@ def main() -> None:
         st.markdown("### Chats")
         if st.button("＋ New chat", use_container_width=True):
             _create_chat(client)
-            st.experimental_rerun()
+            st.rerun()
 
         chat_options = [chat["id"] for chat in st.session_state.chats]  # type: ignore[attr-defined]
         titles_map = {chat["id"]: chat.get("title", "Untitled chat") for chat in st.session_state.chats}  # type: ignore[attr-defined]
@@ -353,7 +409,7 @@ def main() -> None:
         )
         if selected_chat != current_chat_id:
             _set_active_chat(selected_chat, client=client)
-            st.experimental_rerun()
+            st.rerun()
 
         current_entry = _get_chat_entry(st.session_state.chat_id)
         if current_entry is None:
@@ -369,24 +425,6 @@ def main() -> None:
             _promote_chat(current_entry["id"])
 
         st.caption(f"Chat ID: {st.session_state.chat_id}")
-
-        auto_refresh = st.checkbox(
-            "Auto refresh",
-            value=bool(st.session_state.auto_refresh_enabled),
-        )
-        st.session_state.auto_refresh_enabled = auto_refresh
-
-        if auto_refresh:
-            poll_interval = st.slider(
-                "Refresh interval (ms)",
-                min_value=500,
-                max_value=5000,
-                step=500,
-                value=int(max(st.session_state.poll_interval_ms, 500)),
-            )
-            st.session_state.poll_interval_ms = poll_interval
-        else:
-            st.session_state.poll_interval_ms = 0
 
         st.divider()
 
@@ -439,20 +477,12 @@ def main() -> None:
             reply_target = st.session_state.get("selected_reply_to")
             ticket = _send_message(client, prompt, reply_to=reply_target)
             _append_history("human", prompt, ticket_id=ticket)
-            st.experimental_rerun()
+            st.rerun()
 
     with streams_tab:
         st.title("Redis Stream Viewer")
         st.caption("Inspect raw mailbox traffic for debugging and audits.")
         _render_stream_view(client)
-
-    interval = int(st.session_state.get("poll_interval_ms", POLL_INTERVAL_MS))
-    if st.session_state.get("auto_refresh_enabled") and interval > 0:
-        st.experimental_autorefresh(interval=interval, key="ui-refresh")
-
-    stream_interval = int(st.session_state.get("stream_refresh_ms", 0))
-    if st.session_state.get("stream_auto_refresh") and stream_interval > 0:
-        st.experimental_autorefresh(interval=stream_interval, key="stream-refresh")
 
 
 if __name__ == "__main__":

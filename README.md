@@ -33,10 +33,10 @@ Because checkpoints are bound to `chat_id`, both orchestrator and agents can rec
 
 - **Chat sidebar**: ChatGPT-style list of conversations (new chat, rename, switch). Each chat persists its history and baseline stream offset.
 - **Chat view**: Real-time conversation with trace expanders that reveal `payload.messages` for every response.
-- **Streams tab**: Raw Redis mailbox inspector with auto-refresh, ordering controls, and JSON payload display.
+- **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display.
 - **Registry panel**: Summaries of total/healthy agents plus a routing selector to pin `reply_to` to a specific agent.
 
-The UI writes `chat_id` and a `ticket_id` into each payload, polls `qc:mailbox/human` with `XREAD` (short blocking interval), and filters responses by `chat_id`. Multiple chats run concurrently without interfering with one another.
+The UI writes `chat_id` and a `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope for the active chat arrives it queues a Streamlit rerun. The main script simply renders state and never schedules timer-based reruns, so the interface remains responsive even when no traffic is flowing.
 
 ## Deployment
 
@@ -74,7 +74,24 @@ All services treat payload fields as opaque except for the threading/routing att
 
 ## Local Development
 
-1. Install dependencies via `uv sync` inside each package (`quadracode-runtime`, `quadracode-orchestrator`, `quadracode-agent`, `quadracode-agent-registry`, `quadracode-tools`, `quadracode-ui`).
+0. We use uv for environments and commands
+   - Install uv: see https://docs.astral.sh/uv/getting-started/installation/
+     - macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+     - Or via pipx: `pipx install uv`
+   - Optional shared venv: `uv venv --python 3.12` (kept at repo root `.venv`). You can either activate it once (`source .venv/bin/activate`) or skip activation and prefix commands with `uv run`.
+
+1. Install dependencies once from the repo root (recommended):
+   ```bash
+   uv sync
+   ```
+   This uses the root `pyproject.toml` to install all workspace packages in editable mode via `[tool.uv.sources]`.
+   Alternatively, sync per-package:
+   ```bash
+   for pkg in quadracode-runtime quadracode-orchestrator quadracode-agent \
+              quadracode-agent-registry quadracode-tools quadracode-ui; do
+       (cd "$pkg" && uv sync)
+   done
+   ```
 2. Run LangGraph dev servers locally:
 
 ```bash
@@ -108,11 +125,55 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 - `scripts/` — operational scripts (stream tailer, agent launcher).
 - `tests/` — unit and integration suites (including checkpoint reuse tests).
 
+## AI Coding Agents Quickstart
+
+Automated coding assistants should work inside `/tmp/quadracode-gh`. Follow the steps below to gain full coverage of the stack:
+
+1. **Create a virtual environment with uv** (Python 3.12) at the repo root:
+   ```bash
+   uv venv --python 3.12
+   # optional: activate once if you prefer
+   source .venv/bin/activate
+   ```
+   Notes:
+   - Keep the environment in the repo root so all packages share it during development.
+   - Activation is optional; you can also run commands with `uv run <command>` without activating.
+
+2. **Install dependencies from the repo root** (preferred):
+   ```bash
+   uv sync
+   ```
+   This installs all workspace packages declared in the root `pyproject.toml`.
+   Alternative (per-package):
+   ```bash
+   for pkg in quadracode-runtime quadracode-orchestrator quadracode-agent \
+              quadracode-agent-registry quadracode-tools quadracode-ui; do
+       (cd "$pkg" && uv sync)
+   done
+   ```
+
+3. **Know where to edit**:
+   - LangGraph flows and shared messaging live in `quadracode-runtime/src`.
+   - Orchestrator- and agent-specific prompts/configs sit under `quadracode-orchestrator/` and `quadracode-agent/`.
+   - The Streamlit control plane is `quadracode-ui/src/quadracode_ui/app.py`; background mailbox watching happens there.
+   - REST registry endpoints are in `quadracode-agent-registry/src` (FastAPI mounted on port 8090).
+   - Contracts and envelope models reside in `quadracode-contracts/src`.
+
+4. **Run services locally**:
+   - Launch Redis (`redis-server` or `docker compose up redis`).
+   - Start LangGraph runtimes with `uv run langgraph dev orchestrator --config quadracode-orchestrator/langgraph-local.json` and the analogous agent command.
+   - Run the UI with `uv run streamlit run quadracode-ui/src/quadracode_ui/app.py` and environment variables `REDIS_HOST`, `REDIS_PORT`, `AGENT_REGISTRY_URL` pointing at your running services.
+
+5. **Execute tests**. Use `uv run pytest` within each package. The UI ships with Streamlit AppTest coverage in `quadracode-ui/tests`.
+
+6. **Observe Redis traffic**. Tail `scripts/tail_streams.sh` or run `redis-cli monitor` while the UI is active. The watcher thread only calls `XREAD` when a chat is selected; this is expected behavior.
+
+Following the steps above keeps tool runs repeatable and ensures any AI coding agent has the full repository context available.
+
 ## Configuration Surface
 
 - `QUADRACODE_ID` — runtime identity (overrides profile default).
 - `AGENT_REGISTRY_URL`, `REDIS_HOST`, `REDIS_PORT`, `SHARED_PATH`, MCP transport vars — required for tool discovery.
-- `UI_POLL_INTERVAL_MS` — default chat auto-refresh interval (overridable per chat in the UI).
 - `.env`, `.env.docker` — shared environment definitions consumed by Compose services.
 
 ## Guarantees

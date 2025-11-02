@@ -2,6 +2,7 @@
 name = "quadracode-ui"
 version = "0.1.0"
 description = "Streamlit UI for Quadracode orchestrator"
+readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "streamlit>=1.38",
@@ -12,3 +13,6 @@ dependencies = [
 
 [tool.uv.sources]
 quadracode-contracts = { path = "../quadracode-contracts" }
+
+[project.optional-dependencies]
+tests = ["pytest>=8.2"]

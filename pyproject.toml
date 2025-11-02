@@ -1,0 +1,23 @@
+[project]
+name = "quadracode-dev"
+version = "0.0.0"
+description = "Development meta-package for Quadracode monorepo"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "quadracode-contracts",
+  "quadracode-tools",
+  "quadracode-runtime",
+  "orchestrator",
+  "quadracode-agent",
+  "quadracode-agent-registry",
+  "quadracode-ui",
+]
+
+[tool.uv.sources]
+quadracode-contracts = { path = "quadracode-contracts", editable = true }
+quadracode-tools = { path = "quadracode-tools", editable = true }
+quadracode-runtime = { path = "quadracode-runtime", editable = true }
+orchestrator = { path = "quadracode-orchestrator", editable = true }
+quadracode-agent = { path = "quadracode-agent", editable = true }
+quadracode-agent-registry = { path = "quadracode-agent-registry", editable = true }
+quadracode-ui = { path = "quadracode-ui", editable = true }
