@@ -113,6 +113,21 @@ def read_stream(stream: str, *, count: int = 20) -> list[tuple[str, dict[str, st
     return entries
 
 
+def read_stream_after(stream: str, baseline: str, *, count: int = 100) -> list[tuple[str, dict[str, str]]]:
+    entries = read_stream(stream, count=count)
+    return [entry for entry in entries if stream_id_gt(entry[0], baseline)]
+
+
+def wait_for_context_metrics(baseline_id: str, *, timeout: int = 60) -> list[tuple[str, dict[str, str]]]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        entries = read_stream_after("qc:context:metrics", baseline_id, count=200)
+        if entries:
+            return entries
+        time.sleep(1)
+    return []
+
+
 def wait_for_container(service: str, *, timeout: int = 120) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -322,6 +337,7 @@ def test_orchestrator_round_trip():
         baseline_agent_last_id = stream_last_generated_id(agent_stream)
         baseline_agent_entries = stream_entries_added(agent_stream) or 0
         baseline_orchestrator_entries = stream_entries_added("qc:mailbox/orchestrator") or 0
+        metrics_baseline_id = get_last_stream_id("qc:context:metrics")
         logger.info(
             "Baselines: human_id=%s agent_last=%s agent_entries=%d orchestrator_entries=%d",
             baseline_id,
@@ -387,6 +403,32 @@ def test_orchestrator_round_trip():
         log_stream_snapshot(agent_stream)
         log_stream_snapshot("qc:mailbox/orchestrator")
         log_stream_snapshot("qc:mailbox/human")
+
+        metrics_entries = wait_for_context_metrics(metrics_baseline_id)
+        context_snapshots: list[dict[str, object]] = []
+        for entry_id, fields in metrics_entries:
+            payload_raw = fields.get("payload", "{}")
+            try:
+                payload = json.loads(payload_raw)
+            except json.JSONDecodeError:
+                payload = {"raw": payload_raw}
+            context_snapshots.append(
+                {
+                    "id": entry_id,
+                    "event": fields.get("event"),
+                    "quality": payload.get("quality_score"),
+                    "focus_metric": payload.get("focus_metric"),
+                    "context_window_used": payload.get("context_window_used"),
+                    "quality_components": payload.get("quality_components"),
+                    "issues": payload.get("issues"),
+                    "recommendations": payload.get("recommendations"),
+                }
+            )
+
+        assert context_snapshots, "Context metrics stream did not record activity"
+        logger.info("Context engineering snapshots: %s", json.dumps(context_snapshots, indent=2))
+        assert any(snapshot.get("event") == "pre_process" for snapshot in context_snapshots)
+        assert any(snapshot.get("event") == "post_process" for snapshot in context_snapshots)
 
         # Ask orchestrator to report on registry state and confirm tool usage.
         second_baseline = get_last_stream_id("qc:mailbox/human")

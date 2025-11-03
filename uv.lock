@@ -1327,6 +1327,7 @@ dependencies = [
     { name = "langgraph-cli", extra = ["inmem"] },
     { name = "quadracode-contracts" },
     { name = "quadracode-tools" },
+    { name = "redis" },
 ]
 
 [package.metadata]
@@ -1339,6 +1340,7 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"] },
     { name = "quadracode-contracts", directory = "quadracode-contracts" },
     { name = "quadracode-tools", directory = "quadracode-tools" },
+    { name = "redis", specifier = ">=5.0" },
 ]
 
 [[package]]

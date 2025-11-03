@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from threading import Event, Thread
 from typing import Any, Dict, List, Optional
@@ -29,6 +31,8 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 AGENT_REGISTRY_URL = os.environ.get("AGENT_REGISTRY_URL", "")
 UI_BARE = os.environ.get("UI_BARE", "0") == "1"
+CONTEXT_METRICS_STREAM = os.environ.get("CONTEXT_METRICS_STREAM", "qc:context:metrics")
+CONTEXT_METRICS_LIMIT = int(os.environ.get("CONTEXT_METRICS_LIMIT", "200"))
 
 MAILBOX_ORCHESTRATOR = mailbox_key(ORCHESTRATOR_RECIPIENT)
 MAILBOX_HUMAN = mailbox_key(HUMAN_RECIPIENT)
@@ -285,6 +289,137 @@ def _render_stream_view(client: redis.Redis) -> None:
             st.json(fields)
 
 
+def _load_context_metrics(client: redis.Redis, limit: int) -> List[Dict[str, Any]]:
+    try:
+        raw_entries = client.xrevrange(CONTEXT_METRICS_STREAM, count=limit)
+    except redis.ResponseError:
+        return []
+    except redis.RedisError as exc:  # noqa: BLE001
+        st.error(f"Failed to read context metrics: {exc}")
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    for entry_id, fields in raw_entries:
+        event = fields.get("event", "unknown")
+        timestamp = fields.get("timestamp")
+        payload_raw = fields.get("payload")
+        try:
+            payload = json.loads(payload_raw) if payload_raw else {}
+        except json.JSONDecodeError:
+            payload = {"raw_payload": payload_raw}
+        parsed.append(
+            {
+                "id": entry_id,
+                "event": event,
+                "timestamp": timestamp,
+                "payload": payload,
+            }
+        )
+
+    return list(reversed(parsed))
+
+
+def _render_metrics_dashboard(client: redis.Redis) -> None:
+    limit = st.slider(
+        "History depth",
+        min_value=50,
+        max_value=CONTEXT_METRICS_LIMIT,
+        step=50,
+        value=min(150, CONTEXT_METRICS_LIMIT),
+        key="metrics_history_depth",
+    )
+
+    if st.button("Refresh metrics", type="primary"):
+        st.rerun()
+
+    entries = _load_context_metrics(client, limit=limit)
+    if not entries:
+        st.info("No context metrics have been emitted yet.")
+        return
+
+    latest = entries[-1]
+    latest_payload = latest.get("payload", {})
+    latest_quality = latest_payload.get("quality_score")
+    latest_focus = latest_payload.get("focus_metric") or "—"
+    latest_window = latest_payload.get("context_window_used")
+
+    cols = st.columns(3)
+    cols[0].metric("Quality Score", f"{latest_quality:.2f}" if isinstance(latest_quality, (int, float)) else "n/a")
+    cols[1].metric("Focus Metric", latest_focus)
+    cols[2].metric("Context Tokens", latest_window or 0)
+
+    quality_points = [
+        {
+            "timestamp": entry["timestamp"],
+            "quality": entry["payload"].get("quality_score"),
+        }
+        for entry in entries
+        if entry["payload"].get("quality_score") is not None
+    ]
+
+    if quality_points:
+        st.subheader("Quality Trend")
+        st.vega_lite_chart(
+            {
+                "data": {"values": quality_points},
+                "mark": {"type": "line", "interpolate": "monotone"},
+                "encoding": {
+                    "x": {"field": "timestamp", "type": "temporal", "title": "Time"},
+                    "y": {"field": "quality", "type": "quantitative", "title": "Quality"},
+                },
+            },
+            width="stretch",
+        )
+
+    window_points = [
+        {
+            "timestamp": entry["timestamp"],
+            "tokens": entry["payload"].get("context_window_used"),
+        }
+        for entry in entries
+        if entry["payload"].get("context_window_used") is not None
+    ]
+
+    if window_points:
+        st.subheader("Context Window Usage")
+        st.vega_lite_chart(
+            {
+                "data": {"values": window_points},
+                "mark": {"type": "area", "line": True},
+                "encoding": {
+                    "x": {"field": "timestamp", "type": "temporal", "title": "Time"},
+                    "y": {"field": "tokens", "type": "quantitative", "title": "Tokens"},
+                },
+            },
+            width="stretch",
+        )
+
+    operations = Counter(
+        entry["payload"].get("operation")
+        for entry in entries
+        if entry["event"] == "tool_response" and entry["payload"].get("operation")
+    )
+    if operations:
+        st.subheader("Operation Distribution")
+        chart_data = [
+            {"operation": op, "count": count} for op, count in sorted(operations.items(), key=lambda item: item[1], reverse=True)
+        ]
+        st.vega_lite_chart(
+            {
+                "data": {"values": chart_data},
+                "mark": "bar",
+                "encoding": {
+                    "x": {"field": "operation", "type": "nominal", "title": "Operation"},
+                    "y": {"field": "count", "type": "quantitative", "title": "Count"},
+                },
+            },
+            width="stretch",
+        )
+
+    with st.expander("Raw Metrics", expanded=False):
+        st.json(entries[-50:])
+
+
 def _queue_session_rerun() -> None:
     ctx = get_script_run_ctx()
     if ctx is None or ctx.script_requests is None:
@@ -395,7 +530,7 @@ def main() -> None:
             trace=trace_list,
         )
 
-    chat_tab, streams_tab = st.tabs(["Chat", "Streams"])
+    chat_tab, streams_tab, metrics_tab = st.tabs(["Chat", "Streams", "Context Metrics"])
 
     with st.sidebar:
         st.markdown("### Chats")
@@ -471,6 +606,11 @@ def main() -> None:
         st.title("Redis Stream Viewer")
         st.caption("Inspect raw mailbox traffic for debugging and audits.")
         _render_stream_view(client)
+
+    with metrics_tab:
+        st.title("Context Metrics Dashboard")
+        st.caption("Live metrics emitted by the context engineering node.")
+        _render_metrics_dashboard(client)
 
 
 if __name__ == "__main__":

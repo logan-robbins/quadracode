@@ -15,7 +15,8 @@ dependencies = [
     "langgraph-cli[inmem]",
     "quadracode-tools",
     "langchain-mcp-adapters",
-    "quadracode-contracts"
+    "quadracode-contracts",
+    "redis>=5.0"
 ]
 
 [tool.uv.sources]

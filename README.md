@@ -21,6 +21,7 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Multi-Agent Coordination**: Built-in service registry, dynamic routing, and agent health tracking
 - **Dynamic Fleet Management**: Orchestrator autonomously spawns and deletes agents based on workload, creating specialized agents for complex tasks
 - **MCP Integration**: Standardized tool interfaces via Model Context Protocol for seamless agent capability sharing
+- **Context Engineering Node**: Progressive loader, prioritised compression, LLM-backed summarisation, and Redis-backed metrics keep long-running chats sharp without losing history
 - **Full Observability**: Streamlit control plane with conversation management, real-time stream inspection, and message tracing
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
@@ -49,8 +50,22 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Agent Management** scripts and tools enable the orchestrator to spawn/delete agents autonomously based on workload
 - **Redis-MCP proxy** exposes the Redis transport to MCP-compatible clients for runtime tool loading
 - **Streamlit UI** (`8501`) provides multi-chat management, live stream inspection, and trace visualization
+- **Context Metrics Stream** (`qc:context:metrics`) records every `pre_process`, `post_process`, `tool_response`, `curation`, `load`, `externalize`, and `governor_plan` event so you can audit what the context engine did turn-by-turn
 
 Every message is a simple envelope: `timestamp`, `sender`, `recipient`, `message`, and `payload` (JSON). The payload carries threading metadata, correlation IDs, tool outputs, and routing hints.
+
+### Context Engineering Node
+
+Every orchestrator turn traverses an opt-in context engineering pipeline:
+
+1. **`context_pre`** scores the active state, runs the MemAct curator when quality dips or the window overflows, and pushes just-in-time context via the progressive loader.
+2. **`context_governor`** (LLM-backed) reviews the latest state, plans retain/compress/summarize/externalize/discard operations, and hands the driver a goal-aware prompt outline.
+3. **`driver` / tools** execute with the trimmed, skill-aware context; tool responses flow back into the working set automatically.
+4. **`context_post`** reflects on the turn, updates the evolving playbook, appends curation rules, and checkpoints if needed.
+5. **`context_tool`** captures each tool output, evaluates relevance, and—when payloads are large—invokes the reducer to summarise them.
+
+The reducer uses Anthropic’s Claude Haiku by default (configurable via `ContextEngineConfig.reducer_model`) to map/reduce long blobs into concise summaries while embedding a `restorable_reference`. The progressive loader now includes a **skills catalog** that stages SKILL.md metadata, loads full skill content on demand, and queues linked references for future turns. Tool outputs are captured automatically, externalized segments can be persisted to disk via `externalize_write_enabled`, and each stage emits structured metrics that feed the Streamlit dashboard and the e2e logs.
+
 
 ## How It Works
 
@@ -205,6 +220,7 @@ When a spike in requests arrives, the orchestrator automatically scales the agen
 - **Chat sidebar**: ChatGPT-style conversation list (new chat, rename, switch). Each chat persists its history and baseline stream offset
 - **Chat view**: Real-time conversation with trace expanders revealing `payload.messages` for every response
 - **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display
+- **Context Metrics tab**: Live charts sourced from `qc:context:metrics` showing quality scores, focus metrics, and operation distributions emitted by the context engineering node
 - **Registry panel**: Summaries of total/healthy agents; orchestrator determines routing and scaling dynamically
 
 The UI writes `chat_id` and `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope arrives, it triggers a Streamlit rerun. The interface remains responsive even when no traffic is flowing.
@@ -238,7 +254,7 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 # Runtime memory regression (checkpoint persistence)
 uv run pytest tests/test_runtime_memory.py
 
-# End-to-end (orchestrates Docker Compose, validates registry/tools/chat)
+# End-to-end (orchestrates Docker Compose, validates registry/tools/chat, and hits live Anthropic endpoints)
 uv run pytest tests/e2e -m e2e
 
 # UI integration (live Redis, no stubs)
@@ -289,6 +305,8 @@ Environment variables control runtime behavior:
 ## Observability & Operations
 
 - **Redis stream stats**: `redis-cli XINFO STREAM qc:mailbox/<recipient>`
+- **Context engine telemetry**: `redis-cli XRANGE qc:context:metrics - +` to inspect quality components, governor plans, MemAct operation counts, load events, and externalization actions (events: `pre_process`, `curation`, `load`, `externalize`, `tool_response`, `post_process`, `governor_plan`)
+- **Externalized segments**: enable persistence with `ContextEngineConfig.externalize_write_enabled` (or env var `QUADRACODE_EXTERNALIZE_WRITE=1`) to write pointer payloads under `external_memory_path`
 - **Service logs**: `docker compose logs <service>`
 - **Streamlit stream viewer**: Inspect raw payloads and message traces
 - **Agent fleet status**: Check registry API at `/agents` endpoint or use orchestrator's `agent_management` tool
@@ -303,7 +321,7 @@ Environment variables control runtime behavior:
 - **Parallelism**: Orchestrator never blocks on agent work; long-running jobs emit incremental envelopes
 - **Elasticity**: Agent fleet scales automatically based on orchestrator decisions; spawned agents auto-register and self-terminate
 - **Extensibility**: Shared MCP adapters + local tools ensure orchestrator and agents share capabilities automatically
-- **Transparency**: `payload.messages` carries full reasoning traces; UI exposes both human responses and underlying traffic
+- **Transparency**: `payload.messages` carries full reasoning traces; UI exposes both human responses and underlying traffic, and `qc:context:metrics` logs every context-engine decision for auditability
 - **Platform Portability**: Same codebase runs on Docker Compose and Kubernetes with environment variable configuration
 
 ## Contributing

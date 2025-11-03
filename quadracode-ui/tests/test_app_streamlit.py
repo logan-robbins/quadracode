@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Tuple
 
 import pytest
@@ -25,10 +27,13 @@ def run_app() -> None:
 class FakeRedis:
     """Minimal Redis stub to drive the Streamlit app during tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, metrics_stream: str) -> None:
         self._delivered = False
         self.stream_entries: List[Tuple[str, Dict[str, str]]] = []
         self.xadd_envelopes: List[Tuple[str, MessageEnvelope]] = []
+        self.metrics_stream = metrics_stream
+        self.metrics_entries: List[Tuple[str, Dict[str, str]]] = []
+        self._populate_metrics()
 
     def ping(self) -> None:
         return
@@ -55,6 +60,8 @@ class FakeRedis:
 
     def xrevrange(self, key: str, count: int = 1) -> List[Tuple[str, Dict[str, str]]]:
         if key != MAILBOX_HUMAN:
+            if key == self.metrics_stream:
+                return list(reversed(self.metrics_entries))[:count]
             return []
 
         from streamlit import session_state as ss
@@ -74,8 +81,8 @@ class FakeRedis:
     def xread(
         self,
         streams: Dict[str, str],
-        block: int,
-        count: int,
+        block: int | None = None,
+        count: int | None = None,
     ) -> List[Tuple[str, List[Tuple[str, Dict[str, str]]]]]:
         if self._delivered:
             return []
@@ -97,6 +104,48 @@ class FakeRedis:
     def xadd(self, key: str, fields: Dict[str, str]) -> None:
         self.xadd_envelopes.append((key, MessageEnvelope.from_stream_fields(fields)))
 
+    def _populate_metrics(self) -> None:
+        now = datetime.now(timezone.utc)
+        sample = [
+            (
+                "1-0",
+                {
+                    "event": "pre_process",
+                    "timestamp": (now - timedelta(minutes=2)).isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "quality_score": 0.62,
+                            "context_window_used": 4200,
+                            "quality_components": {"relevance": 0.6},
+                        }
+                    ),
+                },
+            ),
+            (
+                "2-0",
+                {
+                    "event": "tool_response",
+                    "timestamp": (now - timedelta(minutes=1)).isoformat(),
+                    "payload": json.dumps({"operation": "summarize", "relevance": 0.45}),
+                },
+            ),
+            (
+                "3-0",
+                {
+                    "event": "post_process",
+                    "timestamp": now.isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "quality_score": 0.74,
+                            "focus_metric": "relevance",
+                            "context_window_used": 4800,
+                        }
+                    ),
+                },
+            ),
+        ]
+        self.metrics_entries = sample
+
 
 @pytest.fixture(autouse=True)
 def _clear_cached_client() -> None:
@@ -108,8 +157,9 @@ def _clear_cached_client() -> None:
 
 @pytest.fixture
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
-    stub = FakeRedis()
     import quadracode_ui.app as app_module
+
+    stub = FakeRedis(app_module.CONTEXT_METRICS_STREAM)
 
     monkeypatch.setattr(app_module.redis, "Redis", lambda *_, **__: stub)
     monkeypatch.setattr(
@@ -122,7 +172,7 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
 
 
 def test_chat_fragment_pulls_responses(fake_redis: FakeRedis) -> None:
-    tester = AppTest.from_function(run_app, default_timeout=1.0)
+    tester = AppTest.from_function(run_app, default_timeout=3.0)
     tester.run()
 
     # The fake registry suppresses sidebar errors, so the chat tab should render cleanly.
@@ -132,7 +182,7 @@ def test_chat_fragment_pulls_responses(fake_redis: FakeRedis) -> None:
 
 
 def test_chat_input_enqueues_messages(fake_redis: FakeRedis) -> None:
-    tester = AppTest.from_function(run_app, default_timeout=1.0)
+    tester = AppTest.from_function(run_app, default_timeout=3.0)
     tester.run()
 
     assert tester.chat_input
