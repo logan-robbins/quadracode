@@ -416,19 +416,24 @@ def test_orchestrator_round_trip():
                 {
                     "id": entry_id,
                     "event": fields.get("event"),
-                    "quality": payload.get("quality_score"),
-                    "focus_metric": payload.get("focus_metric"),
-                    "context_window_used": payload.get("context_window_used"),
-                    "quality_components": payload.get("quality_components"),
-                    "issues": payload.get("issues"),
-                    "recommendations": payload.get("recommendations"),
+                    "payload": payload,
                 }
             )
 
         assert context_snapshots, "Context metrics stream did not record activity"
         logger.info("Context engineering snapshots: %s", json.dumps(context_snapshots, indent=2))
-        assert any(snapshot.get("event") == "pre_process" for snapshot in context_snapshots)
-        assert any(snapshot.get("event") == "post_process" for snapshot in context_snapshots)
+        events_observed = {snapshot.get("event") for snapshot in context_snapshots}
+        assert "pre_process" in events_observed
+        # post_process is emitted on the tools path; the first turn may not invoke tools
+        # curation is conditional on low quality or overflow and may not always occur
+        assert "load" in events_observed
+        assert "governor_plan" in events_observed
+
+        load_events = [snapshot for snapshot in context_snapshots if snapshot.get("event") == "load"]
+        assert load_events, "Load metrics were not emitted"
+        assert any(
+            snapshot.get("payload", {}).get("segments") for snapshot in load_events
+        ), "Load metrics lacked segment details"
 
         # Ask orchestrator to report on registry state and confirm tool usage.
         second_baseline = get_last_stream_id("qc:mailbox/human")
@@ -471,6 +476,109 @@ def test_orchestrator_round_trip():
         assert any(AGENT_ID in text for text in ai_contents), (
             "orchestrator response did not reference agent status"
         )
+
+        # After tool invocation, ensure post_process metrics were emitted
+        metrics_entries_after_tool = read_stream_after("qc:context:metrics", metrics_baseline_id, count=400)
+        context_snapshots_after_tool: list[dict[str, object]] = []
+        for entry_id, fields in metrics_entries_after_tool:
+            payload_raw = fields.get("payload", "{}")
+            try:
+                payload2 = json.loads(payload_raw)
+            except json.JSONDecodeError:
+                payload2 = {"raw": payload_raw}
+            context_snapshots_after_tool.append(
+                {
+                    "id": entry_id,
+                    "event": fields.get("event"),
+                    "payload": payload2,
+                }
+            )
+        events_after_tool = {snapshot.get("event") for snapshot in context_snapshots_after_tool}
+        assert "post_process" in events_after_tool, "Post-process metrics were not emitted after tool call"
+    finally:
+        run_compose(["logs", "orchestrator-runtime"], check=False)
+        run_compose(["logs", "agent-runtime"], check=False)
+        run_compose(["down", "-v"], check=False)
+
+
+@pytest.mark.e2e
+def test_context_engine_tunable_thresholds():
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is required for end-to-end test")
+
+    # Lower thresholds to force curation/externalization and tool reduction
+    extra_env = {
+        "QUADRACODE_MAX_TOOL_PAYLOAD_CHARS": "10",
+        "QUADRACODE_TARGET_CONTEXT_SIZE": "10",
+        "QUADRACODE_REDUCER_MODEL": "heuristic",
+        "QUADRACODE_GOVERNOR_MODEL": "heuristic",
+    }
+
+    run_compose(["down", "-v"], check=False)
+    run_compose(
+        [
+            "up",
+            "--build",
+            "-d",
+            "redis",
+            "redis-mcp",
+            "agent-registry",
+            "orchestrator-runtime",
+            "agent-runtime",
+        ],
+        env=extra_env,
+    )
+
+    try:
+        wait_for_container("redis")
+        wait_for_container("redis-mcp")
+        wait_for_container("agent-registry")
+        wait_for_container("orchestrator-runtime")
+        wait_for_container("agent-runtime")
+        wait_for_redis()
+
+        # Ensure clean metrics and mailboxes
+        redis_cli("FLUSHALL")
+
+        metrics_baseline_id = get_last_stream_id("qc:context:metrics")
+
+        # Use a message containing the keyword "test" to trigger progressive loader
+        send_message_to_orchestrator("Hello from E2E test", reply_to=AGENT_ID)
+
+        # Wait for initial context metrics (pre-process + load). Curation occurs on the next turn.
+        metrics_entries = wait_for_context_metrics(metrics_baseline_id)
+        assert metrics_entries, "No context metrics observed with lowered thresholds"
+        snapshots: list[dict[str, object]] = []
+        for entry_id, fields in metrics_entries:
+            payload_raw = fields.get("payload", "{}")
+            try:
+                payload = json.loads(payload_raw)
+            except json.JSONDecodeError:
+                payload = {"raw": payload_raw}
+            snapshots.append(
+                {
+                    "id": entry_id,
+                    "event": fields.get("event"),
+                    "payload": payload,
+                }
+            )
+
+        events = {s.get("event") for s in snapshots}
+        assert "load" in events and "pre_process" in events
+
+        # Now encourage a tool call; the second turn's pre_process should trigger curation/externalize
+        second_baseline = get_last_stream_id("qc:mailbox/human")
+        metrics_baseline_second = get_last_stream_id("qc:context:metrics")
+        send_message_to_orchestrator(
+            "How many agents are registered? Provide details using the agent_registry tool.",
+        )
+        _ = wait_for_human_response(second_baseline)
+
+        # With MAX_TOOL_PAYLOAD_CHARS=10 any tool output should trigger reduction+tool_response
+        metrics_after_tool = read_stream_after("qc:context:metrics", metrics_baseline_second, count=400)
+        tool_events = {fields.get("event") for _, fields in metrics_after_tool}
+        assert "tool_response" in tool_events, "Expected tool_response metrics after tool call"
+
     finally:
         run_compose(["logs", "orchestrator-runtime"], check=False)
         run_compose(["logs", "agent-runtime"], check=False)

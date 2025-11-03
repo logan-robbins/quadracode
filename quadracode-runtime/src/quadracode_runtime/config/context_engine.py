@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -13,7 +14,7 @@ class ContextEngineConfig:
 
     # Token limits
     context_window_max: int = 128_000
-    target_context_size: int = 100_000
+    target_context_size: int = 10_000
 
     # Quality thresholds
     quality_threshold: float = 0.7
@@ -71,7 +72,7 @@ class ContextEngineConfig:
     reducer_target_tokens: int = 200
 
     # Governor / planning
-    governor_model: Optional[str] = "anthropic:claude-3-haiku-20240307"
+    governor_model: Optional[str] = "heuristic"
     governor_max_segments: int = 12
 
     # Skills / progressive disclosure
@@ -109,3 +110,74 @@ class ContextEngineConfig:
             "archived_memory": 3,
         }
     )
+
+    @classmethod
+    def from_environment(cls) -> "ContextEngineConfig":
+        """Create a config instance, allowing environment overrides.
+
+        Supported environment variables (optional):
+        - QUADRACODE_CONTEXT_WINDOW_MAX (int)
+        - QUADRACODE_TARGET_CONTEXT_SIZE (int)
+        - QUADRACODE_MAX_TOOL_PAYLOAD_CHARS (int)
+        - QUADRACODE_REDUCER_MODEL (str or 'heuristic')
+        - QUADRACODE_REDUCER_CHUNK_TOKENS (int)
+        - QUADRACODE_REDUCER_TARGET_TOKENS (int)
+        - QUADRACODE_GOVERNOR_MODEL (str or 'heuristic')
+        - QUADRACODE_GOVERNOR_MAX_SEGMENTS (int)
+        - QUADRACODE_METRICS_ENABLED (bool: '1'/'true'/'yes')
+        - QUADRACODE_METRICS_EMIT_MODE ("stream"|"log")
+        - QUADRACODE_METRICS_REDIS_URL (str)
+        - QUADRACODE_METRICS_STREAM_KEY (str)
+        - QUADRACODE_EXTERNALIZE_WRITE_ENABLED (bool)
+        - QUADRACODE_QUALITY_THRESHOLD (float 0..1)
+        """
+
+        def _int(name: str, default: int) -> int:
+            raw = os.environ.get(name)
+            if raw is None:
+                return default
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return default
+
+        def _float(name: str, default: float) -> float:
+            raw = os.environ.get(name)
+            if raw is None:
+                return default
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return default
+
+        def _bool(name: str, default: bool) -> bool:
+            raw = os.environ.get(name)
+            if raw is None:
+                return default
+            return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+        base = cls()
+
+        # Numeric overrides
+        base.context_window_max = _int("QUADRACODE_CONTEXT_WINDOW_MAX", base.context_window_max)
+        base.target_context_size = _int("QUADRACODE_TARGET_CONTEXT_SIZE", base.target_context_size)
+        base.max_tool_payload_chars = _int("QUADRACODE_MAX_TOOL_PAYLOAD_CHARS", base.max_tool_payload_chars)
+        base.reducer_chunk_tokens = _int("QUADRACODE_REDUCER_CHUNK_TOKENS", base.reducer_chunk_tokens)
+        base.reducer_target_tokens = _int("QUADRACODE_REDUCER_TARGET_TOKENS", base.reducer_target_tokens)
+        base.governor_max_segments = _int("QUADRACODE_GOVERNOR_MAX_SEGMENTS", base.governor_max_segments)
+        base.quality_threshold = _float("QUADRACODE_QUALITY_THRESHOLD", base.quality_threshold)
+
+        # String overrides
+        base.reducer_model = os.environ.get("QUADRACODE_REDUCER_MODEL", base.reducer_model)
+        base.governor_model = os.environ.get("QUADRACODE_GOVERNOR_MODEL", base.governor_model)
+        base.metrics_emit_mode = os.environ.get("QUADRACODE_METRICS_EMIT_MODE", base.metrics_emit_mode)
+        base.metrics_redis_url = os.environ.get("QUADRACODE_METRICS_REDIS_URL", base.metrics_redis_url)
+        base.metrics_stream_key = os.environ.get("QUADRACODE_METRICS_STREAM_KEY", base.metrics_stream_key)
+
+        # Booleans
+        base.metrics_enabled = _bool("QUADRACODE_METRICS_ENABLED", base.metrics_enabled)
+        base.externalize_write_enabled = _bool(
+            "QUADRACODE_EXTERNALIZE_WRITE_ENABLED", base.externalize_write_enabled
+        )
+
+        return base

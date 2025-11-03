@@ -130,6 +130,57 @@ class FakeRedis:
                 },
             ),
             (
+                "2-5",
+                {
+                    "event": "curation",
+                    "timestamp": (now - timedelta(seconds=45)).isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "operation_counts": {"externalize": 1, "summarize": 2},
+                            "total_segments": 8,
+                            "reason": "quality_recovery",
+                        }
+                    ),
+                },
+            ),
+            (
+                "2-8",
+                {
+                    "event": "load",
+                    "timestamp": (now - timedelta(seconds=30)).isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "count": 3,
+                            "segments": [
+                                {"segment_id": "context-code-overview", "type": "code_context", "tokens": 120},
+                                {"segment_id": "skill-debugging-playbook", "type": "skill:debugging-playbook", "tokens": 220},
+                                {"segment_id": "context-error-history", "type": "error_history", "tokens": 80},
+                            ],
+                        }
+                    ),
+                },
+            ),
+            (
+                "2-9",
+                {
+                    "event": "externalize",
+                    "timestamp": (now - timedelta(seconds=20)).isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "count": 1,
+                            "externalizations": [
+                                {
+                                    "id": "ext-123",
+                                    "path": "/shared/context_memory/memory/seg-1-ext-123.json",
+                                    "source_segment": "seg-1",
+                                    "source_type": "memory",
+                                }
+                            ],
+                        }
+                    ),
+                },
+            ),
+            (
                 "3-0",
                 {
                     "event": "post_process",
@@ -139,6 +190,20 @@ class FakeRedis:
                             "quality_score": 0.74,
                             "focus_metric": "relevance",
                             "context_window_used": 4800,
+                        }
+                    ),
+                },
+            ),
+            (
+                "3-1",
+                {
+                    "event": "governor_plan",
+                    "timestamp": (now + timedelta(seconds=5)).isoformat(),
+                    "payload": json.dumps(
+                        {
+                            "action_counts": {"retain": 2, "summarize": 1},
+                            "ordered_segments": ["skill-debugging-playbook", "context-code-overview"],
+                            "focus": ["debugging", "error triage"],
                         }
                     ),
                 },
@@ -195,3 +260,15 @@ def test_chat_input_enqueues_messages(fake_redis: FakeRedis) -> None:
     assert key == MAILBOX_ORCHESTRATOR
     assert envelope.message == "Ping orchestrator"
     assert envelope.payload.get("chat_id") == tester.session_state["chat_id"]
+
+
+def test_load_context_metrics_parses_extended_events(fake_redis: FakeRedis) -> None:
+    import quadracode_ui.app as app_module
+
+    entries = app_module._load_context_metrics(fake_redis, limit=20)
+    events = {entry["event"] for entry in entries}
+    assert {"pre_process", "tool_response", "curation", "load", "externalize", "post_process", "governor_plan"}.issubset(events)
+    load_entries = [entry for entry in entries if entry["event"] == "load"]
+    assert load_entries
+    serialized = json.dumps(load_entries[0]["payload"])
+    assert "skill:debugging-playbook" in serialized

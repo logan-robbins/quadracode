@@ -265,6 +265,32 @@ uv run pytest quadracode-ui/tests -m integration -q
 uv run pytest quadracode-ui/tests -m e2e -q
 ```
 
+### End‑to‑End Requirements
+
+The e2e suite exercises the full stack (Redis, MCP proxy, registry, orchestrator, agent) against live model/tool backends. To run it reliably:
+
+- Docker + Compose
+  - Docker Engine with the v2 compose plugin (runs `docker compose`).
+  - Access to `/var/run/docker.sock` (mounted into the orchestrator runtime by compose) so it can spawn and manage agents.
+- Internet egress
+  - Outbound HTTPS is required for the LLM driver and any MCP‑backed tools used in the flows.
+- API keys (export in your shell or set in `.env.docker`)
+  - `ANTHROPIC_API_KEY` (default driver/reducer/governor use Claude).
+  - `OPENAI_API_KEY` (optional; only if you switch models or enable prompt caching experiments).
+  - `PERPLEXITY_API_KEY` (optional; used by the Perplexity Ask MCP server if enabled).
+  - Other tool keys are optional and only needed if you enable flows that call them: `FIRECRAWL_API_KEY`, `BRIGHT_DATA_API_KEY`, `SCRAPINGBEE_API_KEY`, `GOOGLE_API_KEY`, `BING_SEARCH_API_KEY`, `GITHUB_TOKEN`.
+- Ports (defaults, overridable)
+  - Redis `6379`, MCP proxy `8000`, Agent Registry `8090`, Orchestrator dev `8123`, Agent dev `8124`, Streamlit UI `8501` (UI container is optional).
+
+Run the suite after bringing up the stack:
+
+```bash
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+uv run pytest tests/e2e -m e2e -q
+```
+
+Environment for compose is sourced from `.env` and `.env.docker` by default. Ensure those files contain valid keys for your environment.
+
 ## Repository Layout
 
 ```
@@ -363,3 +389,33 @@ This workflow ensures repeatable builds and full repository context for AI-assis
 ---
 
 **Quadracode**: Build self-scaling AI agent systems that work when you sleep.
+### Context Engine Configuration
+
+You can tune the context engine at runtime using environment variables (all optional). These are picked up automatically by the orchestrator and agent runtimes.
+
+- `QUADRACODE_CONTEXT_WINDOW_MAX` (int, tokens)
+- `QUADRACODE_TARGET_CONTEXT_SIZE` (int, tokens) — default 10,000
+- `QUADRACODE_MAX_TOOL_PAYLOAD_CHARS` (int, characters)
+- `QUADRACODE_REDUCER_MODEL` (string, e.g., `heuristic` to avoid live LLM)
+- `QUADRACODE_REDUCER_CHUNK_TOKENS` (int, tokens)
+- `QUADRACODE_REDUCER_TARGET_TOKENS` (int, tokens)
+- `QUADRACODE_GOVERNOR_MODEL` (string, e.g., `heuristic`)
+- `QUADRACODE_GOVERNOR_MAX_SEGMENTS` (int)
+- `QUADRACODE_METRICS_ENABLED` (bool: `1|true|yes`)
+- `QUADRACODE_METRICS_EMIT_MODE` (`stream|log`)
+- `QUADRACODE_METRICS_REDIS_URL` (string)
+- `QUADRACODE_METRICS_STREAM_KEY` (string)
+- `QUADRACODE_EXTERNALIZE_WRITE_ENABLED` (bool)
+- `QUADRACODE_QUALITY_THRESHOLD` (float 0..1)
+
+Units
+- “Context window” and “target size” are measured in approximate tokens (whitespace-delimited). The context engine tracks per-segment `token_count` and sums to compute `context_window_used`.
+- `MAX_TOOL_PAYLOAD_CHARS` is characters of tool output before reduction is applied.
+
+Example (force compression/externalization during tests):
+
+```bash
+export QUADRACODE_MAX_TOOL_PAYLOAD_CHARS=10
+export QUADRACODE_TARGET_CONTEXT_SIZE=10
+export QUADRACODE_REDUCER_MODEL=heuristic
+```

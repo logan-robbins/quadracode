@@ -18,7 +18,12 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
     driver = make_driver(system_prompt, QuadracodeTools.tools)
 
     if enable_context_engineering:
-        context_engine = ContextEngine(ContextEngineConfig())
+        # Allow environment-driven overrides for testability and tuning
+        try:
+            config = ContextEngineConfig.from_environment()  # type: ignore[attr-defined]
+        except AttributeError:
+            config = ContextEngineConfig()
+        context_engine = ContextEngine(config)
         workflow = StateGraph(ContextEngineState)
 
         workflow.add_node("context_pre", context_engine.pre_process_sync)

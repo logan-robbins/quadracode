@@ -51,7 +51,7 @@ class ContextEngine:
         self.metrics = ContextMetricsEmitter(config)
         self.reducer = ContextReducer(config)
         self.max_tool_payload_chars = config.max_tool_payload_chars
-        self.governor_model = config.governor_model
+        self.governor_model = (config.governor_model or "heuristic").lower()
         self._governor_llm = None
         self._governor_lock = asyncio.Lock()
 
@@ -334,8 +334,8 @@ class ContextEngine:
         if override:
             return override
 
-        if not self.governor_model:
-            raise RuntimeError("Context governor model is not configured and no override provided.")
+        if self.governor_model in {"heuristic", ""}:
+            return self._heuristic_governor_plan(state)
 
         llm = await self._ensure_governor_llm()
         snapshot = self._plan_segments_snapshot(state)
@@ -476,9 +476,12 @@ class ContextEngine:
             },
         )
         await self._emit_externalization_metrics(state)
+        await self._emit_externalization_metrics(state)
         return state
 
     async def _ensure_governor_llm(self):
+        if self.governor_model in {"heuristic", ""}:
+            raise RuntimeError("Heuristic governor does not use an LLM")
         if self._governor_llm is not None:
             return self._governor_llm
 
@@ -486,6 +489,37 @@ class ContextEngine:
             if self._governor_llm is None:
                 self._governor_llm = init_chat_model(self.governor_model)
         return self._governor_llm
+
+    def _heuristic_governor_plan(self, state: ContextEngineState) -> Dict[str, Any]:
+        segments = list(state.get("context_segments", []))
+        max_segments = max(1, self.config.governor_max_segments)
+        sorted_segments = sorted(
+            segments,
+            key=lambda seg: (-seg.get("priority", 5), seg.get("timestamp", "")),
+        )
+
+        actions: List[Dict[str, Any]] = []
+        for idx, segment in enumerate(sorted_segments):
+            segment_id = segment.get("id")
+            if not segment_id:
+                continue
+            decision = "retain"
+            if idx >= max_segments and segment.get("compression_eligible", True):
+                decision = "summarize"
+            elif segment.get("token_count", 0) > self.config.reducer_chunk_tokens:
+                decision = "compress"
+            actions.append({"segment_id": segment_id, "decision": decision})
+
+        outline = {
+            "system": "Heuristic context governor active. Maintain focus on current objectives and recent decisions.",
+            "focus": state.get("pending_context", []) or state.get("context_playbook", {}).get("last_reflection", {}).get("focus_metric"),
+            "ordered_segments": [segment.get("id") for segment in sorted_segments[:max_segments] if segment.get("id")],
+        }
+
+        return {
+            "actions": actions,
+            "prompt_outline": outline,
+        }
 
     def _plan_segments_snapshot(self, state: ContextEngineState) -> List[Dict[str, Any]]:
         segments = state.get("context_segments", [])
@@ -679,13 +713,18 @@ class ContextEngine:
     async def _emit_curation_metrics(
         self, state: ContextEngineState, *, reason: str
     ) -> None:
-        summary = state.get("last_curation_summary")
-        if not summary:
-            return
+        summary = state.get("last_curation_summary") or {}
         payload = {
             **summary,
             "reason": reason,
         }
+        if "timestamp" not in payload:
+            payload["timestamp"] = _utc_now().isoformat()
+        if "total_segments" not in payload:
+            payload["total_segments"] = len(state.get("context_segments", []))
+        if "operation_counts" not in payload:
+            payload["operation_counts"] = {}
+
         await self.metrics.emit(state, "curation", payload)
         state["last_curation_summary"] = {}
 
