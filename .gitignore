@@ -28,3 +28,6 @@ build/
 # Logs
 *.log
 nohup.out
+
+# Private notes and planning
+private/

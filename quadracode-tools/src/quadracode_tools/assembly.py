@@ -9,6 +9,7 @@ from .tools.bash_shell import bash_shell
 from .tools.read_file import read_file
 from .tools.write_file import write_file
 from .tools.agent_registry import agent_registry_tool
+from .tools.agent_management import agent_management_tool
 
 
 def get_tools() -> List[BaseTool]:
@@ -19,4 +20,5 @@ def get_tools() -> List[BaseTool]:
         read_file,
         write_file,
         agent_registry_tool,
+        agent_management_tool,
     ]

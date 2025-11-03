@@ -132,6 +132,16 @@ services:
   orchestrator-runtime:
     <<: *orchestrator-base
     command: ["uv", "run", "python", "-m", "quadracode_orchestrator"]
+    environment:
+      ENV_FILE_PATH: /app/.env.docker
+      QUADRACODE_SCRIPTS_DIR: /app/scripts/agent-management
+      AGENT_RUNTIME_PLATFORM: docker
+    volumes:
+      - shared-data:/shared
+      - mcp-remote-cache:/var/lib/mcp-remote
+      - ./.env.docker:/app/.env.docker:ro
+      - ./scripts:/app/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "true"]
       interval: 30s
