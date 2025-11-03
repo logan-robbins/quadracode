@@ -46,6 +46,7 @@ class ContextEngineConfig:
     metrics_stream_key: str = "qc:context:metrics"
     metrics_redis_url: str = "redis://redis:6379/0"
     metrics_emit_mode: str = "stream"  # stream | log
+    autonomous_metrics_stream_key: str = "qc:autonomous:events"
 
     # Project awareness
     project_root: str = field(default_factory=lambda: str(Path.cwd()))
@@ -128,6 +129,7 @@ class ContextEngineConfig:
         - QUADRACODE_METRICS_EMIT_MODE ("stream"|"log")
         - QUADRACODE_METRICS_REDIS_URL (str)
         - QUADRACODE_METRICS_STREAM_KEY (str)
+        - QUADRACODE_AUTONOMOUS_STREAM_KEY (str)
         - QUADRACODE_EXTERNALIZE_WRITE_ENABLED (bool)
         - QUADRACODE_QUALITY_THRESHOLD (float 0..1)
         """
@@ -173,6 +175,10 @@ class ContextEngineConfig:
         base.metrics_emit_mode = os.environ.get("QUADRACODE_METRICS_EMIT_MODE", base.metrics_emit_mode)
         base.metrics_redis_url = os.environ.get("QUADRACODE_METRICS_REDIS_URL", base.metrics_redis_url)
         base.metrics_stream_key = os.environ.get("QUADRACODE_METRICS_STREAM_KEY", base.metrics_stream_key)
+        base.autonomous_metrics_stream_key = os.environ.get(
+            "QUADRACODE_AUTONOMOUS_STREAM_KEY",
+            base.autonomous_metrics_stream_key,
+        )
 
         # Booleans
         base.metrics_enabled = _bool("QUADRACODE_METRICS_ENABLED", base.metrics_enabled)

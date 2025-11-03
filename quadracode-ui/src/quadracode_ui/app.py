@@ -33,6 +33,8 @@ AGENT_REGISTRY_URL = os.environ.get("AGENT_REGISTRY_URL", "")
 UI_BARE = os.environ.get("UI_BARE", "0") == "1"
 CONTEXT_METRICS_STREAM = os.environ.get("CONTEXT_METRICS_STREAM", "qc:context:metrics")
 CONTEXT_METRICS_LIMIT = int(os.environ.get("CONTEXT_METRICS_LIMIT", "200"))
+AUTONOMOUS_EVENTS_STREAM = os.environ.get("AUTONOMOUS_EVENTS_STREAM", "qc:autonomous:events")
+AUTONOMOUS_EVENTS_LIMIT = int(os.environ.get("AUTONOMOUS_EVENTS_LIMIT", "200"))
 
 MAILBOX_ORCHESTRATOR = mailbox_key(ORCHESTRATOR_RECIPIENT)
 MAILBOX_HUMAN = mailbox_key(HUMAN_RECIPIENT)
@@ -51,6 +53,15 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("history", [])  # type: ignore[attr-defined]
     st.session_state.setdefault("last_seen_id", "0-0")
     st.session_state.setdefault("chat_selector", None)
+    st.session_state.setdefault("autonomous_mode_enabled", False)
+    st.session_state.setdefault("autonomous_max_iterations", 1000)
+    st.session_state.setdefault("autonomous_max_hours", 48.0)
+    st.session_state.setdefault("autonomous_max_agents", 4)
+    st.session_state.setdefault("autonomous_chat_settings", {})
+    st.session_state.setdefault("autonomous_mode_toggle", False)
+    st.session_state.setdefault("autonomous_max_iterations_input", 1000)
+    st.session_state.setdefault("autonomous_max_hours_input", 48.0)
+    st.session_state.setdefault("autonomous_max_agents_input", 4)
 
 
 def _get_chat_entry(chat_id: str) -> Optional[Dict[str, Any]]:
@@ -94,6 +105,21 @@ def _set_active_chat(chat_id: str, *, client: Optional[redis.Redis] = None) -> N
     st.session_state.last_seen_id = last_seen or "0-0"
     st.session_state.chat_selector = chat_id
     _promote_chat(chat_id)
+
+    settings_map = st.session_state.autonomous_chat_settings  # type: ignore[attr-defined]
+    chat_settings = settings_map.get(chat_id, {}) if isinstance(settings_map, dict) else {}
+    if chat_settings:
+        st.session_state.autonomous_mode_enabled = True
+        st.session_state.autonomous_max_iterations = int(chat_settings.get("max_iterations", 1000))
+        st.session_state.autonomous_max_hours = float(chat_settings.get("max_hours", 48.0))
+        st.session_state.autonomous_max_agents = int(chat_settings.get("max_agents", 4))
+        st.session_state.autonomous_mode_toggle = True
+        st.session_state.autonomous_max_iterations_input = st.session_state.autonomous_max_iterations
+        st.session_state.autonomous_max_hours_input = st.session_state.autonomous_max_hours
+        st.session_state.autonomous_max_agents_input = st.session_state.autonomous_max_agents
+    else:
+        st.session_state.autonomous_mode_enabled = False
+        st.session_state.autonomous_mode_toggle = False
 
 
 def _create_chat(client: redis.Redis, *, title: Optional[str] = None) -> str:
@@ -152,10 +178,40 @@ def _render_history() -> None:
                     st.json(trace)
 
 
+def _current_autonomous_settings() -> Dict[str, Any]:
+    return {
+        "max_iterations": int(st.session_state.get("autonomous_max_iterations", 1000)),
+        "max_hours": float(st.session_state.get("autonomous_max_hours", 48.0)),
+        "max_agents": int(st.session_state.get("autonomous_max_agents", 4)),
+    }
+
+
+def _persist_autonomous_settings(chat_id: str | None) -> None:
+    if not chat_id:
+        return
+    settings_map = st.session_state.autonomous_chat_settings  # type: ignore[attr-defined]
+    if not isinstance(settings_map, dict):
+        settings_map = {}
+        st.session_state.autonomous_chat_settings = settings_map  # type: ignore[attr-defined]
+    if st.session_state.autonomous_mode_enabled:
+        settings_map[chat_id] = _current_autonomous_settings()
+    else:
+        settings_map.pop(chat_id, None)
+
+
 def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> str:
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
     # Orchestrator owns routing. The UI does not set reply_to.
+
+    if st.session_state.autonomous_mode_enabled:
+        settings = _current_autonomous_settings()
+        payload["mode"] = "autonomous"
+        payload["autonomous_settings"] = settings
+        payload.setdefault("task_goal", message)
+        _persist_autonomous_settings(st.session_state.chat_id)
+    else:
+        _persist_autonomous_settings(st.session_state.chat_id)
 
     envelope = MessageEnvelope(
         sender=HUMAN_RECIPIENT,
@@ -165,6 +221,25 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
     )
     client.xadd(MAILBOX_ORCHESTRATOR, envelope.to_stream_fields())
     return ticket_id
+
+
+def _send_emergency_stop(client: redis.Redis) -> None:
+    ticket_id = uuid.uuid4().hex
+    payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
+    payload["autonomous_control"] = {"action": "emergency_stop"}
+    if st.session_state.autonomous_mode_enabled:
+        payload["mode"] = "autonomous"
+        payload["autonomous_settings"] = _current_autonomous_settings()
+        payload.setdefault("task_goal", "Emergency stop")
+
+    envelope = MessageEnvelope(
+        sender=HUMAN_RECIPIENT,
+        recipient=ORCHESTRATOR_RECIPIENT,
+        message="Emergency stop requested by human.",
+        payload=payload,
+    )
+    client.xadd(MAILBOX_ORCHESTRATOR, envelope.to_stream_fields())
+    _append_history("human", "‼️ Emergency stop requested", ticket_id=ticket_id)
 
 
 def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
@@ -319,6 +394,36 @@ def _load_context_metrics(client: redis.Redis, limit: int) -> List[Dict[str, Any
     return list(reversed(parsed))
 
 
+def _load_autonomous_events(client: redis.Redis, limit: int) -> List[Dict[str, Any]]:
+    try:
+        raw_entries = client.xrevrange(AUTONOMOUS_EVENTS_STREAM, count=limit)
+    except redis.ResponseError:
+        return []
+    except redis.RedisError as exc:  # noqa: BLE001
+        st.error(f"Failed to read autonomous events: {exc}")
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    for entry_id, fields in raw_entries:
+        event = fields.get("event", "unknown")
+        timestamp = fields.get("timestamp")
+        payload_raw = fields.get("payload")
+        try:
+            payload = json.loads(payload_raw) if payload_raw else {}
+        except json.JSONDecodeError:
+            payload = {"raw_payload": payload_raw}
+        parsed.append(
+            {
+                "id": entry_id,
+                "event": event,
+                "timestamp": timestamp,
+                "payload": payload,
+            }
+        )
+
+    return list(reversed(parsed))
+
+
 def _render_metrics_dashboard(client: redis.Redis) -> None:
     limit = st.slider(
         "History depth",
@@ -418,6 +523,98 @@ def _render_metrics_dashboard(client: redis.Redis) -> None:
 
     with st.expander("Raw Metrics", expanded=False):
         st.json(entries[-50:])
+
+
+def _render_autonomous_dashboard(client: redis.Redis) -> None:
+    limit = st.slider(
+        "Event history depth",
+        min_value=50,
+        max_value=AUTONOMOUS_EVENTS_LIMIT,
+        step=50,
+        value=min(200, AUTONOMOUS_EVENTS_LIMIT),
+        key="autonomous_events_limit",
+    )
+
+    events = _load_autonomous_events(client, limit)
+    if not events:
+        st.info("No autonomous events recorded yet.")
+        return
+
+    latest = events[-1]
+    st.subheader("Latest Event")
+    cols = st.columns(3)
+    cols[0].metric("Type", latest.get("event", "unknown"))
+    cols[1].metric("Timestamp", latest.get("timestamp", ""))
+    payload = latest.get("payload", {})
+    thread_id = payload.get("thread_id") if isinstance(payload, dict) else None
+    cols[2].metric("Thread", thread_id or "—")
+
+    counts: Dict[str, int] = {}
+    milestones: Dict[int, Dict[str, Any]] = {}
+    escalations: List[Dict[str, Any]] = []
+    critiques: List[Dict[str, Any]] = []
+    guardrails: List[Dict[str, Any]] = []
+
+    for item in events:
+        event_type = item.get("event", "unknown")
+        counts[event_type] = counts.get(event_type, 0) + 1
+        payload = item.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if event_type == "checkpoint":
+            record = payload.get("record")
+            if isinstance(record, dict):
+                milestone_id = int(record.get("milestone", 0))
+                milestones[milestone_id] = record
+        elif event_type == "escalation":
+            record = payload.get("record")
+            if isinstance(record, dict):
+                escalations.append(record)
+        elif event_type == "critique":
+            record = payload.get("record")
+            if isinstance(record, dict):
+                critiques.append(record)
+        elif event_type == "guardrail_trigger":
+            guardrails.append(payload)
+
+    st.subheader("Event Counts")
+    count_rows = [
+        {"event": key, "count": value}
+        for key, value in sorted(counts.items(), key=lambda item: item[0])
+    ]
+    st.dataframe(count_rows, hide_index=True, use_container_width=True)
+
+    if milestones:
+        st.subheader("Milestone Status")
+        ordered = [milestones[key] for key in sorted(milestones.keys())]
+        st.dataframe(ordered, hide_index=True, use_container_width=True)
+
+    if guardrails:
+        st.subheader("Guardrail Events")
+        guardrail_rows: List[Dict[str, Any]] = []
+        for entry in guardrails[-10:]:
+            guardrail_rows.append(
+                {
+                    "type": entry.get("type", "unknown"),
+                    "iteration": entry.get("iteration_count"),
+                    "iteration_limit": entry.get("limit"),
+                    "elapsed_hours": entry.get("elapsed_hours"),
+                    "runtime_limit": entry.get("limit_hours"),
+                    "thread": entry.get("thread_id"),
+                }
+            )
+        st.dataframe(guardrail_rows, hide_index=True, use_container_width=True)
+
+    if escalations:
+        st.subheader("Escalations")
+        st.json(escalations[-5:])
+
+    if critiques:
+        st.subheader("Recent Critiques")
+        st.json(critiques[-5:])
+
+    with st.expander("Raw Events", expanded=False):
+        st.json(events[-50:])
 
 
 def _queue_session_rerun() -> None:
@@ -530,7 +727,12 @@ def main() -> None:
             trace=trace_list,
         )
 
-    chat_tab, streams_tab, metrics_tab = st.tabs(["Chat", "Streams", "Context Metrics"])
+    chat_tab, streams_tab, metrics_tab, autonomous_tab = st.tabs([
+        "Chat",
+        "Streams",
+        "Context Metrics",
+        "Autonomous",
+    ])
 
     with st.sidebar:
         st.markdown("### Chats")
@@ -567,6 +769,58 @@ def main() -> None:
             _promote_chat(current_entry["id"])
 
         st.caption(f"Chat ID: {st.session_state.chat_id}")
+
+        st.divider()
+
+        st.header("Autonomous Mode")
+        auto_enabled = st.toggle(
+            "Enable HUMAN_OBSOLETE mode",
+            value=st.session_state.autonomous_mode_enabled,
+            key="autonomous_mode_toggle",
+        )
+        st.session_state.autonomous_mode_enabled = auto_enabled
+
+        if auto_enabled:
+            st.number_input(
+                "Max iterations",
+                min_value=10,
+                max_value=5000,
+                step=10,
+                value=int(st.session_state.autonomous_max_iterations),
+                key="autonomous_max_iterations_input",
+            )
+            st.number_input(
+                "Max runtime (hours)",
+                min_value=1.0,
+                max_value=168.0,
+                step=1.0,
+                value=float(st.session_state.autonomous_max_hours),
+                key="autonomous_max_hours_input",
+            )
+            st.number_input(
+                "Max agents",
+                min_value=1,
+                max_value=20,
+                step=1,
+                value=int(st.session_state.autonomous_max_agents),
+                key="autonomous_max_agents_input",
+            )
+
+            st.session_state.autonomous_max_iterations = int(st.session_state.autonomous_max_iterations_input)
+            st.session_state.autonomous_max_hours = float(st.session_state.autonomous_max_hours_input)
+            st.session_state.autonomous_max_agents = int(st.session_state.autonomous_max_agents_input)
+        else:
+            st.caption("Autonomous controls disabled for this chat.")
+
+        _persist_autonomous_settings(st.session_state.chat_id)
+
+        if st.session_state.autonomous_mode_enabled:
+            if st.button("Emergency Stop", type="secondary", use_container_width=True):
+                _send_emergency_stop(client)
+                st.session_state.autonomous_mode_enabled = False
+                st.session_state.autonomous_mode_toggle = False
+                _persist_autonomous_settings(st.session_state.chat_id)
+                st.rerun()
 
         st.divider()
 
@@ -611,6 +865,11 @@ def main() -> None:
         st.title("Context Metrics Dashboard")
         st.caption("Live metrics emitted by the context engineering node.")
         _render_metrics_dashboard(client)
+
+    with autonomous_tab:
+        st.title("Autonomous Mode Events")
+        st.caption("Checkpoints, critiques, and escalations emitted during HUMAN_OBSOLETE runs.")
+        _render_autonomous_dashboard(client)
 
 
 if __name__ == "__main__":

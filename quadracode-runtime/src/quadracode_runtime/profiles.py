@@ -1,11 +1,49 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Iterable, List
+from typing import Iterable, List, Mapping, Optional
 
-from quadracode_contracts import HUMAN_RECIPIENT, ORCHESTRATOR_RECIPIENT
+from quadracode_contracts import (
+    HUMAN_RECIPIENT,
+    ORCHESTRATOR_RECIPIENT,
+    AutonomousRoutingDirective,
+)
 
 from .prompts import BASE_PROMPT
+
+_AUTONOMOUS_MODE_VALUES = {"autonomous", "human_obsolete"}
+_AUTONOMOUS_FLAG_VALUES = {"1", "true", "yes", "on"}
+_AUTONOMOUS_ENV_VARS = (
+    "QUADRACODE_MODE",
+    "QUADRACODE_AUTONOMOUS_MODE",
+    "HUMAN_OBSOLETE_MODE",
+)
+
+
+def is_autonomous_mode_enabled() -> bool:
+    """Return True if HUMAN_OBSOLETE autonomous mode is enabled."""
+
+    for env_var in _AUTONOMOUS_ENV_VARS:
+        value = os.environ.get(env_var)
+        if value is None:
+            continue
+        normalized = value.strip().lower()
+        if env_var == "QUADRACODE_MODE" and normalized in _AUTONOMOUS_MODE_VALUES:
+            return True
+        if normalized in _AUTONOMOUS_FLAG_VALUES:
+            return True
+
+    return False
+
+
+def _extract_autonomous_directive(
+    payload: Mapping[str, object] | None,
+) -> Optional[AutonomousRoutingDirective]:
+    if payload is None:
+        return None
+    directive_payload = payload.get("autonomous")
+    return AutonomousRoutingDirective.from_payload(directive_payload)
 
 
 @dataclass(frozen=True)
@@ -71,6 +109,43 @@ class OrchestratorRecipientPolicy(RecipientPolicy):
 
 
 @dataclass(frozen=True)
+class AutonomousRecipientPolicy(RecipientPolicy):
+    """Recipient resolution for HUMAN_OBSOLETE autonomous orchestrator mode."""
+
+    def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
+        recipients = super().resolve(envelope, payload)
+        directive = _extract_autonomous_directive(payload)
+        notify_human = bool(directive and directive.deliver_to_human)
+        escalate = bool(directive and directive.escalate)
+        include_human = notify_human or escalate
+
+        non_human: List[str] = [r for r in recipients if r != HUMAN_RECIPIENT]
+
+        if non_human:
+            recipients = non_human
+            if include_human:
+                recipients.append(HUMAN_RECIPIENT)
+        elif include_human:
+            if HUMAN_RECIPIENT not in recipients:
+                recipients.append(HUMAN_RECIPIENT)
+        else:
+            # No non-human recipients and no explicit need to contact human.
+            recipients = [r for r in recipients if r != HUMAN_RECIPIENT]
+            if not recipients:
+                # Preserve fallback to human to avoid message loss.
+                recipients = [HUMAN_RECIPIENT]
+
+        seen: set[str] = set()
+        deduped: List[str] = []
+        for recipient in recipients:
+            if recipient not in seen:
+                deduped.append(recipient)
+                seen.add(recipient)
+
+        return deduped
+
+
+@dataclass(frozen=True)
 class AgentRecipientPolicy(RecipientPolicy):
     """Recipient resolution for agents: never route directly to human."""
 
@@ -94,29 +169,48 @@ class RuntimeProfile:
         return self.policy.resolve(envelope, payload)
 
 
-ORCHESTRATOR_PROFILE = RuntimeProfile(
-    name="orchestrator",
-    default_identity=ORCHESTRATOR_RECIPIENT,
-    policy=OrchestratorRecipientPolicy(
-        fallback=HUMAN_RECIPIENT,
-        include_sender=False,
-    ),
-)
+def _make_orchestrator_profile() -> RuntimeProfile:
+    """Construct an orchestrator profile using the current mode configuration."""
 
-AGENT_PROFILE = RuntimeProfile(
-    name="agent",
-    default_identity="agent",
-    policy=AgentRecipientPolicy(
-        fallback=ORCHESTRATOR_RECIPIENT,
-        include_sender=True,
-        force=(ORCHESTRATOR_RECIPIENT,),
-    ),
-)
+    if is_autonomous_mode_enabled():
+        policy: RecipientPolicy = AutonomousRecipientPolicy(
+            fallback=HUMAN_RECIPIENT,
+            include_sender=False,
+        )
+    else:
+        policy = OrchestratorRecipientPolicy(
+            fallback=HUMAN_RECIPIENT,
+            include_sender=False,
+        )
+
+    return RuntimeProfile(
+        name="orchestrator",
+        default_identity=ORCHESTRATOR_RECIPIENT,
+        system_prompt=BASE_PROMPT,
+        policy=policy,
+    )
+
+
+def _make_agent_profile() -> RuntimeProfile:
+    return RuntimeProfile(
+        name="agent",
+        default_identity="agent",
+        system_prompt=BASE_PROMPT,
+        policy=AgentRecipientPolicy(
+            fallback=ORCHESTRATOR_RECIPIENT,
+            include_sender=True,
+            force=(ORCHESTRATOR_RECIPIENT,),
+        ),
+    )
+
+
+ORCHESTRATOR_PROFILE = _make_orchestrator_profile()
+AGENT_PROFILE = _make_agent_profile()
 
 
 def load_profile(name: str) -> RuntimeProfile:
     if name == "orchestrator":
-        return ORCHESTRATOR_PROFILE
+        return _make_orchestrator_profile()
     if name == "agent":
-        return AGENT_PROFILE
+        return _make_agent_profile()
     raise ValueError(f"Unknown runtime profile: {name}")

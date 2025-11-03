@@ -1,13 +1,51 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Optional, TypedDict, cast
+from typing import Annotated, Any, Dict, List, Optional, TypedDict, cast, Literal
 
 from langchain_core.messages import AnyMessage, message_to_dict, messages_from_dict
 from langgraph.graph import add_messages
 
 
-class RuntimeState(TypedDict):
+class AutonomousMilestone(TypedDict, total=False):
+    """Autonomous milestone tracking record."""
+
+    milestone: int
+    title: Optional[str]
+    status: Literal["pending", "in_progress", "complete", "blocked"]
+    summary: Optional[str]
+    next_steps: List[str]
+    updated_at: Optional[str]
+
+
+class AutonomousErrorRecord(TypedDict, total=False):
+    """Autonomous error history record."""
+
+    error_type: str
+    description: str
+    recovery_attempts: List[str]
+    escalated: bool
+    resolved: bool
+    timestamp: Optional[str]
+
+
+class _RuntimeStateRequired(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
+
+
+class RuntimeState(_RuntimeStateRequired, total=False):
+    autonomous_mode: bool
+    task_goal: Optional[str]
+    current_phase: Optional[str]
+    iteration_count: int
+    milestones: List[AutonomousMilestone]
+    error_history: List[AutonomousErrorRecord]
+    autonomous_started_at: Optional[str]
+    last_iteration_at: Optional[str]
+    iteration_limit_triggered: bool
+    runtime_limit_triggered: bool
+    autonomous_routing: Dict[str, Any]
+    autonomous_settings: Dict[str, Any]
+    thread_id: Optional[str]
 
 
 class ContextSegment(TypedDict):

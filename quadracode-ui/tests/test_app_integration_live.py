@@ -55,7 +55,7 @@ def test_live_send_writes_to_orchestrator_stream() -> None:
     assert env.sender == HUMAN_RECIPIENT
     assert env.recipient == ORCHESTRATOR_RECIPIENT
     assert env.message == "Hello orchestrator"
-    assert env.payload.get("chat_id") == tester.session_state.get("chat_id")
+    assert env.payload.get("chat_id") == _state_get(tester.session_state, "chat_id")
     assert env.payload.get("ticket_id")
 
 
@@ -75,7 +75,7 @@ def test_live_receive_updates_when_human_stream_gets_entry() -> None:
     tester.run()
 
     # Obtain the active chat id so we can target the message correctly
-    chat_id = tester.session_state.get("chat_id")
+    chat_id = _state_get(tester.session_state, "chat_id")
     assert chat_id, "App did not initialize a chat_id"
 
     # Append a new entry to the human mailbox for this chat
@@ -97,4 +97,14 @@ def test_live_receive_updates_when_human_stream_gets_entry() -> None:
     last = tester.chat_message[-1]
     assert last.markdown
     assert last.markdown[0].value == "Hello from Redis"
-
+def _state_get(session_state, key: str, default=None):
+    getter = getattr(session_state, "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except KeyError:
+            return default
+    try:
+        return session_state[key]
+    except KeyError:
+        return default

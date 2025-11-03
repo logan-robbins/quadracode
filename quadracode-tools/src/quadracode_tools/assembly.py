@@ -10,6 +10,11 @@ from .tools.read_file import read_file
 from .tools.write_file import write_file
 from .tools.agent_registry import agent_registry_tool
 from .tools.agent_management import agent_management_tool
+from .tools.autonomous_control import (
+    autonomous_checkpoint,
+    autonomous_escalate,
+    autonomous_critique,
+)
 
 
 def get_tools() -> List[BaseTool]:
@@ -21,4 +26,7 @@ def get_tools() -> List[BaseTool]:
         write_file,
         agent_registry_tool,
         agent_management_tool,
+        autonomous_checkpoint,
+        autonomous_escalate,
+        autonomous_critique,
     ]

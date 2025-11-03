@@ -12,6 +12,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from ..config import ContextEngineConfig
+from ..autonomous import process_autonomous_tool_response
 from ..state import (
     ContextEngineState,
     ContextSegment,
@@ -162,6 +163,9 @@ class ContextEngine:
         self, state: ContextEngineState, tool_response: Any | None
     ) -> ContextEngineState:
         state = self._ensure_state_defaults(state)
+        autonomous_event = None
+        if tool_response is not None:
+            state, autonomous_event = process_autonomous_tool_response(state, tool_response)
         if tool_response is None:
             return state
         scoring_payload: Any
@@ -182,6 +186,11 @@ class ContextEngine:
                 "segment_count": len(state.get("context_segments", [])),
             },
         )
+        if autonomous_event:
+            await self.metrics.emit_autonomous(
+                autonomous_event["event"],
+                autonomous_event.get("payload", {}),
+            )
         return state
 
     async def _decide_operation(

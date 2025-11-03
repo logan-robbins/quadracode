@@ -196,6 +196,44 @@ REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
 
 Open http://localhost:8501 and start a conversation. The orchestrator will delegate work to agents and dynamically scale the fleet as needed. You'll see real-time updates as the system processes your request.
 
+When experimenting with HUMAN_OBSOLETE mode, open the sidebar and enable **Autonomous Mode**. You can configure guardrails (max iterations, runtime hours, transient agent cap) and trigger an emergency stop if you want to return control to the human. The chat UI also exposes an **Autonomous** tab that streams checkpoints, critiques, guardrail hits, and escalations emitted by the runtime.
+
+#### HUMAN_OBSOLETE Autonomy Loop
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Goal Intake                                                       │
+│ - Human seeds task + guardrails via Streamlit sidebar             │
+├──────────────────────────────────────────────────────────────────┤
+│ ┌────────────────────────────┐        ┌────────────────────────┐ │
+│ │ Orchestrator Runtime       │◄──────►│ Context Engine (ACE)   │ │
+│ │ - Autonomous prompt        │        │ - Progressive loading  │ │
+│ │ - Recipient policy         │        │ - Checkpoints &        │ │
+│ │ - Guardrail enforcement    │        │   critiques            │ │
+│ │ - Event emission           │        └────────┬───────────────┘ │
+│ └─────────────┬──────────────┘                 │                 │
+│               │ delegates / spawns             │ emits metrics   │
+│               ▼                                ▼                 │
+│ ┌────────────────────────────┐        ┌────────────────────────┐ │
+│ │ Dynamic Agent Fleet        │        │ Redis Streams          │ │
+│ │ - Specialized workers      │        │ - qc:mailbox/*         │ │
+│ │ - Agent registry health    │        │ - qc:autonomous:events │ │
+│ │ - MCP tool discovery       │        └────────┬───────────────┘ │
+│ └─────────────┬──────────────┘                 │                 │
+│               │                                 │                 │
+│               ▼                                 │                 │
+│ ┌────────────────────────────┐        ┌─────────┴──────────────┐ │
+│ │ UI / Control Plane         │◄──────►│ Observability & Logs   │ │
+│ │ - Chat + autonomous tab    │        │ - Dashboard panels     │ │
+│ │ - Guardrail settings       │        │ - Redis/metrics tail   │ │
+│ │ - Emergency stop control   │        │ - Research exports     │ │
+│ └────────────────────────────┘        └────────────────────────┘ │
+│                                                                  │
+│ Loop: Evaluate → Critique → Plan → Execute → Checkpoint → Emit   │
+│ Escalate only on fatal errors or human-triggered emergency stop. │
+└──────────────────────────────────────────────────────────────────┘
+```
+
 **Optional**: Containerize the UI by uncommenting the `ui` service in `docker-compose.yml`:
 
 ```bash
@@ -274,6 +312,12 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 ### Testing
 
 ```bash
+# Autonomous mode unit regression (routing, guardrails, emergency stop)
+uv run pytest quadracode-runtime/tests/test_autonomous_mode.py -q
+
+# Streamlit UI helpers (parsers, autonomous settings persistence)
+uv run pytest quadracode-ui/tests/test_autonomous_ui.py -q
+
 # Runtime memory regression (checkpoint persistence)
 uv run pytest tests/test_runtime_memory.py
 
@@ -287,6 +331,8 @@ uv run pytest quadracode-ui/tests -m integration -q
 # Prerequisite: docker compose up redis agent-registry orchestrator-runtime agent-runtime
 uv run pytest quadracode-ui/tests -m e2e -q
 ```
+
+> **Tip:** Custom pytest marks (`integration`, `e2e`) are registered in `pytest.ini`, so the command line snippets above run without additional flags. For live UI tests ensure Docker services are up first (see commands below).
 
 ### End‑to‑End Requirements
 
@@ -358,6 +404,7 @@ Environment variables control runtime behavior:
 - **Externalized segments**: enable persistence with `ContextEngineConfig.externalize_write_enabled` (or env var `QUADRACODE_EXTERNALIZE_WRITE=1`) to write pointer payloads under `external_memory_path`
 - **Service logs**: `docker compose logs <service>`
 - **Streamlit stream viewer**: Inspect raw payloads and message traces
+- **Autonomous guardrails & control events**: `redis-cli XRANGE qc:autonomous:events - +` to review checkpoints, critiques, guardrail triggers, and emergency stops emitted in HUMAN_OBSOLETE mode
 - **Agent fleet status**: Check registry API at `/agents` endpoint or use orchestrator's `agent_management` tool
 - **Checkpoint introspection**: From within a runtime, call:
   ```python
