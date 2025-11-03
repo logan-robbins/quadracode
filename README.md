@@ -26,6 +26,29 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
 
+## Repository Layout
+
+This monorepo contains several Python 3.12 packages and supporting assets:
+
+- `quadracode-runtime/` — Shared runtime for all services. Contains the LangGraph workflow (driver + tools), the Context Engineering node (pre/governor/post/tool_response), Redis/MCP messaging, metrics emitters, and state/contracts glue.
+- `quadracode-orchestrator/` — Orchestrator service wrapper. Provides system prompt, runtime profile, and process entrypoint to run the orchestrator graph.
+- `quadracode-agent/` — Generic agent service wrapper. Uses the shared runtime with the agent profile to execute delegated work.
+- `quadracode-agent-registry/` — Uvicorn/FastAPI registry on port 8090 for agent discovery, health, and stats used by the orchestrator.
+- `quadracode-tools/` — Reusable tools exposed to agents (LangChain and MCP-backed) such as `agent_registry`, file IO, bash, etc.
+- `quadracode-contracts/` — Shared Pydantic models and message envelope contracts used across services.
+- `quadracode-ui/` — Streamlit UI for multi-chat control plane and live stream inspection.
+- `scripts/` — Agent management helpers for Docker/Kubernetes and stream tailing utilities.
+- `tests/e2e/` — End-to-end tests that launch the real stack via Docker Compose and validate cross-service flows and context metrics.
+
+## Always-On Philosophy
+
+Quadracode is built for Always-On AI: agents and orchestrators maintain progress across long-running, multi-step work.
+
+- Durable state via LangGraph checkpointing and Redis streams
+- Non-blocking orchestration and incremental updates for long jobs
+- Dynamic fleet management to scale capacity up/down as needed
+- Context Engineering keeps history sharp via curation, reduction, and progressive loading
+
 ## Architecture Overview
 
 ```
@@ -419,3 +442,15 @@ export QUADRACODE_MAX_TOOL_PAYLOAD_CHARS=10
 export QUADRACODE_TARGET_CONTEXT_SIZE=10
 export QUADRACODE_REDUCER_MODEL=heuristic
 ```
+
+## Local Development & Testing
+
+- Sync dependencies: `uv sync`
+- Run units/fast tests in a package: `uv run pytest`
+- Run end-to-end tests: `uv run pytest tests/e2e -m e2e`
+- Launch local LangGraph dev server: `uv run langgraph dev agent --config quadracode-agent/langgraph-local.json` (swap `agent` with `orchestrator` as needed)
+
+## Docker Stack
+
+- Bring up Redis, registry, orchestrator, and agent runtimes: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime`
+- Tail streams: `bash scripts/tail_streams.sh`
