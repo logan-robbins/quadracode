@@ -4,10 +4,11 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, root_validator
+from quadracode_contracts import DEFAULT_WORKSPACE_MOUNT
 
 
 class AgentManagementRequest(BaseModel):
@@ -36,6 +37,18 @@ class AgentManagementRequest(BaseModel):
         default=None,
         description="Docker network to attach the agent to. Defaults to 'quadracode_default'.",
     )
+    workspace_id: Optional[str] = Field(
+        default=None,
+        description="Optional workspace identifier to mount into the agent container.",
+    )
+    workspace_volume: Optional[str] = Field(
+        default=None,
+        description="Optional Docker volume name backing the workspace to mount at /workspace.",
+    )
+    workspace_mount: Optional[str] = Field(
+        default=None,
+        description="Mount path inside the agent container for the workspace volume (default /workspace).",
+    )
 
     @root_validator(skip_on_failure=True)
     def _validate_requirements(cls, values):  # type: ignore[override]
@@ -44,6 +57,11 @@ class AgentManagementRequest(BaseModel):
 
         if op in {"delete_agent", "get_container_status"} and not agent_id:
             raise ValueError(f"{op} requires agent_id")
+
+        workspace_volume = values.get("workspace_volume")
+        workspace_mount = values.get("workspace_mount")
+        if workspace_mount and not workspace_volume:
+            raise ValueError("workspace_mount requires workspace_volume")
 
         return values
 
@@ -73,7 +91,7 @@ def _get_scripts_dir() -> Path:
     return Path("/app/scripts/agent-management")
 
 
-def _run_script(script_name: str, *args: str) -> dict:
+def _run_script(script_name: str, *args: str, env_overrides: Optional[Dict[str, str]] = None) -> dict:
     """
     Execute an agent management script and return parsed JSON output.
 
@@ -94,6 +112,13 @@ def _run_script(script_name: str, *args: str) -> dict:
             "message": f"Agent management script {script_name} not found at {script_path}",
         }
 
+    env = os.environ.copy()
+    if env_overrides:
+        for key, value in env_overrides.items():
+            if value is None:
+                continue
+            env[str(key)] = str(value)
+
     try:
         result = subprocess.run(
             [str(script_path)] + list(args),
@@ -101,6 +126,7 @@ def _run_script(script_name: str, *args: str) -> dict:
             text=True,
             check=False,
             timeout=30,
+            env=env,
         )
 
         # Try to parse JSON output
@@ -194,8 +220,40 @@ def agent_management_tool(
             while len(args) < 2:
                 args.append("")  # placeholders
             args.append(params.network)
+        workspace_id = params.workspace_id
+        workspace_volume = params.workspace_volume
+        workspace_mount = params.workspace_mount
 
-        response = _run_script("spawn-agent.sh", *args)
+        descriptor_env: Optional[dict[str, Any]] = None
+        descriptor_raw = os.environ.get("QUADRACODE_ACTIVE_WORKSPACE_DESCRIPTOR")
+        if descriptor_raw:
+            try:
+                parsed = json.loads(descriptor_raw)
+                if isinstance(parsed, dict):
+                    descriptor_env = parsed
+            except json.JSONDecodeError:
+                descriptor_env = None
+
+        if descriptor_env:
+            workspace_id = workspace_id or descriptor_env.get("workspace_id")
+            workspace_volume = workspace_volume or descriptor_env.get("volume")
+            workspace_mount = workspace_mount or descriptor_env.get("mount_path")
+
+        if workspace_mount is None:
+            workspace_mount = DEFAULT_WORKSPACE_MOUNT
+
+        env_overrides: Dict[str, str] = {}
+        if workspace_id:
+            env_overrides["QUADRACODE_WORKSPACE_ID"] = str(workspace_id)
+        if workspace_volume:
+            env_overrides["QUADRACODE_WORKSPACE_VOLUME"] = str(workspace_volume)
+            env_overrides["QUADRACODE_WORKSPACE_MOUNT"] = str(workspace_mount or DEFAULT_WORKSPACE_MOUNT)
+
+        response = _run_script(
+            "spawn-agent.sh",
+            *args,
+            env_overrides=env_overrides or None,
+        )
         return json.dumps(response, indent=2)
 
     if params.operation == "delete_agent":

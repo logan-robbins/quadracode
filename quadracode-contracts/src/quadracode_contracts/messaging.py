@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 MAILBOX_PREFIX = "qc:mailbox/"
 ORCHESTRATOR_RECIPIENT = "orchestrator"
 HUMAN_RECIPIENT = "human"
+HUMAN_CLONE_RECIPIENT = "human_clone"
 
 
 def _default_timestamp() -> str:
@@ -74,6 +75,7 @@ __all__.extend(
         "MAILBOX_PREFIX",
         "ORCHESTRATOR_RECIPIENT",
         "HUMAN_RECIPIENT",
+        "HUMAN_CLONE_RECIPIENT",
         "mailbox_key",
         "mailbox_recipient",
         "agent_mailbox",

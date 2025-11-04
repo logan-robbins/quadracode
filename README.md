@@ -20,11 +20,54 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Async-First**: Orchestrator never blocks on agent work; long-running jobs emit incremental updates over Redis Streams
 - **Multi-Agent Coordination**: Built-in service registry, dynamic routing, and agent health tracking
 - **Dynamic Fleet Management**: Orchestrator autonomously spawns and deletes agents based on workload, creating specialized agents for complex tasks
+- **Two-Level Autonomy Loop**: A `HumanClone` agent acts as a relentless, skeptical reviewer for the orchestrator, ensuring that work is never prematurely considered "done."
 - **MCP Integration**: Standardized tool interfaces via Model Context Protocol for seamless agent capability sharing
 - **Context Engineering Node**: Progressive loader, prioritised compression, LLM-backed summarisation, and Redis-backed metrics keep long-running chats sharp without losing history
 - **Full Observability**: Streamlit control plane with conversation management, real-time stream inspection, and message tracing
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
+
+#### HUMAN_OBSOLETE Autonomy Loop
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Goal Intake                                                       │
+│ - Human seeds task + guardrails via Streamlit sidebar             │
+├──────────────────────────────────────────────────────────────────┤
+│ Outer Loop: Propose → Reject → Refine                             │
+│ ┌────────────────────────────┐        ┌────────────────────────┐ │
+│ │ Orchestrator Runtime       │◄──────►│ HumanClone (Reviewer)  │ │
+│ │ (Proposes final solution)  │        │ (Relentlessly rejects) │ │
+│ └─────────────┬──────────────┘        └────────────────────────┘ │
+│               │                                                  │
+│ Inner Loop: Evaluate → Critique → Plan → Execute                  │
+│               ▼                                                  │
+│ ┌────────────────────────────┐        ┌────────────────────────┐ │
+│ │ Dynamic Agent Fleet        │        │ Redis Streams          │ │
+│ │ - Specialized workers      │        │ - qc:mailbox/*         │ │
+│ │ - Agent registry health    │        │ - - qc:autonomous:events │ │
+│ │ - MCP tool discovery       │        └────────┬───────────────┘ │
+│ └─────────────┬──────────────┘                 │                 │
+│               │                                 │                 │
+│               ▼                                 │                 │
+│ ┌────────────────────────────┐        ┌─────────┴──────────────┐ │
+│ │ UI / Control Plane         │◄──────►│ Observability & Logs   │ │
+│ │ - Chat + autonomous tab    │        │ - Dashboard panels     │ │
+│ │ - Guardrail settings       │        │ - Redis/metrics tail   │ │
+│ │ - Emergency stop control   │        │ - Research exports     │ │
+│ └────────────────────────────┘        └────────────────────────┘ │
+│                                                                  │
+│ Escalate only on fatal errors or human-triggered emergency stop. │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+The autonomy of the system is maintained by a two-level loop:
+
+1.  **The Inner Loop (Orchestrator-Agent):** This is the "Evaluate → Critique → Plan → Execute" loop. The orchestrator delegates tasks to the agent fleet, critiques their work, and plans the next steps.
+
+2.  **The Outer Loop (Orchestrator-HumanClone):** When the orchestrator believes it has completed the entire task, it enters the outer loop. It submits its final work product to the `HumanClone` for review. The `HumanClone`, with its relentlessly skeptical prompt, will almost always reject the work and send it back to the orchestrator with a generic exhortation to "go deeper" or "try again." This forces the orchestrator to begin its inner loop anew, finding new ways to improve its work.
+
+This two-level loop ensures that the system is always questioning its own conclusions and is constantly striving to produce a better result. The only escape from this loop is via the `escalate_to_human` tool, which the orchestrator is programmed to use only in cases of truly unrecoverable error.
 
 ## Repository Layout
 
@@ -417,6 +460,24 @@ Environment variables control runtime behavior:
 - **Parallelism**: Orchestrator never blocks on agent work; long-running jobs emit incremental envelopes
 - **Elasticity**: Agent fleet scales automatically based on orchestrator decisions; spawned agents auto-register and self-terminate
 - **Extensibility**: Shared MCP adapters + local tools ensure orchestrator and agents share capabilities automatically
+
+### Supervisor Identity (Human vs HumanClone)
+
+By default, the orchestrator uses the real human (`human`) as the supervising recipient for updates. To run the same system with a HumanClone standing in for the human—without any special autonomous mode awareness—set:
+
+```
+QUADRACODE_SUPERVISOR_RECIPIENT=human_clone
+```
+
+and run a HumanClone runtime:
+
+```
+docker compose up -d human-clone-runtime
+```
+
+In this configuration, message flows are simply `human_clone ↔ orchestrator ↔ agent(s)`. Initial tasks are seeded the same way as before; you can send the opening message from the HumanClone (sender `human_clone`) or target the orchestrator with `reply_to` set to the appropriate agent when needed. No special “autonomous mode” flags are required; tools and routing work identically with a different supervisor identity.
+
+The Streamlit UI exposes this as the **“Enable HUMAN_OBSOLETE mode”** toggle. When enabled, all outgoing chat messages originate from the HumanClone mailbox and responses target `qc:mailbox/human_clone`, so the HumanClone stays in the loop continuously.
 - **Transparency**: `payload.messages` carries full reasoning traces; UI exposes both human responses and underlying traffic, and `qc:context:metrics` logs every context-engine decision for auditability
 - **Platform Portability**: Same codebase runs on Docker Compose and Kubernetes with environment variable configuration
 

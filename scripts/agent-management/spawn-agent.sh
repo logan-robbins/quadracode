@@ -65,7 +65,6 @@ spawn_docker() {
         "--env" "AGENT_REGISTRY_URL=${AGENT_REGISTRY_URL:-http://agent-registry:8090}"
         "--env" "MCP_REDIS_SERVER_URL=${MCP_REDIS_SERVER_URL:-http://redis-mcp:8000/mcp}"
         "--env" "MCP_REDIS_TRANSPORT=${MCP_REDIS_TRANSPORT:-streamable_http}"
-        "--env" "SHARED_PATH=${SHARED_PATH:-/shared}"
         "--env" "MCP_REMOTE_CACHE_DIR=${MCP_REMOTE_CACHE_DIR:-/var/lib/mcp-remote}"
         "--env" "QUADRACODE_AGENT_AUTOREGISTER=${QUADRACODE_AGENT_AUTOREGISTER:-1}"
         "--env" "QUADRACODE_AGENT_HEARTBEAT_INTERVAL=${QUADRACODE_AGENT_HEARTBEAT_INTERVAL:-15}"
@@ -77,6 +76,25 @@ spawn_docker() {
     [[ -n "${PERPLEXITY_API_KEY:-}" ]] && env_args+=("--env" "PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}")
     [[ -n "${FIRECRAWL_API_KEY:-}" ]] && env_args+=("--env" "FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}")
 
+    local shared_path_value="${SHARED_PATH:-/shared}"
+    local workspace_mount="${QUADRACODE_WORKSPACE_MOUNT:-/workspace}"
+    local volume_args=(
+        -v quadracode_shared-data:/shared
+        -v quadracode_mcp-remote-cache:/var/lib/mcp-remote
+    )
+
+    if [[ -n "${QUADRACODE_WORKSPACE_VOLUME:-}" ]]; then
+        shared_path_value="${workspace_mount}"
+        env_args+=("--env" "WORKSPACE_MOUNT=${workspace_mount}")
+        env_args+=("--env" "WORKSPACE_VOLUME=${QUADRACODE_WORKSPACE_VOLUME}")
+        if [[ -n "${QUADRACODE_WORKSPACE_ID:-}" ]]; then
+            env_args+=("--env" "WORKSPACE_ID=${QUADRACODE_WORKSPACE_ID}")
+        fi
+        volume_args+=("-v" "${QUADRACODE_WORKSPACE_VOLUME}:${workspace_mount}")
+    fi
+
+    env_args+=("--env" "SHARED_PATH=${shared_path_value}")
+
     # Spawn container
     local container_id
     if ! container_id=$(docker run -d \
@@ -84,8 +102,7 @@ spawn_docker() {
         --network "${NETWORK}" \
         --restart unless-stopped \
         "${env_args[@]}" \
-        -v quadracode_shared-data:/shared \
-        -v quadracode_mcp-remote-cache:/var/lib/mcp-remote \
+        "${volume_args[@]}" \
         "${IMAGE}" \
         uv run python -m quadracode_agent 2>&1); then
         json_output "false" "Failed to spawn agent" "${container_id}"

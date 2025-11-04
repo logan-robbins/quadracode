@@ -15,6 +15,14 @@ from .tools.autonomous_control import (
     autonomous_escalate,
     autonomous_critique,
 )
+from .tools.workspace import (
+    workspace_create,
+    workspace_exec,
+    workspace_copy_to,
+    workspace_copy_from,
+    workspace_destroy,
+    workspace_info,
+)
 
 
 def get_tools() -> List[BaseTool]:
@@ -24,6 +32,12 @@ def get_tools() -> List[BaseTool]:
         bash_shell,
         read_file,
         write_file,
+        workspace_create,
+        workspace_exec,
+        workspace_copy_to,
+        workspace_copy_from,
+        workspace_destroy,
+        workspace_info,
         agent_registry_tool,
         agent_management_tool,
         autonomous_checkpoint,

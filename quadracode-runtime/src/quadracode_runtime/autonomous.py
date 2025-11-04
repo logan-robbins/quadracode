@@ -10,6 +10,7 @@ from quadracode_contracts import (
     AutonomousCritiqueRecord,
     AutonomousEscalationRecord,
     AutonomousRoutingDirective,
+    HUMAN_CLONE_RECIPIENT,
 )
 
 from .state import AutonomousErrorRecord, AutonomousMilestone, ContextEngineState
@@ -17,8 +18,11 @@ from .state import AutonomousErrorRecord, AutonomousMilestone, ContextEngineStat
 
 AUTONOMOUS_TOOL_NAMES = {
     "autonomous_checkpoint",
-    "autonomous_escalate",
+    "request_final_review",
+    "escalate_to_human",
     "autonomous_critique",
+    # Accept built-in escalate tool without special aliasing
+    "autonomous_escalate",
 }
 
 
@@ -94,6 +98,33 @@ def process_autonomous_tool_response(
             tool_response=tool_response,
             thread_id=thread_id,
             categories=["checkpoint"],
+        )
+        return state, event_record
+
+    if event == "final_review_request":
+        record_payload = payload.get("record")
+        if not isinstance(record_payload, dict):
+            return state, None
+        try:
+            record = AutonomousEscalationRecord(**record_payload)
+        except Exception:
+            return state, None
+
+        state["autonomous_routing"] = AutonomousRoutingDirective(
+            deliver_to_human=False,
+            escalate=False,
+            recipient=HUMAN_CLONE_RECIPIENT,
+        ).to_payload()
+        state["current_phase"] = "awaiting_review"
+        event_record = {
+            "event": "final_review_request",
+            "payload": {"record": record.dict()},
+        }
+        _attach_common_event_metadata(
+            event_record,
+            tool_response=tool_response,
+            thread_id=thread_id,
+            categories=["review_request"],
         )
         return state, event_record
 

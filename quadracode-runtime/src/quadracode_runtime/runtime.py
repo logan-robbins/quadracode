@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from langchain_core.messages import (
     BaseMessage,
@@ -22,6 +22,7 @@ from quadracode_contracts import (
     MessageEnvelope,
     AutonomousRoutingDirective,
 )
+from quadracode_tools.tools.workspace import ensure_workspace
 
 from .graph import CHECKPOINTER, build_graph
 from .messaging import RedisMCPMessaging
@@ -37,6 +38,14 @@ AUTONOMOUS_METRICS_REDIS_URL = os.environ.get("QUADRACODE_METRICS_REDIS_URL", "r
 _AUTONOMOUS_METRICS_CLIENT = None
 _AUTONOMOUS_METRICS_DISABLED = False
 _AUTONOMOUS_METRICS_LOCK = Lock()
+
+_WORKSPACE_ENV_KEYS = (
+    "QUADRACODE_ACTIVE_WORKSPACE_DESCRIPTOR",
+    "QUADRACODE_ACTIVE_WORKSPACE_ID",
+    "QUADRACODE_ACTIVE_WORKSPACE_VOLUME",
+    "QUADRACODE_ACTIVE_WORKSPACE_CONTAINER",
+    "QUADRACODE_ACTIVE_WORKSPACE_MOUNT",
+)
 
 
 def _now_iso() -> str:
@@ -122,6 +131,27 @@ def _publish_autonomous_event(
         )
     except Exception:
         _AUTONOMOUS_METRICS_DISABLED = True
+
+
+def _set_workspace_environment(descriptor: dict[str, Any] | None) -> None:
+    if descriptor:
+        os.environ["QUADRACODE_ACTIVE_WORKSPACE_DESCRIPTOR"] = json.dumps(
+            descriptor, separators=(",", ":")
+        )
+        mapping = {
+            "QUADRACODE_ACTIVE_WORKSPACE_ID": descriptor.get("workspace_id"),
+            "QUADRACODE_ACTIVE_WORKSPACE_VOLUME": descriptor.get("volume"),
+            "QUADRACODE_ACTIVE_WORKSPACE_CONTAINER": descriptor.get("container"),
+            "QUADRACODE_ACTIVE_WORKSPACE_MOUNT": descriptor.get("mount_path"),
+        }
+        for key, value in mapping.items():
+            if value is not None and str(value).strip():
+                os.environ[key] = str(value)
+            else:
+                os.environ.pop(key, None)
+    else:
+        for key in _WORKSPACE_ENV_KEYS:
+            os.environ.pop(key, None)
 
 
 def _append_error_history(result: dict[str, object], entry: dict[str, object]) -> None:
@@ -369,13 +399,22 @@ class RuntimeRunner:
                 "iteration_limit_triggered",
                 "runtime_limit_triggered",
                 "autonomous_settings",
+                "workspace",
             ):
                 value = state_payload.get(key)
                 if value is None:
                     continue
                 if key in {"milestones", "error_history"} and not isinstance(value, list):
                     continue
+                if key == "workspace":
+                    if isinstance(value, dict):
+                        state["workspace"] = deepcopy(value)
+                    continue
                 state[key] = value  # type: ignore[assignment]
+
+        workspace_payload = payload.get("workspace")
+        if isinstance(workspace_payload, dict):
+            state["workspace"] = deepcopy(workspace_payload)
 
         settings_payload = payload.get("autonomous_settings")
         if isinstance(settings_payload, dict):
@@ -384,6 +423,15 @@ class RuntimeRunner:
         control_payload = payload.get("autonomous_control")
         if isinstance(control_payload, dict) and control_payload.get("action") == "emergency_stop":
             return self._handle_emergency_stop(envelope, payload, state, thread_id)
+
+        if is_orchestrator:
+            self._ensure_workspace_for_thread(thread_id, state, payload)
+
+        workspace_descriptor = state.get("workspace")
+        if isinstance(workspace_descriptor, dict):
+            _set_workspace_environment(workspace_descriptor)
+        else:
+            _set_workspace_environment(None)
 
         if autonomous_active:
             state["autonomous_mode"] = True
@@ -411,6 +459,8 @@ class RuntimeRunner:
         result = await asyncio.to_thread(self._graph.invoke, state, config)
         output_messages = result.get("messages", [])
         output_serialized = messages_to_dict(output_messages)
+        if "workspace" not in result and isinstance(state.get("workspace"), dict):
+            result["workspace"] = deepcopy(state["workspace"])  # type: ignore[index]
 
         if autonomous_active:
             prior_raw = state.get("iteration_count", 0)
@@ -473,9 +523,14 @@ class RuntimeRunner:
             "runtime_limit_triggered",
             "autonomous_settings",
             "thread_id",
+            "workspace",
         ):
             value = result.get(key)
             if value is None:
+                continue
+            if key == "workspace":
+                if isinstance(value, dict):
+                    autonomous_snapshot[key] = deepcopy(value)
                 continue
             autonomous_snapshot[key] = deepcopy(value)
         if autonomous_snapshot:
@@ -485,6 +540,11 @@ class RuntimeRunner:
         if routing_payload:
             response_payload["autonomous"] = deepcopy(routing_payload)
         response_payload["messages"] = output_serialized
+        workspace_descriptor = result.get("workspace")
+        if isinstance(workspace_descriptor, dict):
+            response_payload["workspace"] = deepcopy(workspace_descriptor)
+        else:
+            response_payload.pop("workspace", None)
         response_payload.setdefault("chat_id", thread_id)
         response_payload["thread_id"] = thread_id
 
@@ -504,6 +564,45 @@ class RuntimeRunner:
             for recipient in recipients
         ]
         return responses
+
+    def _ensure_workspace_for_thread(
+        self,
+        thread_id: str,
+        state: RuntimeState,
+        payload: dict,
+    ) -> None:
+        existing = state.get("workspace")
+        overrides = payload.get("workspace_config")
+        image: Optional[str] = None
+        network: Optional[str] = None
+        if isinstance(overrides, dict):
+            raw_image = overrides.get("image")
+            raw_network = overrides.get("network")
+            if isinstance(raw_image, str) and raw_image.strip():
+                image = raw_image.strip()
+            if isinstance(raw_network, str) and raw_network.strip():
+                network = raw_network.strip()
+        if isinstance(existing, dict):
+            existing_image = existing.get("image")
+            existing_network = existing.get("network")  # allow override if captured
+            if image is None and isinstance(existing_image, str) and existing_image.strip():
+                image = existing_image.strip()
+            if network is None and isinstance(existing_network, str) and existing_network.strip():
+                network = existing_network.strip()
+
+        success, descriptor_model, error = ensure_workspace(thread_id, image=image, network=network)
+        if not success or descriptor_model is None:
+            if error:
+                print(f"[workspace] unable to provision workspace for {thread_id}: {error}")
+            return
+
+        descriptor_dict = descriptor_model.dict()
+        if network:
+            descriptor_dict.setdefault("network", network)
+        if image:
+            descriptor_dict.setdefault("image", image)
+        state["workspace"] = descriptor_dict
+        payload["workspace"] = deepcopy(descriptor_dict)
 
     def _handle_emergency_stop(
         self,
@@ -556,6 +655,9 @@ class RuntimeRunner:
             "autonomous_settings": state.get("autonomous_settings", {}),
             "thread_id": thread_id,
         }
+        workspace_state = state.get("workspace")
+        if isinstance(workspace_state, dict):
+            snapshot["workspace"] = deepcopy(workspace_state)
 
         response_payload = {
             key: value
@@ -566,6 +668,8 @@ class RuntimeRunner:
         response_payload.setdefault("chat_id", thread_id)
         response_payload["thread_id"] = thread_id
         response_payload["state"] = deepcopy(snapshot)
+        if isinstance(workspace_state, dict):
+            response_payload["workspace"] = deepcopy(workspace_state)
         response_payload["autonomous"] = directive.to_payload()
 
         response_body = "Emergency stop acknowledged. Autonomous run halted."

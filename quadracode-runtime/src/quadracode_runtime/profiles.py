@@ -5,13 +5,13 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Mapping, Optional
 
 from quadracode_contracts import (
+    HUMAN_CLONE_RECIPIENT,
     HUMAN_RECIPIENT,
     ORCHESTRATOR_RECIPIENT,
     AutonomousRoutingDirective,
 )
 
 from .prompts import BASE_PROMPT
-
 _AUTONOMOUS_MODE_VALUES = {"autonomous", "human_obsolete"}
 _AUTONOMOUS_FLAG_VALUES = {"1", "true", "yes", "on"}
 _AUTONOMOUS_ENV_VARS = (
@@ -19,6 +19,23 @@ _AUTONOMOUS_ENV_VARS = (
     "QUADRACODE_AUTONOMOUS_MODE",
     "HUMAN_OBSOLETE_MODE",
 )
+
+
+def _supervisor_recipient() -> str:
+    """Return the configured supervisor identity (human or human_clone).
+
+    Defaults to HUMAN_RECIPIENT but can be overridden via environment to
+    make HumanClone stand in for the human without any special-mode logic.
+    """
+
+    value = os.environ.get("QUADRACODE_SUPERVISOR_RECIPIENT") or os.environ.get(
+        "QUADRACODE_SUPERVISOR"
+    )
+    normalized = (value or "").strip().lower()
+    if normalized in {HUMAN_CLONE_RECIPIENT, "human_clone"}:
+        return HUMAN_CLONE_RECIPIENT
+    # Fallback to actual human by default
+    return HUMAN_RECIPIENT
 
 
 def is_autonomous_mode_enabled() -> bool:
@@ -159,6 +176,13 @@ class AgentRecipientPolicy(RecipientPolicy):
         return recipients
 
 @dataclass(frozen=True)
+class HumanCloneRecipientPolicy(RecipientPolicy):
+    """Recipient resolution for the HumanClone: always route back to the orchestrator."""
+
+    def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
+        return [ORCHESTRATOR_RECIPIENT]
+
+@dataclass(frozen=True)
 class RuntimeProfile:
     name: str
     default_identity: str
@@ -174,12 +198,12 @@ def _make_orchestrator_profile() -> RuntimeProfile:
 
     if is_autonomous_mode_enabled():
         policy: RecipientPolicy = AutonomousRecipientPolicy(
-            fallback=HUMAN_RECIPIENT,
+            fallback=_supervisor_recipient(),
             include_sender=False,
         )
     else:
         policy = OrchestratorRecipientPolicy(
-            fallback=HUMAN_RECIPIENT,
+            fallback=_supervisor_recipient(),
             include_sender=False,
         )
 
@@ -203,6 +227,34 @@ def _make_agent_profile() -> RuntimeProfile:
         ),
     )
 
+HUMAN_CLONE_PROFILE_CACHE: RuntimeProfile | None = None
+
+HUMAN_CLONE_PROFILE_CACHE: RuntimeProfile | None = None
+
+
+def _make_human_clone_profile() -> RuntimeProfile:
+    try:
+        from quadracode_orchestrator.prompts.human_clone import (
+            HUMAN_CLONE_SYSTEM_PROMPT,
+        )
+    except ImportError as exc:  # pragma: no cover - orchestrator optional
+        raise RuntimeError(
+            "HumanClone profile requires quadracode_orchestrator package to be installed"
+        ) from exc
+    return RuntimeProfile(
+        name="human_clone",
+        default_identity=HUMAN_CLONE_RECIPIENT,
+        system_prompt=HUMAN_CLONE_SYSTEM_PROMPT,
+        policy=HumanCloneRecipientPolicy(),
+    )
+
+
+def get_human_clone_profile() -> RuntimeProfile:
+    global HUMAN_CLONE_PROFILE_CACHE
+    if HUMAN_CLONE_PROFILE_CACHE is None:
+        HUMAN_CLONE_PROFILE_CACHE = _make_human_clone_profile()
+    return HUMAN_CLONE_PROFILE_CACHE
+
 
 ORCHESTRATOR_PROFILE = _make_orchestrator_profile()
 AGENT_PROFILE = _make_agent_profile()
@@ -213,4 +265,6 @@ def load_profile(name: str) -> RuntimeProfile:
         return _make_orchestrator_profile()
     if name == "agent":
         return _make_agent_profile()
+    if name == "human_clone":
+        return get_human_clone_profile()
     raise ValueError(f"Unknown runtime profile: {name}")

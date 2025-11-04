@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import time
 import uuid
 from collections import Counter
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Dict, List, Optional
 
@@ -19,12 +21,29 @@ from streamlit.runtime.scriptrunner_utils.script_run_context import (
 from streamlit.runtime.scriptrunner_utils.script_requests import RerunData
 
 from quadracode_contracts import (
+    HUMAN_CLONE_RECIPIENT,
     HUMAN_RECIPIENT,
     MAILBOX_PREFIX,
     ORCHESTRATOR_RECIPIENT,
     MessageEnvelope,
 )
 from quadracode_contracts.messaging import mailbox_key
+from quadracode_tools.tools.workspace import (
+    workspace_copy_from,
+    workspace_create,
+    workspace_destroy,
+    workspace_exec,
+)
+
+
+def _int_env(var_name: str, default: int) -> int:
+    value = os.environ.get(var_name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
@@ -35,6 +54,11 @@ CONTEXT_METRICS_STREAM = os.environ.get("CONTEXT_METRICS_STREAM", "qc:context:me
 CONTEXT_METRICS_LIMIT = int(os.environ.get("CONTEXT_METRICS_LIMIT", "200"))
 AUTONOMOUS_EVENTS_STREAM = os.environ.get("AUTONOMOUS_EVENTS_STREAM", "qc:autonomous:events")
 AUTONOMOUS_EVENTS_LIMIT = int(os.environ.get("AUTONOMOUS_EVENTS_LIMIT", "200"))
+WORKSPACE_EXPORT_ROOT = Path(os.environ.get("QUADRACODE_WORKSPACE_EXPORT_ROOT", "./workspace_exports")).expanduser()
+WORKSPACE_LOG_TAIL_LINES = _int_env("QUADRACODE_WORKSPACE_LOG_TAIL_LINES", 400)
+WORKSPACE_LOG_LIST_LIMIT = _int_env("QUADRACODE_WORKSPACE_LOG_LIST_LIMIT", 20)
+WORKSPACE_STREAM_PREFIX = os.environ.get("QUADRACODE_WORKSPACE_STREAM_PREFIX", "qc:workspace")
+WORKSPACE_EVENTS_LIMIT = _int_env("QUADRACODE_WORKSPACE_EVENTS_LIMIT", 50)
 
 MAILBOX_ORCHESTRATOR = mailbox_key(ORCHESTRATOR_RECIPIENT)
 MAILBOX_HUMAN = mailbox_key(HUMAN_RECIPIENT)
@@ -45,6 +69,71 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
+def _active_supervisor() -> str:
+    value = st.session_state.get("supervisor_recipient")
+    if value in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT}:
+        return value
+    return HUMAN_RECIPIENT
+
+
+def _set_supervisor(recipient: str, chat_id: str | None = None) -> None:
+    target = recipient if recipient in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT} else HUMAN_RECIPIENT
+    st.session_state.supervisor_recipient = target
+    supervisors = st.session_state.get("chat_supervisors")
+    if not isinstance(supervisors, dict):
+        supervisors = {}
+        st.session_state.chat_supervisors = supervisors
+    if chat_id:
+        supervisors[chat_id] = target
+
+
+def _supervisor_mailbox() -> str:
+    return mailbox_key(_active_supervisor())
+
+
+def _get_last_seen(chat_id: str, supervisor: str) -> str | None:
+    last_seen_map = st.session_state.chat_last_seen  # type: ignore[attr-defined]
+    entry = last_seen_map.get(chat_id) if isinstance(last_seen_map, dict) else None
+    if isinstance(entry, dict):
+        value = entry.get(supervisor)
+        if isinstance(value, str):
+            return value
+        return None
+    if isinstance(entry, str) and supervisor == HUMAN_RECIPIENT:
+        return entry
+    return None
+
+
+def _set_last_seen(chat_id: str, supervisor: str, entry_id: str) -> None:
+    last_seen_map = st.session_state.chat_last_seen  # type: ignore[attr-defined]
+    if not isinstance(last_seen_map, dict):
+        last_seen_map = {}
+        st.session_state.chat_last_seen = last_seen_map  # type: ignore[attr-defined]
+    existing = last_seen_map.get(chat_id)
+    if isinstance(existing, dict):
+        existing[supervisor] = entry_id
+    elif isinstance(existing, str):
+        last_seen_map[chat_id] = {HUMAN_RECIPIENT: existing, supervisor: entry_id}
+    else:
+        last_seen_map[chat_id] = {supervisor: entry_id}
+
+
+def _baseline_last_seen(client: redis.Redis, supervisor: str) -> str:
+    mailbox = mailbox_key(supervisor)
+    latest = client.xrevrange(mailbox, count=1)
+    return latest[0][0] if latest else "0-0"
+
+
+def _reset_last_seen_for_active_chat(client: redis.Redis) -> None:
+    chat_id = st.session_state.chat_id
+    if not chat_id:
+        return
+    supervisor = _active_supervisor()
+    baseline = _baseline_last_seen(client, supervisor)
+    _set_last_seen(chat_id, supervisor, baseline)
+    st.session_state.last_seen_id = baseline
+
+
 def _ensure_session_defaults() -> None:
     st.session_state.setdefault("chats", [])
     st.session_state.setdefault("chat_histories", {})
@@ -53,6 +142,8 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("history", [])  # type: ignore[attr-defined]
     st.session_state.setdefault("last_seen_id", "0-0")
     st.session_state.setdefault("chat_selector", None)
+    st.session_state.setdefault("supervisor_recipient", HUMAN_RECIPIENT)
+    st.session_state.setdefault("chat_supervisors", {})
     st.session_state.setdefault("autonomous_mode_enabled", False)
     st.session_state.setdefault("autonomous_max_iterations", 1000)
     st.session_state.setdefault("autonomous_max_hours", 48.0)
@@ -62,6 +153,9 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("autonomous_max_iterations_input", 1000)
     st.session_state.setdefault("autonomous_max_hours_input", 48.0)
     st.session_state.setdefault("autonomous_max_agents_input", 4)
+    st.session_state.setdefault("workspace_descriptors", {})
+    st.session_state.setdefault("workspace_messages", [])
+    st.session_state.setdefault("workspace_log_selection", {})
 
 
 def _get_chat_entry(chat_id: str) -> Optional[Dict[str, Any]]:
@@ -83,23 +177,32 @@ def _promote_chat(chat_id: str) -> None:
     if entry is not None:
         st.session_state.chats = [entry, *remainder]  # type: ignore[attr-defined]
 
-
-def _baseline_last_seen(client: redis.Redis) -> str:
-    latest = client.xrevrange(MAILBOX_HUMAN, count=1)
-    return latest[0][0] if latest else "0-0"
-
-
 def _set_active_chat(chat_id: str, *, client: Optional[redis.Redis] = None) -> None:
     entry = _get_chat_entry(chat_id)
     if entry is None:
         return
     histories = st.session_state.chat_histories  # type: ignore[attr-defined]
-    last_seen_map = st.session_state.chat_last_seen  # type: ignore[attr-defined]
     history = histories.setdefault(chat_id, [])
-    last_seen = last_seen_map.get(chat_id)
+    supervisors = st.session_state.chat_supervisors  # type: ignore[attr-defined]
+    if not isinstance(supervisors, dict):
+        supervisors = {}
+        st.session_state.chat_supervisors = supervisors  # type: ignore[attr-defined]
+
+    settings_map_candidate = st.session_state.autonomous_chat_settings  # type: ignore[attr-defined]
+    if isinstance(settings_map_candidate, dict):
+        chat_settings = settings_map_candidate.get(chat_id, {})
+    else:
+        chat_settings = {}
+
+    supervisor = supervisors.get(chat_id)
+    if supervisor not in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT}:
+        supervisor = HUMAN_CLONE_RECIPIENT if chat_settings else HUMAN_RECIPIENT
+    _set_supervisor(supervisor, chat_id)
+
+    last_seen = _get_last_seen(chat_id, supervisor)
     if last_seen is None and client is not None:
-        last_seen = _baseline_last_seen(client)
-        last_seen_map[chat_id] = last_seen
+        last_seen = _baseline_last_seen(client, supervisor)
+        _set_last_seen(chat_id, supervisor, last_seen)
     st.session_state.chat_id = chat_id
     st.session_state.history = history  # type: ignore[attr-defined]
     st.session_state.last_seen_id = last_seen or "0-0"
@@ -107,7 +210,10 @@ def _set_active_chat(chat_id: str, *, client: Optional[redis.Redis] = None) -> N
     _promote_chat(chat_id)
 
     settings_map = st.session_state.autonomous_chat_settings  # type: ignore[attr-defined]
-    chat_settings = settings_map.get(chat_id, {}) if isinstance(settings_map, dict) else {}
+    if isinstance(settings_map, dict):
+        chat_settings = settings_map.get(chat_id, {})
+    else:
+        chat_settings = {}
     if chat_settings:
         st.session_state.autonomous_mode_enabled = True
         st.session_state.autonomous_max_iterations = int(chat_settings.get("max_iterations", 1000))
@@ -131,7 +237,9 @@ def _create_chat(client: redis.Redis, *, title: Optional[str] = None) -> str:
     }
     st.session_state.chats = [entry, *st.session_state.chats]  # type: ignore[attr-defined]
     st.session_state.chat_histories[chat_id] = []  # type: ignore[attr-defined]
-    st.session_state.chat_last_seen[chat_id] = _baseline_last_seen(client)  # type: ignore[attr-defined]
+    _set_supervisor(HUMAN_RECIPIENT, chat_id)
+    baseline = _baseline_last_seen(client, HUMAN_RECIPIENT)
+    _set_last_seen(chat_id, HUMAN_RECIPIENT, baseline)
     _set_active_chat(chat_id, client=client)
     return chat_id
 
@@ -142,16 +250,19 @@ def _append_history(
     *,
     ticket_id: str | None = None,
     trace: List[Dict[str, Any]] | None = None,
+    sender: str | None = None,
 ) -> None:
     entry: Dict[str, Any] = {"role": role, "content": content}
     if ticket_id:
         entry["ticket_id"] = ticket_id
     if trace:
         entry["trace"] = trace
+    if sender:
+        entry["sender"] = sender
     st.session_state.history.append(entry)
     chat_id = st.session_state.chat_id
     if chat_id:
-        if role == "human":
+        if role in {"human", "user"}:
             summary = (content or "").strip()
             if summary:
                 chat_entry = _get_chat_entry(chat_id)
@@ -170,7 +281,11 @@ def _render_history() -> None:
     for item in st.session_state.history:  # type: ignore[attr-defined]
         role = item.get("role", "assistant")
         content = item.get("content", "")
-        with st.chat_message(role):
+        display_role = "user" if role in {"human", "user"} else role
+        with st.chat_message(display_role):
+            sender_label = item.get("sender")
+            if sender_label and sender_label != HUMAN_RECIPIENT:
+                st.caption(f"Sender: {sender_label}")
             st.markdown(content or "")
             trace = item.get("trace")
             if trace:
@@ -193,6 +308,11 @@ def _persist_autonomous_settings(chat_id: str | None) -> None:
     if not isinstance(settings_map, dict):
         settings_map = {}
         st.session_state.autonomous_chat_settings = settings_map  # type: ignore[attr-defined]
+    supervisors = st.session_state.chat_supervisors  # type: ignore[attr-defined]
+    if not isinstance(supervisors, dict):
+        supervisors = {}
+        st.session_state.chat_supervisors = supervisors  # type: ignore[attr-defined]
+    supervisors[chat_id] = _active_supervisor()
     if st.session_state.autonomous_mode_enabled:
         settings_map[chat_id] = _current_autonomous_settings()
     else:
@@ -203,6 +323,8 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
     # Orchestrator owns routing. The UI does not set reply_to.
+    supervisor = _active_supervisor()
+    payload["supervisor"] = supervisor
 
     if st.session_state.autonomous_mode_enabled:
         settings = _current_autonomous_settings()
@@ -214,7 +336,7 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
         _persist_autonomous_settings(st.session_state.chat_id)
 
     envelope = MessageEnvelope(
-        sender=HUMAN_RECIPIENT,
+        sender=supervisor,
         recipient=ORCHESTRATOR_RECIPIENT,
         message=message,
         payload=payload,
@@ -227,26 +349,305 @@ def _send_emergency_stop(client: redis.Redis) -> None:
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
     payload["autonomous_control"] = {"action": "emergency_stop"}
+    supervisor = _active_supervisor()
+    payload["supervisor"] = supervisor
     if st.session_state.autonomous_mode_enabled:
         payload["mode"] = "autonomous"
         payload["autonomous_settings"] = _current_autonomous_settings()
         payload.setdefault("task_goal", "Emergency stop")
 
     envelope = MessageEnvelope(
-        sender=HUMAN_RECIPIENT,
+        sender=supervisor,
         recipient=ORCHESTRATOR_RECIPIENT,
         message="Emergency stop requested by human.",
         payload=payload,
     )
     client.xadd(MAILBOX_ORCHESTRATOR, envelope.to_stream_fields())
-    _append_history("human", "‼️ Emergency stop requested", ticket_id=ticket_id)
+    _append_history("user", "‼️ Emergency stop requested", ticket_id=ticket_id, sender=supervisor)
+
+
+def _update_workspace_descriptor(chat_id: str | None, payload: Dict[str, Any]) -> None:
+    if not chat_id:
+        return
+    descriptor = payload.get("workspace")
+    if not isinstance(descriptor, dict):
+        return
+    workspace_map = st.session_state.workspace_descriptors  # type: ignore[attr-defined]
+    if not isinstance(workspace_map, dict):
+        workspace_map = {}
+        st.session_state.workspace_descriptors = workspace_map  # type: ignore[attr-defined]
+    workspace_map[chat_id] = descriptor
+
+
+def _push_workspace_message(kind: str, message: str) -> None:
+    messages = st.session_state.workspace_messages  # type: ignore[attr-defined]
+    if not isinstance(messages, list):
+        messages = []
+    messages.append(
+        {
+            "kind": kind,
+            "message": message,
+            "timestamp": time.time(),
+        }
+    )
+    st.session_state.workspace_messages = messages  # type: ignore[attr-defined]
+
+
+def _active_workspace_descriptor() -> Optional[Dict[str, Any]]:
+    workspace_map = st.session_state.workspace_descriptors  # type: ignore[attr-defined]
+    chat_id = st.session_state.chat_id
+    if isinstance(workspace_map, dict) and isinstance(chat_id, str):
+        descriptor = workspace_map.get(chat_id)
+        if isinstance(descriptor, dict):
+            return descriptor
+    return None
+
+
+def _invoke_workspace_tool(
+    tool: Any,
+    params: Dict[str, Any],
+) -> tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        raw_result = tool.invoke(params)
+    except Exception as exc:  # noqa: BLE001
+        return False, None, str(exc)
+
+    if isinstance(raw_result, dict):
+        parsed = raw_result
+    else:
+        try:
+            parsed = json.loads(raw_result or "{}")
+        except json.JSONDecodeError:
+            return False, None, "Workspace tool returned invalid JSON payload."
+
+    success = bool(parsed.get("success"))
+    if success:
+        return True, parsed, None
+
+    error_message = parsed.get("error")
+    if not error_message:
+        errors = parsed.get("errors")
+        if isinstance(errors, list):
+            error_message = "; ".join(str(entry) for entry in errors if entry)
+    if not error_message and isinstance(parsed.get("message"), str):
+        error_message = str(parsed["message"])
+    if not error_message:
+        error_message = "Workspace operation failed."
+    return False, parsed, error_message
+
+
+def _handle_workspace_create(chat_id: str) -> None:
+    success, data, error_message = _invoke_workspace_tool(
+        workspace_create,
+        {"workspace_id": chat_id},
+    )
+    if success and isinstance(data, dict):
+        descriptor = data.get("workspace")
+        if isinstance(descriptor, dict):
+            workspace_map = st.session_state.workspace_descriptors  # type: ignore[attr-defined]
+            if not isinstance(workspace_map, dict):
+                workspace_map = {}
+                st.session_state.workspace_descriptors = workspace_map  # type: ignore[attr-defined]
+            workspace_map[chat_id] = descriptor
+            _push_workspace_message(
+                "success",
+                f"Workspace ready (image: {descriptor.get('image', 'unknown')}).",
+            )
+        else:
+            _push_workspace_message("warning", "Workspace created but descriptor was not returned.")
+    else:
+        detail = error_message or "unknown error"
+        _push_workspace_message("error", f"Failed to create workspace: {detail}")
+    st.rerun()
+    return None
+
+
+def _handle_workspace_destroy(chat_id: str) -> None:
+    success, data, error_message = _invoke_workspace_tool(
+        workspace_destroy,
+        {
+            "workspace_id": chat_id,
+            "delete_volume": True,
+        },
+    )
+    workspace_map = st.session_state.workspace_descriptors  # type: ignore[attr-defined]
+    if isinstance(workspace_map, dict):
+        workspace_map.pop(chat_id, None)
+    selection_map = st.session_state.workspace_log_selection  # type: ignore[attr-defined]
+    if isinstance(selection_map, dict):
+        selection_map.pop(chat_id, None)
+
+    if success:
+        details = []
+        if isinstance(data, dict):
+            if data.get("container_removed"):
+                details.append("container removed")
+            if data.get("volume_removed"):
+                details.append("volume removed")
+        detail_text = f" ({', '.join(details)})" if details else ""
+        _push_workspace_message("success", f"Workspace destroyed{detail_text}.")
+    else:
+        detail = error_message or "unknown error"
+        _push_workspace_message("error", f"Failed to destroy workspace: {detail}")
+    st.rerun()
+    return None
+
+
+def _handle_workspace_copy_out(chat_id: str, source: str, destination: str) -> None:
+    clean_source = source.strip()
+    if not clean_source:
+        _push_workspace_message("error", "Source path inside the workspace is required.")
+        st.rerun()
+        return None
+    dest_path = Path(destination.strip() or destination)
+    if not destination.strip():
+        dest_path = WORKSPACE_EXPORT_ROOT / chat_id
+    dest_path = dest_path.expanduser()
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    params = {
+        "workspace_id": chat_id,
+        "source_path": clean_source,
+        "destination_path": str(dest_path),
+    }
+    success, data, error_message = _invoke_workspace_tool(workspace_copy_from, params)
+    if success and isinstance(data, dict):
+        copy_result = data.get("workspace_copy")
+        if isinstance(copy_result, dict):
+            transferred = copy_result.get("bytes_transferred")
+        else:
+            transferred = None
+        extra = ""
+        if isinstance(transferred, int):
+            extra = f" ({transferred} bytes)"
+        _push_workspace_message(
+            "success",
+            f"Copied {clean_source} → {dest_path}{extra}.",
+        )
+    else:
+        detail = error_message or "unknown error"
+        _push_workspace_message("error", f"Failed to copy out {clean_source}: {detail}")
+    st.rerun()
+    return None
+
+
+def _invoke_workspace_exec(chat_id: str, command: str) -> tuple[bool, str, str]:
+    success, data, error_message = _invoke_workspace_tool(
+        workspace_exec,
+        {
+            "workspace_id": chat_id,
+            "command": command,
+        },
+    )
+    stdout = ""
+    stderr = ""
+    if isinstance(data, dict):
+        command_result = data.get("workspace_command")
+        if isinstance(command_result, dict):
+            stdout = command_result.get("stdout", "") or ""
+            stderr = command_result.get("stderr", "") or ""
+    if success:
+        return True, stdout, stderr
+    fallback = error_message or stderr
+    return False, stdout, fallback
+
+
+def _list_workspace_logs(chat_id: str) -> List[str]:
+    command = (
+        "if [ -d /workspace/logs ]; then "
+        f"ls -1t /workspace/logs | head -{WORKSPACE_LOG_LIST_LIMIT}; "
+        "fi"
+    )
+    success, stdout, _ = _invoke_workspace_exec(chat_id, command)
+    if not success and not stdout:
+        return []
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def _read_workspace_log(chat_id: str, log_name: str) -> tuple[bool, str]:
+    if not log_name:
+        return False, "Select a log file to preview."
+    safe_path = shlex.quote(f"/workspace/logs/{log_name}")
+    command = (
+        f"if [ -f {safe_path} ]; then "
+        f"tail -n {WORKSPACE_LOG_TAIL_LINES} {safe_path}; "
+        "else "
+        f"echo 'Log not found: {log_name}' >&2; "
+        "exit 1; "
+        "fi"
+    )
+    success, stdout, error_message = _invoke_workspace_exec(chat_id, command)
+    if success:
+        return True, stdout or "(log is empty)"
+    detail = error_message or "Failed to load log file."
+    return False, detail
+
+
+def _workspace_stream_key(workspace_id: str) -> str:
+    suffix = workspace_id.strip()
+    if not suffix:
+        return ""
+    return f"{WORKSPACE_STREAM_PREFIX}:{suffix}:events"
+
+
+def _load_workspace_events(client: redis.Redis, workspace_id: str, limit: int) -> List[Dict[str, Any]]:
+    if limit <= 0:
+        return []
+    stream_key = _workspace_stream_key(workspace_id)
+    if not stream_key:
+        return []
+    try:
+        raw_entries = client.xrevrange(stream_key, count=limit)
+    except redis.ResponseError:
+        return []
+    except redis.RedisError as exc:  # noqa: BLE001
+        st.error(f"Failed to read workspace events: {exc}")
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    for entry_id, fields in raw_entries:
+        event = fields.get("event", "unknown")
+        timestamp = fields.get("timestamp")
+        payload_raw = fields.get("payload")
+        try:
+            payload = json.loads(payload_raw) if payload_raw else {}
+        except json.JSONDecodeError:
+            payload = {"raw_payload": payload_raw}
+        parsed.append(
+            {
+                "id": entry_id,
+                "event": event,
+                "timestamp": timestamp,
+                "payload": payload,
+            }
+        )
+    return parsed
+
+
+def _summarize_workspace_event(payload: Dict[str, Any]) -> str:
+    if not isinstance(payload, dict) or not payload:
+        return ""
+    for key in ("message", "summary", "description", "command"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if "destination" in payload and "source" in payload:
+        return f"{payload['source']} → {payload['destination']}"
+    items = []
+    for key, value in list(payload.items())[:3]:
+        if isinstance(value, (str, int, float)):
+            items.append(f"{key}={value}")
+    summary = ", ".join(items)
+    if summary:
+        return summary
+    return json.dumps(payload, separators=(",", ":"))[:200]
 
 
 def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
     last_id = st.session_state.last_seen_id
+    mailbox = _supervisor_mailbox()
     try:
         # Non-blocking read: omit BLOCK to avoid hanging the Streamlit render thread.
-        responses = client.xread({MAILBOX_HUMAN: last_id}, count=50)
+        responses = client.xread({mailbox: last_id}, count=50)
     except redis.RedisError as exc:  # noqa: BLE001
         st.warning(f"Redis read error: {exc}")
         return []
@@ -254,13 +655,14 @@ def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
     new_last_id = last_id
 
     for stream_key, entries in responses:
-        if stream_key != MAILBOX_HUMAN:
+        if stream_key != mailbox:
             continue
         for entry_id, fields in entries:
             envelope = MessageEnvelope.from_stream_fields(fields)
             payload = envelope.payload or {}
             if payload.get("chat_id") != st.session_state.chat_id:
                 continue
+            _update_workspace_descriptor(st.session_state.chat_id, payload)
             matched.append(envelope)
             if entry_id > new_last_id:
                 new_last_id = entry_id
@@ -269,7 +671,7 @@ def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
         st.session_state.last_seen_id = new_last_id
         chat_id = st.session_state.chat_id
         if chat_id:
-            st.session_state.chat_last_seen[chat_id] = new_last_id  # type: ignore[attr-defined]
+            _set_last_seen(chat_id, _active_supervisor(), new_last_id)
 
     return matched
 
@@ -317,7 +719,8 @@ def _render_stream_view(client: redis.Redis) -> None:
         st.info("No mailboxes discovered yet.")
         return
 
-    default_index = mailboxes.index(MAILBOX_HUMAN) if MAILBOX_HUMAN in mailboxes else 0
+    supervisor_mailbox = _supervisor_mailbox()
+    default_index = mailboxes.index(supervisor_mailbox) if supervisor_mailbox in mailboxes else 0
     selected_stream = st.selectbox(
         "Select stream",
         options=mailboxes,
@@ -651,6 +1054,7 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
     def _watch() -> None:
         known_chat: str | None = st.session_state.get("chat_id")
         last_id: str = st.session_state.get("last_seen_id", "0-0")
+        known_mailbox: str = _supervisor_mailbox()
 
         while not stop_event.is_set():
             active_chat = st.session_state.get("chat_id")
@@ -658,12 +1062,18 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
                 time.sleep(0.25)
                 continue
 
+            mailbox = _supervisor_mailbox()
+
+            if mailbox != known_mailbox:
+                known_mailbox = mailbox
+                last_id = st.session_state.get("last_seen_id", "0-0")
+
             if active_chat != known_chat:
                 last_id = st.session_state.get("last_seen_id", "0-0")
                 known_chat = active_chat
 
             try:
-                responses = client.xread({MAILBOX_HUMAN: last_id}, block=5000, count=50)
+                responses = client.xread({mailbox: last_id}, block=5000, count=50)
             except redis.RedisError:
                 time.sleep(1.0)
                 continue
@@ -674,7 +1084,7 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
             newest_id = last_id
             has_update = False
             for stream_key, entries in responses:
-                if stream_key != MAILBOX_HUMAN:
+                if stream_key != mailbox:
                     continue
                 for entry_id, fields in entries:
                     envelope = MessageEnvelope.from_stream_fields(fields)
@@ -725,6 +1135,7 @@ def main() -> None:
             envelope.message,
             ticket_id=envelope.payload.get("ticket_id"),
             trace=trace_list,
+            sender=envelope.sender,
         )
 
     chat_tab, streams_tab, metrics_tab, autonomous_tab = st.tabs([
@@ -773,12 +1184,18 @@ def main() -> None:
         st.divider()
 
         st.header("Autonomous Mode")
+        prev_supervisor = _active_supervisor()
         auto_enabled = st.toggle(
             "Enable HUMAN_OBSOLETE mode",
             value=st.session_state.autonomous_mode_enabled,
             key="autonomous_mode_toggle",
         )
         st.session_state.autonomous_mode_enabled = auto_enabled
+
+        desired_supervisor = HUMAN_CLONE_RECIPIENT if auto_enabled else HUMAN_RECIPIENT
+        if desired_supervisor != prev_supervisor:
+            _set_supervisor(desired_supervisor, st.session_state.chat_id)
+            _reset_last_seen_for_active_chat(client)
 
         if auto_enabled:
             st.number_input(
@@ -824,6 +1241,197 @@ def main() -> None:
 
         st.divider()
 
+        st.header("Workspace")
+        workspace_messages = st.session_state.workspace_messages  # type: ignore[attr-defined]
+        if isinstance(workspace_messages, list) and workspace_messages:
+            for entry in workspace_messages:
+                kind = entry.get("kind")
+                message = entry.get("message")
+                if not isinstance(message, str):
+                    continue
+                if kind == "success":
+                    st.success(message)
+                elif kind == "warning":
+                    st.warning(message)
+                elif kind == "error":
+                    st.error(message)
+                else:
+                    st.info(message)
+            st.session_state.workspace_messages = []  # type: ignore[attr-defined]
+
+        active_workspace = _active_workspace_descriptor()
+        chat_id = st.session_state.chat_id
+
+        action_cols = st.columns(2)
+        create_disabled = not isinstance(chat_id, str) or active_workspace is not None
+        destroy_disabled = not isinstance(chat_id, str) or active_workspace is None
+        if action_cols[0].button(
+            "Create Workspace",
+            use_container_width=True,
+            disabled=create_disabled,
+        ):
+            if isinstance(chat_id, str):
+                _handle_workspace_create(chat_id)
+        if action_cols[1].button(
+            "Destroy Workspace",
+            type="secondary",
+            use_container_width=True,
+            disabled=destroy_disabled,
+        ):
+            if isinstance(chat_id, str):
+                _handle_workspace_destroy(chat_id)
+
+        if isinstance(active_workspace, dict):
+            info_cols = st.columns(2)
+            info_cols[0].markdown(f"**Image**\n\n`{active_workspace.get('image', 'unknown')}`")
+            info_cols[1].markdown(f"**Mount**\n\n`{active_workspace.get('mount_path', '/workspace')}`")
+            st.caption(
+                f"Container: `{active_workspace.get('container', 'unknown')}`\n\n"
+                f"Volume: `{active_workspace.get('volume', 'unknown')}`"
+            )
+            with st.expander("Descriptor", expanded=False):
+                st.json(active_workspace)
+
+            st.subheader("Copy Out Files")
+            default_destination = str((WORKSPACE_EXPORT_ROOT / chat_id).expanduser()) if isinstance(chat_id, str) else ""
+            with st.form("workspace_copy_from_host"):
+                source_default = "/workspace/"
+                source_value = st.text_input(
+                    "Source path inside workspace",
+                    value=source_default,
+                    key=f"workspace_copy_source_{chat_id}",
+                    help="Copy files or directories from the workspace volume.",
+                )
+                destination_value = st.text_input(
+                    "Destination path on host",
+                    value=default_destination,
+                    key=f"workspace_copy_destination_{chat_id}",
+                    help="Defaults to a per-chat directory under workspace_exports/ if left blank.",
+                )
+                submitted = st.form_submit_button("Copy Out")
+                if submitted and isinstance(chat_id, str):
+                    _handle_workspace_copy_out(chat_id, source_value, destination_value)
+
+            st.subheader("Recent Logs")
+            st.caption("Preview files under `/workspace/logs` (newest first).")
+            logs = []
+            if isinstance(chat_id, str):
+                try:
+                    logs = _list_workspace_logs(chat_id)
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Failed to list logs: {exc}")
+                    logs = []
+            if logs:
+                selection_map = st.session_state.workspace_log_selection  # type: ignore[attr-defined]
+                if not isinstance(selection_map, dict):
+                    selection_map = {}
+                existing_selection = selection_map.get(chat_id) if isinstance(chat_id, str) else None
+                default_index = 0
+                if isinstance(existing_selection, str) and existing_selection in logs:
+                    default_index = logs.index(existing_selection)
+                selected_log = st.selectbox(
+                    "Select log file",
+                    options=logs,
+                    index=default_index,
+                    key=f"workspace_log_select_{chat_id}",
+                    help="Tail view shows the last few hundred lines.",
+                )
+                if isinstance(chat_id, str):
+                    selection_map[chat_id] = selected_log
+                    st.session_state.workspace_log_selection = selection_map  # type: ignore[attr-defined]
+                    success, content = _read_workspace_log(chat_id, selected_log)
+                    if success:
+                        st.code(content, language="text")
+                    else:
+                        st.warning(content)
+            else:
+                st.caption("No logs available yet.")
+
+            st.subheader("Workspace Events")
+            if isinstance(chat_id, str):
+                stream_key = _workspace_stream_key(chat_id)
+                if stream_key:
+                    st.caption(f"Stream: `{stream_key}`")
+                limit_key = f"workspace_events_limit_{chat_id}"
+                if limit_key not in st.session_state:
+                    st.session_state[limit_key] = WORKSPACE_EVENTS_LIMIT
+                controls = st.columns([3, 1])
+                with controls[0]:
+                    limit_value = st.slider(
+                        "Events to load",
+                        min_value=10,
+                        max_value=200,
+                        step=10,
+                        key=limit_key,
+                    )
+                with controls[1]:
+                    if st.button(
+                        "Refresh",
+                        key=f"workspace_events_refresh_{chat_id}",
+                        use_container_width=True,
+                    ):
+                        st.rerun()
+                events = _load_workspace_events(client, chat_id, int(limit_value))
+                if events:
+                    event_types = sorted({entry.get("event", "unknown") or "unknown" for entry in events})
+                    filter_key = f"workspace_events_filter_{chat_id}"
+                    existing_selection = st.session_state.get(filter_key)
+                    if isinstance(existing_selection, list):
+                        sanitized_selection = [event for event in existing_selection if event in event_types]
+                        if not sanitized_selection:
+                            sanitized_selection = event_types
+                    else:
+                        sanitized_selection = event_types
+                    st.session_state[filter_key] = sanitized_selection
+                    selected_types = st.multiselect(
+                        "Event types",
+                        options=event_types,
+                        key=filter_key,
+                        help="Filter workspace events by type.",
+                    )
+                    if not selected_types:
+                        selected_types = event_types
+                        st.session_state[filter_key] = selected_types
+                    filtered_events = [
+                        entry
+                        for entry in events
+                        if entry.get("event", "unknown") in selected_types
+                    ]
+                    if filtered_events:
+                        summaries: List[Dict[str, Any]] = []
+                        for entry in filtered_events:
+                            summary_text = _summarize_workspace_event(entry.get("payload", {}))
+                            if not summary_text:
+                                summary_text = "-"
+                            summaries.append(
+                                {
+                                    "event": entry.get("event", "unknown"),
+                                    "timestamp": entry.get("timestamp") or "",
+                                    "summary": summary_text,
+                                    "id": entry.get("id"),
+                                }
+                            )
+                        st.dataframe(
+                            summaries,
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                        with st.expander("Event details", expanded=False):
+                            for entry in filtered_events:
+                                label_timestamp = entry.get("timestamp") or ""
+                                label_event = entry.get("event", "unknown")
+                                label_id = entry.get("id", "")
+                                st.markdown(f"**{label_timestamp} — {label_event}** `{label_id}`")
+                                st.json(entry.get("payload", {}))
+                    else:
+                        st.caption("No events match the current filters.")
+                else:
+                    st.caption("No workspace events emitted yet.")
+        else:
+            st.caption("No workspace descriptor published yet.")
+
+        st.divider()
+
         st.header("Agent Registry")
         snapshot = _registry_snapshot()
         agents = snapshot.get("agents", [])
@@ -853,7 +1461,7 @@ def main() -> None:
 
         if prompt := st.chat_input("Ask the orchestrator..."):
             ticket = _send_message(client, prompt, reply_to=None)
-            _append_history("human", prompt, ticket_id=ticket)
+            _append_history("user", prompt, ticket_id=ticket, sender=_active_supervisor())
             st.rerun()
 
     with streams_tab:

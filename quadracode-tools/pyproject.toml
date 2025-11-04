@@ -10,8 +10,13 @@ authors = [{ name = "Quadracode Team" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "langchain-core",
-    "httpx"
+    "httpx",
+    "quadracode-contracts",
+    "redis>=5.0"
 ]
+
+[tool.uv.sources]
+quadracode-contracts = { path = "../quadracode-contracts" }
 
 [tool.setuptools]
 package-dir = {"" = "src"}

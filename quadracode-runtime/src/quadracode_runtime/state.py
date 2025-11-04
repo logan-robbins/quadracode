@@ -46,6 +46,7 @@ class RuntimeState(_RuntimeStateRequired, total=False):
     autonomous_routing: Dict[str, Any]
     autonomous_settings: Dict[str, Any]
     thread_id: Optional[str]
+    workspace: Dict[str, Any]
 
 
 class ContextSegment(TypedDict):

@@ -11,9 +11,18 @@ from .messaging import (
     MAILBOX_PREFIX,
     ORCHESTRATOR_RECIPIENT,
     HUMAN_RECIPIENT,
+    HUMAN_CLONE_RECIPIENT,
     mailbox_key,
     mailbox_recipient,
     agent_mailbox,
+)
+from .workspace import (
+    DEFAULT_WORKSPACE_MOUNT,
+    WorkspaceDescriptor,
+    WorkspaceCommandResult,
+    WorkspaceCopyResult,
+    collect_environment_keys,
+    normalize_workspace_name,
 )
 
 __all__ = [
@@ -21,6 +30,7 @@ __all__ = [
     "MAILBOX_PREFIX",
     "ORCHESTRATOR_RECIPIENT",
     "HUMAN_RECIPIENT",
+    "HUMAN_CLONE_RECIPIENT",
     "mailbox_key",
     "mailbox_recipient",
     "agent_mailbox",
@@ -28,6 +38,12 @@ __all__ = [
     "AutonomousCheckpointRecord",
     "AutonomousCritiqueRecord",
     "AutonomousEscalationRecord",
+    "DEFAULT_WORKSPACE_MOUNT",
+    "WorkspaceDescriptor",
+    "WorkspaceCommandResult",
+    "WorkspaceCopyResult",
+    "collect_environment_keys",
+    "normalize_workspace_name",
 ]
 
 __version__ = "0.1.0"

@@ -17,6 +17,12 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 COMPOSE_CMD = ["docker", "compose", "-f", str(COMPOSE_FILE)]
 AGENT_ID = "agent-runtime"
+REQUIRED_ENV_VARS = [
+    "ANTHROPIC_API_KEY",
+]
+
+SUPERVISOR_RECIPIENT = os.environ.get("QUADRACODE_SUPERVISOR_RECIPIENT", "human")
+SUPERVISOR_MAILBOX = f"qc:mailbox/{SUPERVISOR_RECIPIENT}"
 
 
 logger = logging.getLogger(__name__)
@@ -268,9 +274,10 @@ def log_stream_snapshot(stream: str, *, limit: int = 5) -> None:
 
 def send_message_to_orchestrator(message: str, reply_to: str | None = None) -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    payload = json.dumps({}, separators=(",", ":"))
+    payload_obj: dict[str, str] = {"supervisor": SUPERVISOR_RECIPIENT}
     if reply_to:
-        payload = json.dumps({"reply_to": reply_to}, separators=(",", ":"))
+        payload_obj["reply_to"] = reply_to
+    payload = json.dumps(payload_obj, separators=(",", ":"))
     redis_cli(
         "XADD",
         "qc:mailbox/orchestrator",
@@ -278,7 +285,7 @@ def send_message_to_orchestrator(message: str, reply_to: str | None = None) -> N
         "timestamp",
         timestamp,
         "sender",
-        "human",
+        SUPERVISOR_RECIPIENT,
         "recipient",
         "orchestrator",
         "message",
@@ -291,17 +298,23 @@ def send_message_to_orchestrator(message: str, reply_to: str | None = None) -> N
 def wait_for_human_response(baseline_id: str, *, timeout: int = 120) -> dict[str, str]:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        for entry_id, fields in read_stream("qc:mailbox/human"):
+        for entry_id, fields in read_stream(SUPERVISOR_MAILBOX):
             if stream_id_gt(entry_id, baseline_id):
                 return fields
         time.sleep(2)
     raise TimeoutError("Timed out waiting for response on human mailbox")
 
+def require_prerequisites() -> None:
+    if shutil.which("docker") is None:
+        pytest.fail("Docker CLI must be installed and available on PATH for end-to-end tests")
+    missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+    if missing:
+        pytest.fail(f"Missing required environment variables for real LLM calls: {', '.join(missing)}")
+
 
 @pytest.mark.e2e
 def test_orchestrator_round_trip():
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for end-to-end test")
+    require_prerequisites()
 
     run_compose(["down", "-v"], check=False)
     run_compose(
@@ -332,7 +345,7 @@ def test_orchestrator_round_trip():
         assert stats_payload.get("healthy_agents", 0) >= 1
         redis_cli("FLUSHALL")
 
-        baseline_id = get_last_stream_id("qc:mailbox/human")
+        baseline_id = get_last_stream_id(SUPERVISOR_MAILBOX)
         agent_stream = f"qc:mailbox/{AGENT_ID}"
         baseline_agent_last_id = stream_last_generated_id(agent_stream)
         baseline_agent_entries = stream_entries_added(agent_stream) or 0
@@ -345,7 +358,7 @@ def test_orchestrator_round_trip():
             baseline_agent_entries,
             baseline_orchestrator_entries,
         )
-        log_stream_snapshot("qc:mailbox/human")
+        log_stream_snapshot(SUPERVISOR_MAILBOX)
         log_stream_snapshot(agent_stream)
         log_stream_snapshot("qc:mailbox/orchestrator")
 
@@ -354,7 +367,7 @@ def test_orchestrator_round_trip():
         logger.info("Human received fields: sender=%s recipient=%s", response_fields.get("sender"), response_fields.get("recipient"))
 
         assert response_fields.get("sender") == "orchestrator"
-        assert response_fields.get("recipient") == "human"
+        assert response_fields.get("recipient") == SUPERVISOR_RECIPIENT
 
         response_message = response_fields.get("message")
         assert response_message is not None, "orchestrator returned empty response"
@@ -402,7 +415,7 @@ def test_orchestrator_round_trip():
         )
         log_stream_snapshot(agent_stream)
         log_stream_snapshot("qc:mailbox/orchestrator")
-        log_stream_snapshot("qc:mailbox/human")
+        log_stream_snapshot(SUPERVISOR_MAILBOX)
 
         metrics_entries = wait_for_context_metrics(metrics_baseline_id)
         context_snapshots: list[dict[str, object]] = []
@@ -436,7 +449,7 @@ def test_orchestrator_round_trip():
         ), "Load metrics lacked segment details"
 
         # Ask orchestrator to report on registry state and confirm tool usage.
-        second_baseline = get_last_stream_id("qc:mailbox/human")
+        second_baseline = get_last_stream_id(SUPERVISOR_MAILBOX)
         send_message_to_orchestrator(
             "How many agents do you have and what is their status?",
         )
@@ -503,8 +516,7 @@ def test_orchestrator_round_trip():
 
 @pytest.mark.e2e
 def test_context_engine_tunable_thresholds():
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is required for end-to-end test")
+    require_prerequisites()
 
     # Lower thresholds to force curation/externalization and tool reduction
     extra_env = {
@@ -567,7 +579,7 @@ def test_context_engine_tunable_thresholds():
         assert "load" in events and "pre_process" in events
 
         # Now encourage a tool call; the second turn's pre_process should trigger curation/externalize
-        second_baseline = get_last_stream_id("qc:mailbox/human")
+        second_baseline = get_last_stream_id(SUPERVISOR_MAILBOX)
         metrics_baseline_second = get_last_stream_id("qc:context:metrics")
         send_message_to_orchestrator(
             "How many agents are registered? Provide details using the agent_registry tool.",

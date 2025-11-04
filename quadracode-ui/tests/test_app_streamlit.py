@@ -33,6 +33,8 @@ class FakeRedis:
         self.xadd_envelopes: List[Tuple[str, MessageEnvelope]] = []
         self.metrics_stream = metrics_stream
         self.metrics_entries: List[Tuple[str, Dict[str, str]]] = []
+        self.workspace_descriptor: Dict[str, Any] | None = None
+        self.workspace_events: List[Tuple[str, Dict[str, str]]] = []
         self._populate_metrics()
 
     def ping(self) -> None:
@@ -49,7 +51,9 @@ class FakeRedis:
         ticket_id: str,
         entry_id: str,
     ) -> Tuple[str, Dict[str, str]]:
-        payload = {"chat_id": chat_id, "ticket_id": ticket_id, "messages": []}
+        payload: Dict[str, Any] = {"chat_id": chat_id, "ticket_id": ticket_id, "messages": []}
+        if self.workspace_descriptor:
+            payload["workspace"] = self.workspace_descriptor
         envelope = MessageEnvelope(
             sender=ORCHESTRATOR_RECIPIENT,
             recipient=HUMAN_RECIPIENT,
@@ -62,6 +66,8 @@ class FakeRedis:
         if key != MAILBOX_HUMAN:
             if key == self.metrics_stream:
                 return list(reversed(self.metrics_entries))[:count]
+            if key.startswith("qc:workspace:"):
+                return self.workspace_events[:count]
             return []
 
         from streamlit import session_state as ss
@@ -272,3 +278,55 @@ def test_load_context_metrics_parses_extended_events(fake_redis: FakeRedis) -> N
     assert load_entries
     serialized = json.dumps(load_entries[0]["payload"])
     assert "skill:debugging-playbook" in serialized
+
+
+def test_workspace_panel_renders_descriptor_and_events(fake_redis: FakeRedis) -> None:
+    from quadracode_ui import app as app_module
+
+    descriptor = {
+        "workspace_id": "chat-workspace",
+        "volume": "qc-ws-chat-workspace",
+        "container": "qc-ws-chat-workspace-ctr",
+        "mount_path": "/workspace",
+        "image": "quadracode-workspace:latest",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    fake_redis.workspace_descriptor = descriptor
+    fake_redis.workspace_events = [
+        (
+            "3-0",
+            {
+                "event": "workspace_created",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": json.dumps({"message": "provisioned"}),
+            },
+        ),
+        (
+            "4-0",
+            {
+                "event": "command_executed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": json.dumps({"command": "pytest", "returncode": 0}),
+            },
+        ),
+    ]
+
+    tester = AppTest.from_function(run_app, default_timeout=3.0)
+    tester.run()
+
+    workspace_headers = [header.value for header in tester.sidebar.header]
+    assert "Workspace" in workspace_headers
+
+    # The workspace events table is the last dataframe rendered in the sidebar.
+    assert tester.sidebar.dataframe
+    events_df = tester.sidebar.dataframe[-1].value
+    assert {"workspace_created", "command_executed"}.issubset(set(events_df["event"]))
+
+    # Multiselect should offer both event types as filters.
+    assert tester.sidebar.multiselect
+    multiselect_widget = tester.sidebar.multiselect[-1]
+    assert set(multiselect_widget.options) >= {"workspace_created", "command_executed"}
+
+    # Stream caption should reference the workspace volume.
+    stream_caption_values = [caption.value for caption in tester.sidebar.caption]
+    assert any(descriptor["volume"] in text for text in stream_caption_values)

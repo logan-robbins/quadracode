@@ -1237,6 +1237,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langgraph-cli", extra = ["inmem"] },
+    { name = "orchestrator" },
     { name = "quadracode-runtime" },
     { name = "quadracode-tools" },
 ]
@@ -1249,6 +1250,7 @@ requires-dist = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langgraph-cli", extras = ["inmem"] },
+    { name = "orchestrator", virtual = "quadracode-orchestrator" },
     { name = "quadracode-runtime", directory = "quadracode-runtime" },
     { name = "quadracode-tools", directory = "quadracode-tools" },
 ]
@@ -1350,12 +1352,16 @@ source = { editable = "quadracode-tools" }
 dependencies = [
     { name = "httpx" },
     { name = "langchain-core" },
+    { name = "quadracode-contracts" },
+    { name = "redis" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx" },
     { name = "langchain-core" },
+    { name = "quadracode-contracts", directory = "quadracode-contracts" },
+    { name = "redis", specifier = ">=5.0" },
 ]
 
 [[package]]
@@ -1365,6 +1371,7 @@ source = { editable = "quadracode-ui" }
 dependencies = [
     { name = "httpx" },
     { name = "quadracode-contracts" },
+    { name = "quadracode-tools" },
     { name = "redis" },
     { name = "streamlit" },
 ]
@@ -1374,6 +1381,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'tests'", specifier = ">=8.2" },
     { name = "quadracode-contracts", directory = "quadracode-contracts" },
+    { name = "quadracode-tools", directory = "quadracode-tools" },
     { name = "redis", specifier = ">=5.0" },
     { name = "streamlit", specifier = ">=1.38" },
 ]

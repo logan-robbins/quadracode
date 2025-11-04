@@ -8,7 +8,8 @@ FROM arm64v8/python:3.12-slim
 ENV PATH="/root/.cargo/bin:/root/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_ENVIRONMENT=docker
+    UV_ENVIRONMENT=docker \
+    PYTHONPATH="/app/quadracode-orchestrator:${PYTHONPATH}"
 
 # Install UV (fast Python package manager)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,9 +27,11 @@ WORKDIR /app
 COPY quadracode-contracts/ quadracode-contracts/
 COPY quadracode-tools/ quadracode-tools/
 COPY quadracode-runtime/ quadracode-runtime/
+COPY quadracode-orchestrator/ quadracode-orchestrator/
 
 RUN cd quadracode-contracts && uv pip install --system -e . && \
-    cd /app/quadracode-runtime && uv pip install --system -e .
+    cd /app/quadracode-runtime && uv pip install --system -e . && \
+    cd /app/quadracode-orchestrator && uv pip install --system -e .
 
 # Prepare agent project workspace (../quadracode-tools references stay valid)
 WORKDIR /app/quadracode-agent
