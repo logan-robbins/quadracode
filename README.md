@@ -208,7 +208,21 @@ All services treat payload fields as opaque except for threading/routing attribu
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 
-### 1. Launch Services (Docker)
+### 1. Configure Environment
+
+Copy the samples and add your API keys (at minimum set `ANTHROPIC_API_KEY` for live LLM calls and e2e tests):
+
+```bash
+cp .env.sample .env
+cp .env.docker.sample .env.docker
+# Edit both files and add your keys
+```
+
+Notes
+- `.env` is used by local tooling and host processes (UI, tests).
+- `.env.docker` is mounted into containers by Compose so services inherit the same keys.
+
+### 2. Launch Services (Docker)
 
 ```bash
 # Bring up Redis, registry, orchestrator, and agent runtimes
@@ -220,7 +234,7 @@ docker compose ps
 
 The orchestrator will have access to the Docker socket and can spawn additional agents dynamically as workload requires.
 
-### 2. Run the UI
+### 3. Run the UI
 
 ```bash
 # Create virtual environment (one-time setup)
@@ -235,7 +249,7 @@ REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
   uv run streamlit run quadracode-ui/src/quadracode_ui/app.py
 ```
 
-### 3. Access the UI
+### 4. Access the UI
 
 Open http://localhost:8501 and start a conversation. The orchestrator will delegate work to agents and dynamically scale the fleet as needed. You'll see real-time updates as the system processes your request.
 
@@ -289,6 +303,7 @@ docker compose up -d ui
 - **Agent registry**: http://localhost:8090
 - **Redis CLI**: `docker compose exec -T redis redis-cli ...`
 - **Stream tailer**: `bash scripts/tail_streams.sh`
+ - **Workspace purge**: `bash scripts/agent-management/purge-workspaces.sh --dry-run`
 
 ## Kubernetes Deployment
 
@@ -355,27 +370,14 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 ### Testing
 
 ```bash
-# Autonomous mode unit regression (routing, guardrails, emergency stop)
-uv run pytest quadracode-runtime/tests/test_autonomous_mode.py -q
+# Full end-to-end (spins Docker, requires real API keys)
+uv run pytest tests/e2e -m e2e -q
 
-# Streamlit UI helpers (parsers, autonomous settings persistence)
-uv run pytest quadracode-ui/tests/test_autonomous_ui.py -q
-
-# Runtime memory regression (checkpoint persistence)
-uv run pytest tests/test_runtime_memory.py
-
-# End-to-end (orchestrates Docker Compose, validates registry/tools/chat, and hits live Anthropic endpoints)
-uv run pytest tests/e2e -m e2e
-
-# UI integration (live Redis, no stubs)
-uv run pytest quadracode-ui/tests -m integration -q
-
-# UI E2E (full stack, UI runs locally via AppTest)
-# Prerequisite: docker compose up redis agent-registry orchestrator-runtime agent-runtime
-uv run pytest quadracode-ui/tests -m e2e -q
+# UI integration (uses a stubbed Redis client inside the test harness)
+uv run pytest quadracode-ui/tests -q
 ```
 
-> **Tip:** Custom pytest marks (`integration`, `e2e`) are registered in `pytest.ini`, so the command line snippets above run without additional flags. For live UI tests ensure Docker services are up first (see commands below).
+> See TESTS.md for testing rules. All tests in `tests/e2e` are full-stack and require valid keys.
 
 ### End‑to‑End Requirements
 
