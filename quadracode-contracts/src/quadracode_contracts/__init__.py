@@ -2,9 +2,15 @@
 
 from .autonomous import (
     AutonomousCheckpointRecord,
-    AutonomousCritiqueRecord,
     AutonomousEscalationRecord,
     AutonomousRoutingDirective,
+    CritiqueCategory,
+    CritiqueSeverity,
+    HypothesisCritiqueRecord,
+)
+from .human_clone import (
+    HumanCloneExhaustionMode,
+    HumanCloneTrigger,
 )
 from .messaging import (
     MessageEnvelope,
@@ -21,6 +27,7 @@ from .workspace import (
     WorkspaceDescriptor,
     WorkspaceCommandResult,
     WorkspaceCopyResult,
+    WorkspaceSnapshotRecord,
     collect_environment_keys,
     normalize_workspace_name,
 )
@@ -36,12 +43,17 @@ __all__ = [
     "agent_mailbox",
     "AutonomousRoutingDirective",
     "AutonomousCheckpointRecord",
-    "AutonomousCritiqueRecord",
     "AutonomousEscalationRecord",
+    "CritiqueCategory",
+    "CritiqueSeverity",
+    "HypothesisCritiqueRecord",
+    "HumanCloneTrigger",
+    "HumanCloneExhaustionMode",
     "DEFAULT_WORKSPACE_MOUNT",
     "WorkspaceDescriptor",
     "WorkspaceCommandResult",
     "WorkspaceCopyResult",
+    "WorkspaceSnapshotRecord",
     "collect_environment_keys",
     "normalize_workspace_name",
 ]

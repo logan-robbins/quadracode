@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, List, Optional, Literal
 
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
@@ -80,13 +81,34 @@ class AutonomousCheckpointRecord(BaseModel):
     recorded_at: str = Field(default_factory=_utc_now)
 
 
-class AutonomousCritiqueRecord(BaseModel):
-    """Self-critique entry emitted during autonomous execution."""
+class CritiqueCategory(str, Enum):
+    """Categorisation buckets for hypothesis critiques."""
 
-    action_taken: str = Field(..., min_length=1)
-    outcome: str = Field(..., min_length=1)
-    quality_assessment: Literal["good", "adequate", "poor"]
-    improvements: List[str] = Field(default_factory=list)
+    CODE_QUALITY = "code_quality"
+    ARCHITECTURE = "architecture"
+    TEST_COVERAGE = "test_coverage"
+    PERFORMANCE = "performance"
+
+
+class CritiqueSeverity(str, Enum):
+    """Severity rankings used to prioritise critiques."""
+
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class HypothesisCritiqueRecord(BaseModel):
+    """Structured critique data tied to a refinement hypothesis."""
+
+    cycle_id: str = Field(..., min_length=1)
+    hypothesis: str = Field(..., min_length=1)
+    critique_summary: str = Field(..., min_length=1)
+    qualitative_feedback: str = Field(..., min_length=1)
+    category: CritiqueCategory
+    severity: CritiqueSeverity
+    evidence: List[str] = Field(default_factory=list)
     recorded_at: str = Field(default_factory=_utc_now)
 
 
@@ -103,6 +125,8 @@ class AutonomousEscalationRecord(BaseModel):
 __all__ = [
     "AutonomousRoutingDirective",
     "AutonomousCheckpointRecord",
-    "AutonomousCritiqueRecord",
+    "CritiqueCategory",
+    "CritiqueSeverity",
+    "HypothesisCritiqueRecord",
     "AutonomousEscalationRecord",
 ]

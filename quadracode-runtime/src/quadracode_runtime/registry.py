@@ -4,11 +4,13 @@ import asyncio
 import logging
 import os
 from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Optional
 
-from quadracode_tools.tools.agent_registry import agent_registry_tool
+import httpx
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -29,16 +31,39 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        LOGGER.warning("Invalid float for %s=%s; using %.2f", name, raw, default)
+        return default
+
+
 class AgentRegistryIntegration:
     """Manage agent registration and heartbeat lifecycle with the registry service."""
 
-    def __init__(self, agent_id: str, *, host: str, port: int, interval: int) -> None:
+    def __init__(
+        self,
+        agent_id: str,
+        *,
+        host: str,
+        port: int,
+        interval: int,
+        base_url: str,
+        timeout: float,
+    ) -> None:
         self._agent_id = agent_id
         self._host = host
         self._port = port
         self._interval = max(5, interval)
         self._registered = False
         self._task: Optional[asyncio.Task[None]] = None
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout if timeout > 0 else DEFAULT_TIMEOUT_SECONDS
+        self._client: Optional[httpx.AsyncClient] = None
 
     @classmethod
     def from_environment(cls, profile_name: str, agent_id: str) -> Optional["AgentRegistryIntegration"]:
@@ -56,11 +81,23 @@ class AgentRegistryIntegration:
         )
         port = _env_int("QUADRACODE_AGENT_PORT", 8123)
         interval = _env_int("QUADRACODE_AGENT_HEARTBEAT_INTERVAL", 15)
-        return cls(agent_id, host=host, port=port, interval=interval)
+        timeout = _env_float("QUADRACODE_AGENT_REGISTRY_TIMEOUT", DEFAULT_TIMEOUT_SECONDS)
+        base_url = os.environ.get("AGENT_REGISTRY_URL", "http://quadracode-agent-registry:8090")
+        return cls(
+            agent_id,
+            host=host,
+            port=port,
+            interval=interval,
+            base_url=base_url,
+            timeout=timeout,
+        )
 
     async def start(self) -> None:
         if self._task:
             return
+        print("[AgentRegistryIntegration] start() invoked")
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
         success = await self._register()
         if not success:
             LOGGER.warning("Initial agent registry registration failed; will retry in heartbeat loop")
@@ -74,6 +111,9 @@ class AgentRegistryIntegration:
             self._task = None
         if self._registered:
             await self._unregister()
+        if self._client:
+            await self._client.aclose()
+            self._client = None
 
     async def _heartbeat_loop(self) -> None:
         try:
@@ -87,53 +127,73 @@ class AgentRegistryIntegration:
                 await asyncio.sleep(self._interval)
         except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
             raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.warning("Agent registry heartbeat loop stopped due to error: %s", exc)
 
     async def _register(self) -> bool:
-        payload = {
-            "operation": "register_agent",
-            "agent_id": self._agent_id,
-            "host": self._host,
-            "port": self._port,
-        }
-        response = await agent_registry_tool.ainvoke(payload)
-        if _looks_like_error(response):
-            LOGGER.warning("Agent registry registration error: %s", response)
-            self._registered = False
-            return False
-        LOGGER.info(
-            "Registered agent %s with registry (%s:%s)",
+        print(
+            f"[AgentRegistryIntegration] registering agent_id={self._agent_id} "
+            f"host={self._host} port={self._port} base_url={self._base_url}"
+        )
+        success = await self._request(
+            "POST",
+            "/agents/register",
+            {
+                "agent_id": self._agent_id,
+                "host": self._host,
+                "port": self._port,
+            },
+        )
+        if success:
+            LOGGER.info(
+                "Registered agent %s with registry (%s:%s)",
+                self._agent_id,
+                self._host,
+                self._port,
+            )
+            self._registered = True
+            return True
+        LOGGER.warning(
+            "Agent registry registration failed for %s (host=%s port=%s)",
             self._agent_id,
             self._host,
             self._port,
         )
-        self._registered = True
-        return True
+        self._registered = False
+        return False
 
     async def _heartbeat(self) -> bool:
-        payload = {
-            "operation": "heartbeat",
-            "agent_id": self._agent_id,
-            "status": "healthy",
-        }
-        response = await agent_registry_tool.ainvoke(payload)
-        if _looks_like_error(response):
-            LOGGER.warning("Agent heartbeat failed: %s", response)
-            return False
-        LOGGER.debug("Heartbeat acknowledged for agent %s", self._agent_id)
-        return True
+        print(f"[AgentRegistryIntegration] heartbeat agent_id={self._agent_id}")
+        success = await self._request(
+            "POST",
+            f"/agents/{self._agent_id}/heartbeat",
+            {
+                "agent_id": self._agent_id,
+                "status": "healthy",
+                "reported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+        )
+        if not success:
+            LOGGER.warning("Agent heartbeat failed for %s", self._agent_id)
+        return bool(success)
 
     async def _unregister(self) -> None:
-        payload = {"operation": "unregister_agent", "agent_id": self._agent_id}
-        response = await agent_registry_tool.ainvoke(payload)
-        if _looks_like_error(response):
-            LOGGER.warning("Agent unregister failed: %s", response)
-        else:
+        success = await self._request("DELETE", f"/agents/{self._agent_id}")
+        if success:
             LOGGER.info("Unregistered agent %s from registry", self._agent_id)
+        else:
+            LOGGER.warning("Agent unregister failed for %s", self._agent_id)
         self._registered = False
 
-
-def _looks_like_error(message: str) -> bool:
-    lowered = message.strip().lower()
-    if not lowered:
-        return True
-    return lowered.startswith("registry request failed") or lowered.startswith("unable to reach")
+    async def _request(self, method: str, path: str, payload: Optional[dict] = None) -> bool:
+        if not self._client:
+            raise RuntimeError("Agent registry client not initialized")
+        url = f"{self._base_url}{path}"
+        try:
+            response = await self._client.request(method, url, json=payload)
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError as exc:
+            print(f"[AgentRegistryIntegration] request error {method} {url}: {exc}")
+            LOGGER.warning("Agent registry %s %s failed: %s", method.upper(), url, exc)
+            return False

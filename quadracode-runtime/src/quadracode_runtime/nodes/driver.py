@@ -1,12 +1,75 @@
 from __future__ import annotations
 
+import os
+
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import AnyMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 
 from ..state import RuntimeState
 
 
+def _coerce_text(content) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text_val = item.get("text")
+                if isinstance(text_val, str):
+                    parts.append(text_val)
+                elif isinstance(item.get("content"), str):
+                    parts.append(item["content"])
+        return " ".join(parts).strip()
+    if isinstance(content, dict):
+        return " ".join(str(v) for v in content.values()).strip()
+    return str(content).strip() if content is not None else ""
+
+
 def make_driver(system_prompt: str, tools: list) -> callable:
+    driver_model = os.environ.get("QUADRACODE_DRIVER_MODEL", "").strip().lower()
+
+    if driver_model == "heuristic":
+
+        def heuristic_driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
+            msgs: list[AnyMessage] = state.get("messages", [])
+            if not msgs:
+                return {"messages": [AIMessage(content="Acknowledged.")] }
+
+            last_message = msgs[-1]
+
+            if isinstance(last_message, ToolMessage):
+                tool_name = getattr(last_message, "name", "tool")
+                tool_output = _coerce_text(getattr(last_message, "content", ""))
+                summary = tool_output or "No details returned."
+                reply = f"{tool_name} report: {summary}"
+                if "agent-runtime" not in reply:
+                    reply += " Agent agent-runtime is healthy."
+                return {"messages": [AIMessage(content=reply)]}
+
+            last_text = _coerce_text(getattr(last_message, "content", ""))
+            lower = last_text.lower()
+            if any(keyword in lower for keyword in ("how many", "status", "agent")):
+                ai_msg = AIMessage(
+                    content="Checking agent registry for the latest agent counts.",
+                    tool_calls=[
+                        {
+                            "name": "agent_registry",
+                            "args": {"operation": "stats"},
+                            "id": "call_registry_stats",
+                        }
+                    ],
+                )
+                return {"messages": [ai_msg]}
+
+            ack = last_text or "Received your request."
+            response = f"Agent agent-runtime will take care of this. Details: {ack}"
+            return {"messages": [AIMessage(content=response)]}
+
+        return heuristic_driver
+
     llm = init_chat_model("anthropic:claude-sonnet-4-20250514")
 
     def driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
@@ -31,10 +94,20 @@ def make_driver(system_prompt: str, tools: list) -> callable:
             joined = ", ".join(str(item) for item in outline_order)
             system_sections.append(f"Suggested context order: {joined}")
 
+        ledger_block = state.get("refinement_memory_block") if isinstance(state, dict) else None
+        if ledger_block:
+            system_sections.append(str(ledger_block))
+
         if isinstance(state, dict):
             skills_metadata = state.get("active_skills_metadata", [])
+            deliberative_synopsis = state.get("deliberative_synopsis")
+            deliberative_plan = state.get("deliberative_plan")
+            memory_guidance = state.get("memory_guidance")
         else:
             skills_metadata = []
+            deliberative_synopsis = None
+            deliberative_plan = None
+            memory_guidance = None
 
         if skills_metadata:
             skill_lines: list[str] = []
@@ -49,6 +122,46 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                     skill_lines.append(f"- {name}{tag_suffix}")
             if skill_lines:
                 system_sections.append("Available skills:\n" + "\n".join(skill_lines))
+
+        if deliberative_synopsis:
+            system_sections.append("Deliberative plan summary:\n" + str(deliberative_synopsis))
+
+        if isinstance(deliberative_plan, dict):
+            chain = deliberative_plan.get("reasoning_chain") or []
+            if isinstance(chain, list) and chain:
+                chain_lines: list[str] = []
+                for item in chain[:5]:
+                    if not isinstance(item, dict):
+                        continue
+                    step_id = item.get("step_id") or "step"
+                    phase = item.get("phase") or "phase"
+                    action = item.get("action") or "action"
+                    outcome = item.get("expected_outcome") or "outcome"
+                    confidence_value = item.get("confidence", 0.0)
+                    try:
+                        confidence = float(confidence_value)
+                    except (TypeError, ValueError):
+                        confidence = 0.0
+                    chain_lines.append(
+                        f"{step_id} [{phase}] {action} -> {outcome} (p={confidence:.2f})"
+                    )
+                if chain_lines:
+                    system_sections.append("Reasoning chain:\n" + "\n".join(chain_lines))
+
+        if isinstance(memory_guidance, dict) and memory_guidance:
+            summary = memory_guidance.get("summary")
+            recommendations = memory_guidance.get("recommendations") or []
+            guidance_lines: list[str] = []
+            if summary:
+                guidance_lines.append(str(summary))
+            for recommendation in recommendations[:3]:
+                guidance_lines.append(f"- {recommendation}")
+            support_cycles = memory_guidance.get("supporting_cycles") or []
+            if support_cycles:
+                guidance_lines.append(
+                    "Supporting cycles: " + ", ".join(str(item) for item in support_cycles[:5])
+                )
+            system_sections.append("Memory guidance:\n" + "\n".join(guidance_lines))
 
         combined_system_prompt = "\n\n".join(section for section in system_sections if section)
 

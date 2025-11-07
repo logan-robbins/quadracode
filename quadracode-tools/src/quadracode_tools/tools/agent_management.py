@@ -6,9 +6,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
+import httpx
+
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, root_validator
 from quadracode_contracts import DEFAULT_WORKSPACE_MOUNT
+from .agent_registry import _registry_base_url, DEFAULT_TIMEOUT
 
 
 class AgentManagementRequest(BaseModel):
@@ -19,10 +22,13 @@ class AgentManagementRequest(BaseModel):
         "delete_agent",
         "list_containers",
         "get_container_status",
+        "mark_hotpath",
+        "clear_hotpath",
+        "list_hotpath",
     ] = Field(
         ...,
         description="Agent management operation to perform: "
-        "spawn_agent|delete_agent|list_containers|get_container_status",
+        "spawn_agent|delete_agent|list_containers|get_container_status|mark_hotpath|clear_hotpath|list_hotpath",
     )
     agent_id: Optional[str] = Field(
         default=None,
@@ -55,7 +61,7 @@ class AgentManagementRequest(BaseModel):
         op = values.get("operation")
         agent_id = values.get("agent_id")
 
-        if op in {"delete_agent", "get_container_status"} and not agent_id:
+        if op in {"delete_agent", "get_container_status", "mark_hotpath", "clear_hotpath"} and not agent_id:
             raise ValueError(f"{op} requires agent_id")
 
         workspace_volume = values.get("workspace_volume")
@@ -180,6 +186,8 @@ def agent_management_tool(
     - `list_containers`: List all running agent containers/pods
     - `get_container_status`: Get detailed status of a specific agent
       - Requires `agent_id`
+    - `mark_hotpath` / `clear_hotpath`: Toggle registry hotpath residency (requires `agent_id`)
+    - `list_hotpath`: Inspect all agents marked as hotpath in the registry
 
     Platform Support:
     - Docker: Default, uses Docker CLI and docker-compose networks
@@ -257,6 +265,17 @@ def agent_management_tool(
         return json.dumps(response, indent=2)
 
     if params.operation == "delete_agent":
+        if params.agent_id and _is_hotpath_agent(params.agent_id):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "hotpath_agent",
+                    "message": (
+                        f"Agent {params.agent_id} is marked as hotpath and must be cleared before deletion."
+                    ),
+                },
+                indent=2,
+            )
         response = _run_script("delete-agent.sh", params.agent_id)  # type: ignore[arg-type]
         return json.dumps(response, indent=2)
 
@@ -268,11 +287,83 @@ def agent_management_tool(
         response = _run_script("get-agent-status.sh", params.agent_id)  # type: ignore[arg-type]
         return json.dumps(response, indent=2)
 
-    return json.dumps({
-        "success": False,
-        "error": f"Unsupported operation: {params.operation}",
-    }, indent=2)
+    if params.operation == "mark_hotpath":
+        return json.dumps(_update_hotpath_flag(params.agent_id, True), indent=2)
+
+    if params.operation == "clear_hotpath":
+        return json.dumps(_update_hotpath_flag(params.agent_id, False), indent=2)
+
+    if params.operation == "list_hotpath":
+        return json.dumps(_list_hotpath_agents(), indent=2)
+
+    return json.dumps(
+        {
+            "success": False,
+            "error": f"Unsupported operation: {params.operation}",
+        },
+        indent=2,
+    )
 
 
 # Ensure stable tool name
 agent_management_tool.name = "agent_management"
+
+
+REGISTRY_TIMEOUT = float(os.environ.get("AGENT_MANAGEMENT_REGISTRY_TIMEOUT", "5"))
+
+
+def _registry_request(method: str, path: str, payload: Dict[str, Any] | None = None) -> tuple[bool, Any]:
+    base_url = _registry_base_url()
+    url = f"{base_url}{path}"
+    try:
+        with httpx.Client(timeout=REGISTRY_TIMEOUT) as client:
+            resp = client.request(method, url, json=payload)
+            resp.raise_for_status()
+            if not resp.content:
+                return True, {}
+            try:
+                return True, resp.json()
+            except ValueError:
+                return True, resp.text
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text.strip() or exc.response.reason_phrase
+        return False, f"Registry request failed ({exc.response.status_code}): {detail}"
+    except httpx.RequestError as exc:
+        return False, f"Unable to reach agent registry at {base_url}: {exc}"
+
+
+def _is_hotpath_agent(agent_id: str) -> bool:
+    ok, payload = _registry_request("GET", f"/agents/{agent_id}")
+    if not ok or not isinstance(payload, dict):
+        return False
+    return bool(payload.get("hotpath"))
+
+
+def _update_hotpath_flag(agent_id: Optional[str], hotpath: bool) -> Dict[str, Any]:
+    if not agent_id:
+        return {"success": False, "error": "agent_id_required"}
+    ok, payload = _registry_request(
+        "POST",
+        f"/agents/{agent_id}/hotpath",
+        {"hotpath": hotpath},
+    )
+    if not ok or not isinstance(payload, dict):
+        return {"success": False, "error": payload}
+    status = "marked" if hotpath else "cleared"
+    return {
+        "success": True,
+        "message": f"Agent {agent_id} hotpath flag {status}.",
+        "agent": payload,
+    }
+
+
+def _list_hotpath_agents() -> Dict[str, Any]:
+    ok, payload = _registry_request("GET", "/agents/hotpath")
+    if not ok or not isinstance(payload, dict):
+        return {"success": False, "error": payload}
+    agents = payload.get("agents", [])
+    return {
+        "success": True,
+        "agents": agents,
+        "count": len(agents),
+    }

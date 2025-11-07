@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict, ValidationInfo, field_validator
 
@@ -77,6 +77,30 @@ class WorkspaceCopyResult(BaseModel):
     bytes_transferred: Optional[int] = None
 
 
+class WorkspaceSnapshotRecord(BaseModel):
+    """Metadata describing a captured workspace snapshot artifact."""
+
+    snapshot_id: str = Field(..., description="Unique identifier for the snapshot event.")
+    workspace_id: str = Field(..., description="Workspace identifier tied to the snapshot.")
+    created_at: str = Field(..., description="ISO timestamp when the snapshot was captured.")
+    reason: str = Field(..., description="Trigger description (e.g., exhaustion mode, rejection).")
+    checksum: str = Field(..., description="Aggregate checksum covering the captured manifest.")
+    manifest_path: str = Field(..., description="Filesystem path to the manifest JSON file.")
+    archive_path: str = Field(..., description="Filesystem path to the archived workspace tarball.")
+    diff_path: Optional[str] = Field(
+        default=None,
+        description="Optional path to a diff/patch file against the previous snapshot.",
+    )
+    exhaustion_mode: Optional[str] = Field(
+        default=None,
+        description="Exhaustion mode (if any) that triggered the snapshot.",
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata captured at snapshot time (stage, cycle, etc.).",
+    )
+
+
 def collect_environment_keys(env: Optional[dict[str, str]] = None) -> List[str]:
     """Utility to extract environment variable keys in deterministic order."""
     if not env:
@@ -90,6 +114,7 @@ __all__ = [
     "WorkspaceDescriptor",
     "WorkspaceCommandResult",
     "WorkspaceCopyResult",
+    "WorkspaceSnapshotRecord",
     "collect_environment_keys",
     "normalize_workspace_name",
 ]

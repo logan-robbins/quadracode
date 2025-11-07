@@ -35,6 +35,7 @@ from quadracode_runtime.runtime import (
     RuntimeRunner,
     _apply_autonomous_limits,
 )
+from quadracode_runtime.state import ExhaustionMode
 
 
 def _make_envelope(sender: str, recipient: str, message: str = "msg") -> MessageEnvelope:
@@ -205,6 +206,14 @@ def test_runtime_runner_autonomous_loop(monkeypatch):
     first_responses = asyncio.run(runner._process_envelope(start_envelope))
     assert first_responses
     assert all(resp.recipient != HUMAN_RECIPIENT for resp in first_responses)
+    assert all(
+        resp.payload.get("exhaustion_mode") == ExhaustionMode.NONE.value
+        for resp in first_responses
+    )
+    assert all(
+        "exhaustion_probability" in resp.payload
+        for resp in first_responses
+    )
 
     agent_msg = MessageEnvelope(
         sender="agent-loop",
@@ -222,6 +231,7 @@ def test_runtime_runner_autonomous_loop(monkeypatch):
     assert final_responses
     recipients = [resp.recipient for resp in final_responses]
     assert HUMAN_RECIPIENT in recipients
+    assert all("exhaustion_mode" in resp.payload for resp in final_responses)
     assert any(event for event, payload, _ in events if event == "guardrail_trigger") is False
     assert any(
         payload.get("reason") == "stub complete"

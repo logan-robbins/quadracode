@@ -20,6 +20,7 @@ class ContextMetricsEmitter:
     def __init__(self, config: ContextEngineConfig):
         self.config = config
         self._redis = None
+        self._redis_loop_id: int | None = None
         self._redis_lock = asyncio.Lock()
 
     async def emit(
@@ -89,12 +90,22 @@ class ContextMetricsEmitter:
             LOGGER.warning("Failed to push context metrics to Redis: %s", exc)
 
     async def _ensure_redis(self):
-        if self._redis is not None:
+        current_loop = asyncio.get_running_loop()
+        if self._redis is not None and self._redis_loop_id == id(current_loop):
             return self._redis
 
         async with self._redis_lock:
-            if self._redis is not None:
+            current_loop = asyncio.get_running_loop()
+            if self._redis is not None and self._redis_loop_id == id(current_loop):
                 return self._redis
+
+            if self._redis is not None:
+                try:
+                    await self._redis.close()
+                except Exception:  # pragma: no cover - best effort cleanup
+                    pass
+                self._redis = None
+                self._redis_loop_id = None
 
             try:
                 from redis.asyncio import Redis  # type: ignore
@@ -110,4 +121,9 @@ class ContextMetricsEmitter:
                 LOGGER.warning("Redis metrics endpoint unreachable; disabling metrics stream")
                 await self._redis.close()
                 self._redis = None
+                self._redis_loop_id = None
+                return None
+
+            self._redis_loop_id = id(current_loop)
             return self._redis
+            

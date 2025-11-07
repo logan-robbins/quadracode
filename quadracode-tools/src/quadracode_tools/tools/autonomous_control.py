@@ -8,10 +8,12 @@ from pydantic import BaseModel, Field
 
 from quadracode_contracts import (
     AutonomousCheckpointRecord,
-    AutonomousCritiqueRecord,
     AutonomousEscalationRecord,
     AutonomousRoutingDirective,
+    HypothesisCritiqueRecord,
 )
+
+from .test_suite import execute_full_test_suite
 
 
 class AutonomousCheckpointRequest(BaseModel):
@@ -39,13 +41,41 @@ class AutonomousEscalationRequest(BaseModel):
     )
 
 
-class AutonomousCritiqueRequest(BaseModel):
-    """Schema for self-critique events emitted by autonomous orchestrator."""
+class HypothesisCritiqueRequest(BaseModel):
+    """Schema for hypothesis-centric self-critiques."""
 
-    action_taken: str = Field(..., min_length=1)
-    outcome: str = Field(..., min_length=1)
-    quality_assessment: Literal["good", "adequate", "poor"]
-    improvements: List[str] = Field(default_factory=list)
+    cycle_id: str = Field(..., min_length=1)
+    hypothesis: str = Field(..., min_length=1)
+    critique_summary: str = Field(..., min_length=1)
+    qualitative_feedback: str = Field(..., min_length=1)
+    category: Literal["code_quality", "architecture", "test_coverage", "performance"]
+    severity: Literal["low", "moderate", "high", "critical"]
+    evidence: List[str] = Field(default_factory=list)
+
+
+class FinalReviewRequest(BaseModel):
+    """Structured final review submission that enforces test execution."""
+
+    summary: str = Field(..., min_length=1)
+    recovery_attempts: List[str] = Field(default_factory=list)
+    artifacts: List[str] = Field(
+        default_factory=list,
+        description="Artifacts that should be highlighted for HumanClone review.",
+    )
+    workspace_root: Optional[str] = Field(
+        default=None,
+        description="Workspace root override for the test suite tool.",
+    )
+    include_e2e: bool = Field(
+        default=True,
+        description="Run end-to-end suites if discovery finds them.",
+    )
+    coverage_goal: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Optional coverage threshold to assert before final review.",
+    )
 
 
 def _format_output(payload: dict[str, object]) -> str:
@@ -124,24 +154,77 @@ def autonomous_escalate(
     )
 
 
-@tool(args_schema=AutonomousCritiqueRequest)
-def autonomous_critique(
-    action_taken: str,
-    outcome: str,
-    quality_assessment: str,
-    improvements: List[str] | None = None,
+@tool(args_schema=HypothesisCritiqueRequest)
+def hypothesis_critique(
+    cycle_id: str,
+    hypothesis: str,
+    critique_summary: str,
+    qualitative_feedback: str,
+    category: str,
+    severity: str,
+    evidence: List[str] | None = None,
 ) -> str:
-    """Log a self-critique entry for continuous quality evaluation."""
+    """Capture a structured critique tied to a specific refinement hypothesis."""
 
-    record = AutonomousCritiqueRecord(
-        action_taken=action_taken,
-        outcome=outcome,
-        quality_assessment=quality_assessment,  # type: ignore[arg-type]
-        improvements=improvements or [],
+    record = HypothesisCritiqueRecord(
+        cycle_id=cycle_id,
+        hypothesis=hypothesis,
+        critique_summary=critique_summary,
+        qualitative_feedback=qualitative_feedback,
+        category=category,  # type: ignore[arg-type]
+        severity=severity,  # type: ignore[arg-type]
+        evidence=evidence or [],
     )
     return _format_output(
         {
-            "event": "critique",
+            "event": "hypothesis_critique",
             "record": record.dict(),
         }
     )
+
+
+@tool(args_schema=FinalReviewRequest)
+def request_final_review(
+    summary: str,
+    recovery_attempts: List[str] | None = None,
+    artifacts: List[str] | None = None,
+    workspace_root: str | None = None,
+    include_e2e: bool = True,
+    coverage_goal: float | None = None,
+) -> str:
+    """Submit work for HumanClone review only after a full test suite passes."""
+
+    tests = execute_full_test_suite(
+        workspace_root=workspace_root,
+        include_e2e=include_e2e,
+    )
+    overall_status = str(tests.get("overall_status") or "").lower()
+    if overall_status != "passed":
+        return _format_output(
+            {
+                "event": "tests_failed",
+                "message": "Full test suite must pass before requesting final review.",
+                "tests": tests,
+            }
+        )
+
+    record = AutonomousEscalationRecord(
+        error_type="final_review",
+        description=summary,
+        recovery_attempts=recovery_attempts or [],
+        is_fatal=False,
+    )
+    payload: dict[str, object] = {
+        "event": "final_review_request",
+        "record": record.dict(),
+        "tests": tests,
+        "artifacts": artifacts or [],
+    }
+
+    coverage_data = tests.get("coverage") if isinstance(tests, dict) else None
+    if coverage_goal is not None and isinstance(coverage_data, dict):
+        coverage_min = coverage_data.get("min")
+        if isinstance(coverage_min, (int, float)):
+            payload["coverage_goal_met"] = coverage_min >= coverage_goal
+
+    return _format_output(payload)

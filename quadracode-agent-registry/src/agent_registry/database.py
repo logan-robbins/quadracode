@@ -30,26 +30,48 @@ class Database:
                     port INTEGER NOT NULL,
                     status TEXT NOT NULL,
                     registered_at TEXT NOT NULL,
-                    last_heartbeat TEXT
+                    last_heartbeat TEXT,
+                    hotpath INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            try:
+                con.execute("ALTER TABLE agents ADD COLUMN hotpath INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                # Column already exists; ignore
+                pass
 
-    def upsert_agent(self, *, agent_id: str, host: str, port: int, now: datetime) -> None:
+    def upsert_agent(
+        self,
+        *,
+        agent_id: str,
+        host: str,
+        port: int,
+        now: datetime,
+        hotpath: bool = False,
+    ) -> None:
         with self.connect() as con:
             # Try insert; if exists, update host/port and registered_at
             con.execute(
                 """
-                INSERT INTO agents (agent_id, host, port, status, registered_at, last_heartbeat)
-                VALUES (?, ?, ?, 'healthy', ?, ?)
+                INSERT INTO agents (agent_id, host, port, status, registered_at, last_heartbeat, hotpath)
+                VALUES (?, ?, ?, 'healthy', ?, ?, ?)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     host=excluded.host,
                     port=excluded.port,
                     status='healthy',
                     registered_at=excluded.registered_at,
-                    last_heartbeat=excluded.last_heartbeat
+                    last_heartbeat=excluded.last_heartbeat,
+                    hotpath=CASE WHEN agents.hotpath=1 THEN 1 ELSE excluded.hotpath END
                 """,
-                (agent_id, host, port, now.isoformat(), now.isoformat()),
+                (
+                    agent_id,
+                    host,
+                    port,
+                    now.isoformat(),
+                    now.isoformat(),
+                    1 if hotpath else 0,
+                ),
             )
 
     def update_heartbeat(self, *, agent_id: str, status: str, at: datetime) -> bool:
@@ -71,9 +93,21 @@ class Database:
             row = cur.fetchone()
             return row
 
-    def fetch_agents(self) -> List[sqlite3.Row]:
+    def fetch_agents(self, *, hotpath_only: bool = False) -> List[sqlite3.Row]:
         with self.connect() as con:
-            cur = con.execute("SELECT * FROM agents ORDER BY registered_at DESC")
+            if hotpath_only:
+                cur = con.execute(
+                    "SELECT * FROM agents WHERE hotpath = 1 ORDER BY registered_at DESC"
+                )
+            else:
+                cur = con.execute("SELECT * FROM agents ORDER BY registered_at DESC")
             rows = cur.fetchall()
             return list(rows)
 
+    def set_hotpath(self, *, agent_id: str, hotpath: bool) -> bool:
+        with self.connect() as con:
+            cur = con.execute(
+                "UPDATE agents SET hotpath = ? WHERE agent_id = ?",
+                (1 if hotpath else 0, agent_id),
+            )
+            return cur.rowcount > 0

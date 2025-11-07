@@ -95,7 +95,11 @@ def test_metrics_emit_for_tool_responses() -> None:
     assert state["metrics_log"], "pre_process should log metrics"
 
     state = asyncio.run(engine.handle_tool_response(state, {"result": "ok"}))
-    assert state["metrics_log"][-1]["event"] == "tool_response"
+    events = [entry.get("event") for entry in state["metrics_log"]]
+    assert "tool_response" in events
+    assert "prp_transition" in events
 
     state = asyncio.run(engine.post_process(state))
-    assert state["metrics_log"][-1]["event"] == "post_process"
+    events = [entry.get("event") for entry in state["metrics_log"]]
+    assert "post_process" in events
+    assert "prp_transition" in events

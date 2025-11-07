@@ -23,14 +23,20 @@ class AgentRegistryRequest(BaseModel):
         "unregister_agent",
         "stats",
         "health",
+        "list_hotpath",
+        "update_hotpath",
     ] = Field(
         ...,
         description="Registry operation to perform."
-        " list_agents|get_agent|register_agent|heartbeat|unregister_agent|stats|health",
+        " list_agents|get_agent|register_agent|heartbeat|unregister_agent|stats|health|list_hotpath|update_hotpath",
     )
     healthy_only: bool = Field(
         default=False,
         description="Filter to healthy agents when listing.",
+    )
+    hotpath_only: bool = Field(
+        default=False,
+        description="Filter to hotpath agents when listing.",
     )
     limit: int = Field(
         default=50,
@@ -60,12 +66,16 @@ class AgentRegistryRequest(BaseModel):
         default=None,
         description="Heartbeat timestamp (defaults to current UTC time).",
     )
+    hotpath: Optional[bool] = Field(
+        default=None,
+        description="Desired hotpath flag for update_hotpath operations.",
+    )
 
     @root_validator(skip_on_failure=True)
     def _validate_requirements(cls, values):  # type: ignore[override]
         op = values.get("operation")
         agent_id = values.get("agent_id")
-        if op in {"get_agent", "heartbeat", "unregister_agent"} and not agent_id:
+        if op in {"get_agent", "heartbeat", "unregister_agent", "update_hotpath"} and not agent_id:
             raise ValueError("agent_id is required for the requested operation")
         if op == "register_agent":
             missing = [name for name in ("agent_id", "host", "port") if values.get(name) in (None, "")]
@@ -73,6 +83,8 @@ class AgentRegistryRequest(BaseModel):
                 raise ValueError(
                     "register_agent requires agent_id, host, and port"
                 )
+        if op == "update_hotpath" and values.get("hotpath") is None:
+            raise ValueError("update_hotpath requires the 'hotpath' flag")
         return values
 
 
@@ -106,6 +118,8 @@ def agent_registry_tool(
     - `unregister_agent` (requires `agent_id`)
     - `stats`
     - `health`
+    - `list_hotpath`
+    - `update_hotpath` (requires `agent_id` + `hotpath`)
 
     The `AgentRegistryRequest` schema handles validation so callers only need
     to supply the relevant fields for the chosen operation.
@@ -135,6 +149,8 @@ def agent_registry_tool(
                 params_dict: dict[str, str] = {}
                 if params.healthy_only:
                     params_dict["healthy_only"] = "true"
+                if params.hotpath_only:
+                    params_dict["hotpath_only"] = "true"
                 resp = client.get(f"{base_url}/agents", params=params_dict or None)
                 resp.raise_for_status()
                 payload = resp.json()
@@ -158,6 +174,22 @@ def agent_registry_tool(
                     lines.append(
                         f"- {agent_id} @ {host}:{port} status={status} last_heartbeat={last_hb}"
                     )
+                return "\n".join(lines)
+
+            if params.operation == "list_hotpath":
+                resp = client.get(f"{base_url}/agents/hotpath")
+                resp.raise_for_status()
+                payload = resp.json()
+                agents = payload.get("agents") if isinstance(payload, dict) else payload
+                agents = agents or []
+                if not agents:
+                    return "No hotpath agents registered."
+                lines = [f"Hotpath agents ({len(agents)} total):"]
+                for agent in agents:
+                    agent_id = agent.get("agent_id", "<unknown>")
+                    status = agent.get("status", "unknown")
+                    last_hb = agent.get("last_heartbeat") or "never"
+                    lines.append(f"- {agent_id} status={status} last_heartbeat={last_hb}")
                 return "\n".join(lines)
 
             if params.operation == "get_agent":
@@ -195,6 +227,17 @@ def agent_registry_tool(
                 resp = client.delete(f"{base_url}/agents/{params.agent_id}")
                 resp.raise_for_status()
                 return f"Unregistered agent {params.agent_id}."
+
+            if params.operation == "update_hotpath":
+                body = {"hotpath": bool(params.hotpath)}
+                resp = client.post(
+                    f"{base_url}/agents/{params.agent_id}/hotpath",
+                    json=body,
+                )
+                resp.raise_for_status()
+                return (
+                    f"Agent {params.agent_id} hotpath set to {body['hotpath']}."
+                )
 
             if params.operation == "stats":
                 resp = client.get(f"{base_url}/stats")

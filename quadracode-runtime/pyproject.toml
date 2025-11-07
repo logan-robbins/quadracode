@@ -11,12 +11,16 @@ dependencies = [
     "langchain",
     "langchain-anthropic",
     "langchain-openai",
-    "langgraph",
-    "langgraph-cli[inmem]",
+    "langgraph>=0.6,<0.7",
+    "langgraph-cli[inmem]>=0.4,<0.5",
     "quadracode-tools",
     "langchain-mcp-adapters",
     "quadracode-contracts",
-    "redis>=5.0"
+    "redis>=5.0",
+    "pyyaml>=6.0.2,<7.0",
+    "scikit-learn>=1.4,<2.0",
+    "networkx>=3.2,<4.0",
+    "langgraph-checkpoint-sqlite>=2,<3",
 ]
 
 [tool.uv.sources]

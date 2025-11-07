@@ -18,6 +18,10 @@ class AgentRegistrationRequest(BaseModel):
     agent_id: str = Field(..., description="Unique identifier for the agent")
     host: str = Field(..., description="Hostname or IP address reachable by the orchestrator")
     port: int = Field(..., description="Primary service port exposed by the agent")
+    hotpath: bool = Field(
+        default=False,
+        description="Mark the agent as resident (hotpath) so it is never scaled down automatically.",
+    )
 
 
 class AgentHeartbeat(BaseModel):
@@ -37,6 +41,7 @@ class AgentInfo(BaseModel):
     status: AgentStatus
     registered_at: datetime
     last_heartbeat: Optional[datetime]
+    hotpath: bool = Field(default=False)
 
 
 class AgentListResponse(BaseModel):
@@ -44,6 +49,13 @@ class AgentListResponse(BaseModel):
 
     agents: List[AgentInfo]
     healthy_only: bool = Field(default=False)
+    hotpath_only: bool = Field(default=False)
+
+
+class HotpathUpdateRequest(BaseModel):
+    """Request payload for toggling an agent's hotpath state."""
+
+    hotpath: bool = Field(..., description="Desired hotpath flag value")
 
 
 class RegistryStats(BaseModel):
@@ -62,5 +74,5 @@ __all__ = [
     "AgentInfo",
     "AgentListResponse",
     "RegistryStats",
+    "HotpathUpdateRequest",
 ]
-

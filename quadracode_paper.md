@@ -101,3 +101,18 @@ In this paper, we have presented Quadracode, a system for asynchronous, long-run
 Our system is built on a foundation of persistent state, asynchronous messaging, and dynamic resource management, which together provide the resilience and scalability required for real-world automation. We have demonstrated the effectiveness of our approach through a series of use cases, and we have discussed the broader implications of our work.
 
 We believe that the principles embodied in Quadracode—the separation of concerns between orchestration and execution, the relentless pursuit of high-level goals, and the dynamic management of a fleet of specialized agents—are essential for the next generation of autonomous AI systems. This work represents a significant step towards a future where AI can be applied to complex, open-ended problems with the same kind of tenacity and resourcefulness that we associate with human experts.
+## 4. AGI Capability Ladder Mapping
+
+Quadracode targets the "efficient adaptation" rungs described by Legg & Hutter and the later refinements that power Chollet's ARC benchmark. The Perpetual Refinement Protocol (PRP), skepticism gating, and hotpath residency guarantees give the runtime durable traits normally associated with Level 3 autonomy: the system keeps improving its own hypotheses even when the base LLM would have halted. False-stop detection closes the gap with ARC's requirement for persistence under ambiguity, while the HumanClone + orchestrator loop delivers the meta-cognitive drive typically cited in Systems-2 literature.
+
+### 4.1 Baseline Comparison
+
+| Capability | Quadracode | Auto-GPT | LangChain AgentExecutor |
+| --- | --- | --- | --- |
+| PRP state machine with checkpointed ledger | ✅ Guarded transitions survive restarts | ⚠️ heuristic loops only | ⚠️ plan/execute chain resets per task |
+| Skeptical gate before acceptance | ✅ invariant-enforced challenges (human + orchestrator) | ❌ no enforced critique | ❌ relies on prompt discipline |
+| False-stop detection & mitigation counters | ✅ telemetry + automatic HumanClone escalation | ❌ agents halt silently | ❌ requires manual retries |
+| Hotpath service residency | ✅ registry flag prevents teardown and probes health | ❌ spawned agents decay with autoscale | ⚠️ must be scripted manually |
+| Time-travel diff + causal ledger | ✅ deterministic replay + causal inference | ❌ ad-hoc logs | ⚠️ limited to callback traces |
+
+Quadracode therefore occupies the "Level 3 – Efficient Adaptation via Meta-Cognition" tier: it pre-commits to never accepting a result without at least one self-generated challenge, it resists false halts, and it maintains resident service agents that mirror the "always-on" primitives in AGI roadmaps. Auto-GPT and the default LangChain agent stack remain closer to Level 1/2: although they can chain tool calls, they lack structural skepticism or residency guarantees and therefore cannot maintain the motivation loop demanded by ARC-style evaluations.

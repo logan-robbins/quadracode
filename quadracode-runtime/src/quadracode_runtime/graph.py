@@ -1,17 +1,66 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import sqlite3
+
 from langgraph.checkpoint.memory import MemorySaver
+
+try:  # pragma: no cover - optional dependency
+    from langgraph.checkpoint.sqlite import SqliteSaver
+except ImportError:  # pragma: no cover
+    SqliteSaver = None  # type: ignore
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import tools_condition
 
 from .config import ContextEngineConfig
 from .nodes.context_engine import ContextEngine
+from .nodes.prp_trigger import prp_trigger_check
 from .nodes.driver import make_driver
 from .nodes.tool_node import QuadracodeTools
-from .state import ContextEngineState, RuntimeState
+from .state import QuadraCodeState, RuntimeState
 
 
-CHECKPOINTER = MemorySaver()
+def _default_checkpoint_path() -> Path:
+    explicit = os.environ.get("QUADRACODE_CHECKPOINT_DB")
+    if explicit:
+        target = Path(explicit)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target
+
+    candidates = []
+    shared_env = os.environ.get("SHARED_PATH")
+    if shared_env:
+        candidates.append(Path(shared_env))
+    candidates.append(Path("/shared"))
+    candidates.append(Path.cwd() / ".quadracode")
+
+    for directory in candidates:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            continue
+        if os.access(directory, os.W_OK):
+            return directory / "checkpoints.sqlite3"
+
+    fallback = Path.cwd()
+    return fallback / "checkpoints.sqlite3"
+
+
+def _build_checkpointer():
+    if SqliteSaver is None:
+        return MemorySaver()
+
+    path = _default_checkpoint_path()
+    try:
+        conn = sqlite3.connect(str(path), check_same_thread=False)
+        return SqliteSaver(conn)
+    except Exception:
+        return MemorySaver()
+
+
+CHECKPOINTER = _build_checkpointer()
+GRAPH_RECURSION_LIMIT = int(os.environ.get("QUADRACODE_GRAPH_RECURSION_LIMIT", "80"))
 
 
 def build_graph(system_prompt: str, enable_context_engineering: bool = True):
@@ -24,8 +73,9 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         except AttributeError:
             config = ContextEngineConfig()
         context_engine = ContextEngine(config)
-        workflow = StateGraph(ContextEngineState)
+        workflow = StateGraph(QuadraCodeState)
 
+        workflow.add_node("prp_trigger_check", prp_trigger_check)
         workflow.add_node("context_pre", context_engine.pre_process_sync)
         workflow.add_node("context_governor", context_engine.govern_context_sync)
         workflow.add_node("driver", driver)
@@ -33,14 +83,17 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         workflow.add_node("tools", QuadracodeTools)
         workflow.add_node("context_tool", context_engine.handle_tool_response_sync)
 
-        workflow.add_edge(START, "context_pre")
+        workflow.add_edge(START, "prp_trigger_check")
+        workflow.add_edge("prp_trigger_check", "context_pre")
         workflow.add_edge("context_pre", "context_governor")
         workflow.add_edge("context_governor", "driver")
+        workflow.add_edge("driver", "context_post")
         workflow.add_conditional_edges(
-            "driver",
+            "context_post",
             tools_condition,
-            {"tools": "context_post", END: END},
+            {"tools": "tools", END: END},
         )
+        workflow.add_edge("context_post", END)
         workflow.add_edge("context_post", "tools")
         workflow.add_edge("tools", "context_tool")
         workflow.add_edge("context_tool", "driver")

@@ -13,8 +13,11 @@ from .tools.agent_management import agent_management_tool
 from .tools.autonomous_control import (
     autonomous_checkpoint,
     autonomous_escalate,
-    autonomous_critique,
+    hypothesis_critique,
+    request_final_review,
 )
+from .tools.property_tests import generate_property_tests
+from .tools.refinement_ledger import manage_refinement_ledger
 from .tools.workspace import (
     workspace_create,
     workspace_exec,
@@ -23,6 +26,7 @@ from .tools.workspace import (
     workspace_destroy,
     workspace_info,
 )
+from .tools.test_suite import run_full_test_suite
 
 
 def get_tools() -> List[BaseTool]:
@@ -42,5 +46,9 @@ def get_tools() -> List[BaseTool]:
         agent_management_tool,
         autonomous_checkpoint,
         autonomous_escalate,
-        autonomous_critique,
+        hypothesis_critique,
+        request_final_review,
+        run_full_test_suite,
+        generate_property_tests,
+        manage_refinement_ledger,
     ]

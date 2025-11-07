@@ -24,6 +24,7 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **MCP Integration**: Standardized tool interfaces via Model Context Protocol for seamless agent capability sharing
 - **Context Engineering Node**: Progressive loader, prioritised compression, LLM-backed summarisation, and Redis-backed metrics keep long-running chats sharp without losing history
 - **Full Observability**: Streamlit control plane with conversation management, real-time stream inspection, and message tracing
+- **Workspace Integrity Management**: HumanClone rejections and exhaustion events trigger deterministic snapshots, diffable manifests, and checksum validation with automatic restoration when drift is detected
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
 
@@ -451,6 +452,7 @@ Environment variables control runtime behavior:
 - **Streamlit stream viewer**: Inspect raw payloads and message traces
 - **Autonomous guardrails & control events**: `redis-cli XRANGE qc:autonomous:events - +` to review checkpoints, critiques, guardrail triggers, and emergency stops emitted in HUMAN_OBSOLETE mode
 - **Agent fleet status**: Check registry API at `/agents` endpoint or use orchestrator's `agent_management` tool
+- **Time-travel debugging**: Every stage/transition is mirrored into append-only JSONL logs under `./time_travel_logs`. Use `python -m quadracode_runtime.time_travel replay --log time_travel_logs/<thread>.jsonl --cycle cycle-3` to inspect a loop, or `... diff --cycle-a cycle-2 --cycle-b cycle-4` for improvement deltas.
 - **Checkpoint introspection**: From within a runtime, call:
   ```python
   CHECKPOINTER.get_tuple({"configurable": {"thread_id": chat_id, "checkpoint_ns": ""}})

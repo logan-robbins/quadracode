@@ -16,6 +16,7 @@ x-orchestrator-base: &orchestrator-base
     dockerfile: quadracode-orchestrator/Dockerfile
   environment:
     QUADRACODE_ID: orchestrator
+    QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
   depends_on:
     redis:
       condition: service_healthy
@@ -35,6 +36,7 @@ x-agent-base: &agent-base
     dockerfile: quadracode-agent/Dockerfile
   environment:
     QUADRACODE_ID: agent-compose
+    QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
   depends_on:
     redis:
       condition: service_healthy
@@ -131,11 +133,12 @@ services:
 
   orchestrator-runtime:
     <<: *orchestrator-base
-    command: ["uv", "run", "python", "-m", "quadracode_orchestrator"]
+    command: ["python", "-m", "quadracode_orchestrator"]
     environment:
       ENV_FILE_PATH: /app/.env.docker
       QUADRACODE_SCRIPTS_DIR: /app/scripts/agent-management
       AGENT_RUNTIME_PLATFORM: docker
+      QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
     volumes:
       - shared-data:/shared
       - mcp-remote-cache:/var/lib/mcp-remote
@@ -165,8 +168,9 @@ services:
     <<: *agent-base
     environment:
       QUADRACODE_ID: agent-runtime
+      QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
 
-    command: ["uv", "run", "python", "-m", "quadracode_agent"]
+    command: ["python", "-m", "quadracode_agent"]
     healthcheck:
       test: ["CMD", "true"]
       interval: 30s
@@ -176,10 +180,11 @@ services:
 
   human-clone-runtime:
     <<: *orchestrator-base
-    command: ["uv", "run", "python", "-m", "quadracode_runtime"]
+    command: ["python", "-m", "quadracode_runtime"]
     environment:
       QUADRACODE_PROFILE: human_clone
       QUADRACODE_ID: human_clone
+      QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
     volumes:
       - shared-data:/shared
       - mcp-remote-cache:/var/lib/mcp-remote

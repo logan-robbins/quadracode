@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from collections.abc import Iterable, Sequence
 from copy import deepcopy
@@ -24,11 +25,12 @@ from quadracode_contracts import (
 )
 from quadracode_tools.tools.workspace import ensure_workspace
 
-from .graph import CHECKPOINTER, build_graph
+from .graph import CHECKPOINTER, GRAPH_RECURSION_LIMIT, build_graph
 from .messaging import RedisMCPMessaging
 from .profiles import RuntimeProfile, is_autonomous_mode_enabled
-from .state import RuntimeState
+from .state import ExhaustionMode, RuntimeState
 from .registry import AgentRegistryIntegration
+from .validation import validate_human_clone_envelope
 
 IDENTITY_ENV_VAR = "QUADRACODE_ID"
 AUTONOMOUS_DEFAULT_MAX_ITERATIONS = 1000
@@ -46,6 +48,8 @@ _WORKSPACE_ENV_KEYS = (
     "QUADRACODE_ACTIVE_WORKSPACE_CONTAINER",
     "QUADRACODE_ACTIVE_WORKSPACE_MOUNT",
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -307,6 +311,21 @@ class RuntimeRunner:
         self._registry = AgentRegistryIntegration.from_environment(
             profile.name, self._identity
         )
+        if profile.name == "agent":
+            if self._registry:
+                LOGGER.info(
+                    "Agent registry auto-registration enabled for identity=%s",
+                    self._identity,
+                )
+            else:
+                LOGGER.warning(
+                    "Agent registry auto-registration disabled for identity=%s",
+                    self._identity,
+                )
+        print(
+            f"[RuntimeRunner] profile={profile.name} identity={self._identity} "
+            f"registry={'enabled' if self._registry else 'disabled'}"
+        )
 
     async def start(self) -> None:
         messaging = await RedisMCPMessaging.create()
@@ -337,6 +356,13 @@ class RuntimeRunner:
         entry_id: str,
         envelope: MessageEnvelope,
     ) -> None:
+        valid, feedback = validate_human_clone_envelope(envelope)
+        if not valid:
+            if feedback:
+                await messaging.publish(feedback.recipient, feedback)
+            await messaging.delete(self._identity, entry_id)
+            return
+
         try:
             outgoing = await self._process_envelope(envelope)
         except Exception as exc:  # noqa: BLE001
@@ -375,7 +401,7 @@ class RuntimeRunner:
         if autonomous_active:
             configurable["autonomous_mode"] = True
 
-        config = {"configurable": configurable}
+        config = {"configurable": configurable, "recursion_limit": GRAPH_RECURSION_LIMIT}
 
         has_checkpoint = CHECKPOINTER.get_tuple(config) is not None
         messages = _extract_messages(
@@ -384,6 +410,7 @@ class RuntimeRunner:
             include_history=not has_checkpoint,
         )
         state: RuntimeState = {"messages": messages, "thread_id": thread_id}
+        state["_last_envelope_sender"] = envelope.sender
 
         state_payload = payload.get("state")
         if isinstance(state_payload, dict):
@@ -457,6 +484,7 @@ class RuntimeRunner:
             state["autonomous_mode"] = False
 
         result = await asyncio.to_thread(self._graph.invoke, state, config)
+        result.pop("_last_envelope_sender", None)
         output_messages = result.get("messages", [])
         output_serialized = messages_to_dict(output_messages)
         if "workspace" not in result and isinstance(state.get("workspace"), dict):
@@ -524,6 +552,9 @@ class RuntimeRunner:
             "autonomous_settings",
             "thread_id",
             "workspace",
+            "exhaustion_mode",
+            "exhaustion_probability",
+            "exhaustion_recovery_log",
         ):
             value = result.get(key)
             if value is None:
@@ -531,6 +562,24 @@ class RuntimeRunner:
             if key == "workspace":
                 if isinstance(value, dict):
                     autonomous_snapshot[key] = deepcopy(value)
+                continue
+            if key == "exhaustion_mode":
+                if isinstance(value, ExhaustionMode):
+                    autonomous_snapshot[key] = value.value
+                elif isinstance(value, str):
+                    autonomous_snapshot[key] = value
+                else:
+                    autonomous_snapshot[key] = ExhaustionMode.NONE.value
+                continue
+            if key == "exhaustion_probability":
+                try:
+                    autonomous_snapshot[key] = float(value)
+                except (TypeError, ValueError):
+                    autonomous_snapshot[key] = 0.0
+                continue
+            if key == "exhaustion_recovery_log":
+                if isinstance(value, list):
+                    autonomous_snapshot[key] = deepcopy(value[-20:])
                 continue
             autonomous_snapshot[key] = deepcopy(value)
         if autonomous_snapshot:
@@ -547,6 +596,22 @@ class RuntimeRunner:
             response_payload.pop("workspace", None)
         response_payload.setdefault("chat_id", thread_id)
         response_payload["thread_id"] = thread_id
+        exhaustion_mode_value = result.get("exhaustion_mode")
+        if isinstance(exhaustion_mode_value, ExhaustionMode):
+            response_payload["exhaustion_mode"] = exhaustion_mode_value.value
+        elif isinstance(exhaustion_mode_value, str):
+            response_payload["exhaustion_mode"] = exhaustion_mode_value
+        else:
+            response_payload["exhaustion_mode"] = ExhaustionMode.NONE.value
+        try:
+            response_payload["exhaustion_probability"] = float(
+                result.get("exhaustion_probability", 0.0)
+            )
+        except (TypeError, ValueError):
+            response_payload["exhaustion_probability"] = 0.0
+        recovery_log = result.get("exhaustion_recovery_log")
+        if isinstance(recovery_log, list):
+            response_payload["exhaustion_recovery_log"] = deepcopy(recovery_log[-20:])
 
         response_body = _last_message_content(output_messages)
         routing_context = deepcopy(payload)

@@ -1,26 +1,36 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, MutableMapping, Tuple
 
 from langchain_core.messages import ToolMessage
 
 from quadracode_contracts import (
     AutonomousCheckpointRecord,
-    AutonomousCritiqueRecord,
     AutonomousEscalationRecord,
     AutonomousRoutingDirective,
     HUMAN_CLONE_RECIPIENT,
+    HypothesisCritiqueRecord,
 )
 
-from .state import AutonomousErrorRecord, AutonomousMilestone, ContextEngineState
+from .critique import apply_hypothesis_critique
+from .observability import get_meta_observer
+from .time_travel import get_time_travel_recorder
+from .state import (
+    AutonomousErrorRecord,
+    AutonomousMilestone,
+    ContextEngineState,
+    ExhaustionMode,
+    record_test_suite_result,
+)
 
 
 AUTONOMOUS_TOOL_NAMES = {
     "autonomous_checkpoint",
     "request_final_review",
     "escalate_to_human",
-    "autonomous_critique",
+    "hypothesis_critique",
     # Accept built-in escalate tool without special aliasing
     "autonomous_escalate",
 }
@@ -47,6 +57,30 @@ def _attach_common_event_metadata(
         else:
             payload["categories"] = categories
 
+
+_AUTONOMY_OBSERVER = get_meta_observer()
+_TIME_TRAVEL = get_time_travel_recorder()
+
+
+def _publish_autonomous_event(event_record: Dict[str, Any] | None, state: ContextEngineState) -> None:
+    if not event_record:
+        return
+    payload = event_record.get("payload", {})
+    if isinstance(payload, dict):
+        payload.setdefault("loop_depth", int(state.get("prp_cycle_count", 0) or 0))
+    try:
+        _AUTONOMY_OBSERVER.publish_autonomous_event(event_record["event"], payload)  # type: ignore[index]
+    except Exception:  # pragma: no cover - observability is best-effort
+        pass
+    try:
+        _TIME_TRAVEL.log_transition(
+            state,
+            event=f"autonomous.{event_record.get('event', 'unknown')}",
+            payload=payload if isinstance(payload, dict) else {},
+        )
+    except Exception:  # pragma: no cover - best-effort
+        pass
+
 def process_autonomous_tool_response(
     state: ContextEngineState,
     tool_response: Any,
@@ -68,6 +102,12 @@ def process_autonomous_tool_response(
     event_record: Dict[str, Any] | None = None
 
     thread_id = state.get("thread_id")
+    exhaustion_mode = state.get("exhaustion_mode", ExhaustionMode.NONE)
+    if isinstance(exhaustion_mode, str):
+        try:
+            exhaustion_mode = ExhaustionMode(exhaustion_mode)
+        except ValueError:
+            exhaustion_mode = ExhaustionMode.NONE
 
     if event == "checkpoint":
         record_payload = payload.get("record")
@@ -91,7 +131,10 @@ def process_autonomous_tool_response(
         state["current_phase"] = title
         event_record = {
             "event": "checkpoint",
-            "payload": {"record": record.dict()},
+            "payload": {
+                "record": record.model_dump(mode="json"),
+                "exhaustion_mode": exhaustion_mode.value,
+            },
         }
         _attach_common_event_metadata(
             event_record,
@@ -99,6 +142,7 @@ def process_autonomous_tool_response(
             thread_id=thread_id,
             categories=["checkpoint"],
         )
+        _publish_autonomous_event(event_record, state)
         return state, event_record
 
     if event == "final_review_request":
@@ -116,9 +160,15 @@ def process_autonomous_tool_response(
             recipient=HUMAN_CLONE_RECIPIENT,
         ).to_payload()
         state["current_phase"] = "awaiting_review"
+        tests_payload = payload.get("tests")
+        if isinstance(tests_payload, dict):
+            record_test_suite_result(state, tests_payload)
         event_record = {
             "event": "final_review_request",
-            "payload": {"record": record.dict()},
+            "payload": {
+                "record": record.model_dump(mode="json"),
+                "exhaustion_mode": exhaustion_mode.value,
+            },
         }
         _attach_common_event_metadata(
             event_record,
@@ -126,6 +176,7 @@ def process_autonomous_tool_response(
             thread_id=thread_id,
             categories=["review_request"],
         )
+        _publish_autonomous_event(event_record, state)
         return state, event_record
 
     if event == "escalation":
@@ -154,8 +205,9 @@ def process_autonomous_tool_response(
         event_record = {
             "event": "escalation",
             "payload": {
-                "record": record.dict(),
+                "record": record.model_dump(mode="json"),
                 "routing": routing.to_payload(),
+                "exhaustion_mode": exhaustion_mode.value,
             },
         }
         _attach_common_event_metadata(
@@ -164,36 +216,34 @@ def process_autonomous_tool_response(
             thread_id=thread_id,
             categories=["escalation"],
         )
+        _publish_autonomous_event(event_record, state)
         return state, event_record
 
-    if event == "critique":
+    if event == "hypothesis_critique":
         record_payload = payload.get("record")
         if not isinstance(record_payload, dict):
             return state, None
         try:
-            record = AutonomousCritiqueRecord(**record_payload)
+            record = HypothesisCritiqueRecord(**record_payload)
         except Exception:
             return state, None
-        errors = state.setdefault("error_history", [])
-        critique_entry: AutonomousErrorRecord = {
-            "error_type": "critique",
-            "description": f"{record.action_taken}: {record.outcome}",
-            "recovery_attempts": list(record.improvements),
-            "escalated": False,
-            "resolved": False,
-            "timestamp": record.recorded_at,
-        }
-        errors.append(critique_entry)
+
+        translation = apply_hypothesis_critique(state, record)
         event_record = {
-            "event": "critique",
-            "payload": {"record": record.dict()},
+            "event": "hypothesis_critique",
+            "payload": {
+                "record": record.model_dump(mode="json"),
+                "translation": translation,
+                "exhaustion_mode": exhaustion_mode.value,
+            },
         }
         _attach_common_event_metadata(
             event_record,
             tool_response=tool_response,
             thread_id=thread_id,
-            categories=["critique"],
+            categories=["critique", "hypothesis"],
         )
+        _publish_autonomous_event(event_record, state)
         return state, event_record
 
     return state, None

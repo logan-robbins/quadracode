@@ -4,27 +4,52 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence
+
+import httpx
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from ..config import ContextEngineConfig
 from ..autonomous import process_autonomous_tool_response
+from ..ledger import process_manage_refinement_ledger_tool_response
+from ..exhaustion_predictor import ExhaustionPredictor
+from ..deliberative import DeliberativePlanner, DeliberativePlanArtifacts
 from ..state import (
-    ContextEngineState,
     ContextSegment,
+    ExhaustionMode,
+    PRPState,
+    QuadraCodeState,
+    RefinementLedgerEntry,
+    flag_false_stop_event,
+    apply_prp_transition,
     make_initial_context_engine_state,
+    record_skepticism_challenge,
+    record_property_test_result,
+    record_test_suite_result,
 )
+from ..long_term_memory import update_memory_guidance
 from ..metrics import ContextMetricsEmitter
+from ..observability import get_meta_observer
+from ..time_travel import get_time_travel_recorder
+from ..invariants import mark_context_updated
+from ..workspace_integrity import (
+    capture_workspace_snapshot,
+    validate_workspace_integrity,
+)
 from .context_curator import ContextCurator
 from .context_operations import ContextOperation
 from .context_reducer import ContextReducer
 from .context_scorer import ContextScorer
 from .progressive_loader import ProgressiveContextLoader
 
+
+LOGGER = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ReflectionResult:
@@ -55,26 +80,38 @@ class ContextEngine:
         self.governor_model = (config.governor_model or "heuristic").lower()
         self._governor_llm = None
         self._governor_lock = asyncio.Lock()
+        self.exhaustion_predictor = ExhaustionPredictor()
+        self._meta_observer = get_meta_observer()
+        self.time_travel = get_time_travel_recorder()
+        self.registry_url = os.environ.get(
+            "AGENT_REGISTRY_URL",
+            "http://quadracode-agent-registry:8090",
+        ).rstrip("/")
+        self._hotpath_probe_timeout = float(
+            os.environ.get("QUADRACODE_HOTPATH_PROBE_TIMEOUT", "3")
+        )
+        self.deliberative_planner = DeliberativePlanner()
 
-    def pre_process_sync(self, state: ContextEngineState) -> ContextEngineState:
+    def pre_process_sync(self, state: QuadraCodeState) -> QuadraCodeState:
         return asyncio.run(self.pre_process(state))
 
-    def post_process_sync(self, state: ContextEngineState) -> ContextEngineState:
+    def post_process_sync(self, state: QuadraCodeState) -> QuadraCodeState:
         return asyncio.run(self.post_process(state))
 
-    def govern_context_sync(self, state: ContextEngineState) -> ContextEngineState:
+    def govern_context_sync(self, state: QuadraCodeState) -> QuadraCodeState:
         return asyncio.run(self.govern_context(state))
 
     def handle_tool_response_sync(
-        self, state: ContextEngineState
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState
+    ) -> QuadraCodeState:
         tool_messages = self._extract_tool_messages(state)
         if not tool_messages:
             return asyncio.run(self.handle_tool_response(state, None))
         return asyncio.run(self._handle_tool_messages(state, tool_messages))
 
-    async def pre_process(self, state: ContextEngineState) -> ContextEngineState:
+    async def pre_process(self, state: QuadraCodeState) -> QuadraCodeState:
         state = self._ensure_state_defaults(state)
+        await self._enforce_hotpath_residency(state)
         quality_score = await self.scorer.evaluate(state)
         state["context_quality_score"] = quality_score
 
@@ -97,6 +134,9 @@ class ContextEngine:
         state = self._recompute_context_usage(state)
         state = await self._enforce_limits(state)
         await self._emit_load_metrics(state)
+        state = await self._update_exhaustion_mode(state, stage="pre_process")
+        # Invariant: at least one context update per cycle
+        mark_context_updated(state)
         await self.metrics.emit(
             state,
             "pre_process",
@@ -105,11 +145,24 @@ class ContextEngine:
                 "quality_components": state.get("context_quality_components", {}),
                 "context_window_used": state.get("context_window_used", 0),
                 "context_window_max": state.get("context_window_max", self.config.context_window_max),
+                "exhaustion_mode": state.get("exhaustion_mode", ExhaustionMode.NONE).value,
+                "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
             },
         )
+        await self._flush_prp_metrics(state)
+        self.time_travel.log_stage(
+            state,
+            stage="pre_process",
+            payload={
+                "quality_score": quality_score,
+                "context_window_used": state.get("context_window_used", 0),
+                "context_segments": len(state.get("context_segments", [])),
+            },
+        )
+        self._record_stage_observability(state, "pre_process")
         return state
 
-    async def post_process(self, state: ContextEngineState) -> ContextEngineState:
+    async def post_process(self, state: QuadraCodeState) -> QuadraCodeState:
         state = self._ensure_state_defaults(state)
         reflection_payload = await self._reflect_on_decision(state)
         state["reflection_log"].append(
@@ -140,6 +193,7 @@ class ContextEngine:
                 }
             )
 
+        state = await self._update_exhaustion_mode(state, stage="post_process")
         await self.metrics.emit(
             state,
             "post_process",
@@ -149,34 +203,106 @@ class ContextEngine:
                 "issues": reflection_payload.issues,
                 "recommendations": reflection_payload.recommendations,
                 "context_window_used": state.get("context_window_used", 0),
+                "exhaustion_mode": state.get("exhaustion_mode", ExhaustionMode.NONE).value,
+                "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
             },
         )
+        self._apply_prp_transition(state, PRPState.PROPOSE)
+        await self._flush_prp_metrics(state)
+        self.time_travel.log_stage(
+            state,
+            stage="post_process",
+            payload={
+                "reflection_focus": reflection_payload.focus_metric,
+                "issues": reflection_payload.issues,
+                "recommendations": reflection_payload.recommendations,
+            },
+        )
+        self._record_stage_observability(state, "post_process")
         return state
 
-    async def govern_context(self, state: ContextEngineState) -> ContextEngineState:
+    async def govern_context(self, state: QuadraCodeState) -> QuadraCodeState:
         state = self._ensure_state_defaults(state)
         plan = await self._generate_governor_plan(state)
         state = await self._apply_governor_plan(state, plan)
+        deliberative = self.deliberative_planner.build_plan(state)
+        self._store_deliberative_plan(state, deliberative)
+        memory_guidance = update_memory_guidance(state)
+        state = await self._update_exhaustion_mode(state, stage="govern_context")
+        await self.metrics.emit(
+            state,
+            "govern_context",
+            {
+                "plan_items": len(plan.get("actions", [])) if isinstance(plan, dict) else 0,
+                "deliberative_steps": len(deliberative.reasoning_chain),
+                "planning_success_probability": deliberative.probabilistic_projection.success_probability,
+                "planning_uncertainty": deliberative.probabilistic_projection.uncertainty,
+                "memory_guidance_present": bool(memory_guidance),
+                "exhaustion_mode": state.get("exhaustion_mode", ExhaustionMode.NONE).value,
+                "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
+                "context_window_used": state.get("context_window_used", 0),
+            },
+        )
+        self._apply_prp_transition(state, PRPState.EXECUTE)
+        await self._flush_prp_metrics(state)
+        self.time_travel.log_stage(
+            state,
+            stage="govern_context",
+            payload={
+                "plan": plan,
+                "prefetch_queue": len(state.get("prefetch_queue", [])),
+                "deliberative_synopsis": deliberative.synopsis,
+                "deliberative_steps": len(deliberative.reasoning_chain),
+                "memory_guidance": memory_guidance,
+            },
+        )
+        self._record_stage_observability(state, "govern_context")
         return state
 
     async def handle_tool_response(
-        self, state: ContextEngineState, tool_response: Any | None
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState, tool_response: Any | None
+    ) -> QuadraCodeState:
         state = self._ensure_state_defaults(state)
-        autonomous_event = None
         if tool_response is not None:
-            state, autonomous_event = process_autonomous_tool_response(state, tool_response)
-        if tool_response is None:
+            state, _ = process_autonomous_tool_response(state, tool_response)
+            state, _ = process_manage_refinement_ledger_tool_response(state, tool_response)
+        else:
             return state
         scoring_payload: Any
         if isinstance(tool_response, ToolMessage):
-            scoring_payload = self._render_tool_message(tool_response)
+            self._capture_testing_outputs(state, tool_response)
+            self._maybe_issue_skepticism_challenge(state, tool_response)
+            tool_payload = self._render_tool_message(tool_response)
+            self.time_travel.log_tool(
+                state,
+                tool_name=tool_response.name or "unknown_tool",
+                payload=tool_payload,
+            )
+            scoring_payload = tool_payload
         else:
             scoring_payload = tool_response
         relevance = await self.scorer.score_tool_output(scoring_payload)
         operation = await self._decide_operation(relevance, state)
         state = await self._apply_operation(state, tool_response, operation)
         state = await self._enforce_limits(state)
+        state = await self._update_exhaustion_mode(
+            state,
+            stage="handle_tool_response",
+            tool_response=tool_response,
+        )
+        exhaustion_mode = state.get("exhaustion_mode", ExhaustionMode.NONE)
+        current_prp_state = state.get("prp_state", PRPState.HYPOTHESIZE)
+        if current_prp_state != PRPState.EXECUTE:
+            self._apply_prp_transition(state, PRPState.EXECUTE)
+        self._apply_prp_transition(state, PRPState.TEST)
+        if exhaustion_mode in {
+            ExhaustionMode.TEST_FAILURE,
+            ExhaustionMode.HYPOTHESIS_EXHAUSTED,
+        }:
+            self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
+        else:
+            self._apply_prp_transition(state, PRPState.CONCLUDE)
+        await self._flush_prp_metrics(state)
         await self.metrics.emit(
             state,
             "tool_response",
@@ -184,17 +310,24 @@ class ContextEngine:
                 "operation": operation.value,
                 "relevance": relevance,
                 "segment_count": len(state.get("context_segments", [])),
+                "exhaustion_mode": state.get("exhaustion_mode", ExhaustionMode.NONE).value,
+                "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
             },
         )
-        if autonomous_event:
-            await self.metrics.emit_autonomous(
-                autonomous_event["event"],
-                autonomous_event.get("payload", {}),
-            )
+        self.time_travel.log_stage(
+            state,
+            stage="handle_tool_response",
+            payload={
+                "operation": operation.value,
+                "relevance": relevance,
+                "segment_count": len(state.get("context_segments", [])),
+            },
+        )
+        self._record_stage_observability(state, "handle_tool_response")
         return state
 
     async def _decide_operation(
-        self, relevance: float, state: ContextEngineState
+        self, relevance: float, state: QuadraCodeState
     ) -> ContextOperation:
         if relevance < 0.2:
             return ContextOperation.DISCARD
@@ -204,10 +337,10 @@ class ContextEngine:
 
     async def _apply_operation(
         self,
-        state: ContextEngineState,
+        state: QuadraCodeState,
         tool_response: Any,
         operation: ContextOperation,
-    ) -> ContextEngineState:
+    ) -> QuadraCodeState:
         segment = self._build_segment_from_tool(tool_response, state)
 
         if operation is ContextOperation.DISCARD:
@@ -232,7 +365,7 @@ class ContextEngine:
         return state
 
     def _build_segment_from_tool(
-        self, tool_response: Any, state: ContextEngineState
+        self, tool_response: Any, state: QuadraCodeState
     ) -> ContextSegment:
         segment_id = f"tool-{len(state['context_segments']) + 1}"
         restorable_reference: str | None = None
@@ -263,15 +396,94 @@ class ContextEngine:
         }
 
     async def _handle_tool_messages(
-        self, state: ContextEngineState, tool_messages: List[ToolMessage]
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState, tool_messages: List[ToolMessage]
+    ) -> QuadraCodeState:
         current = state
         for message in tool_messages:
             current = await self.handle_tool_response(current, message)
         return current
 
+    def _capture_testing_outputs(self, state: QuadraCodeState, message: ToolMessage) -> None:
+        tool_name = (message.name or "").strip()
+        if tool_name not in {"run_full_test_suite", "request_final_review", "generate_property_tests"}:
+            return
+        payload = self._parse_tool_json(message)
+        if not isinstance(payload, dict):
+            return
+        if tool_name == "request_final_review":
+            tests_payload = payload.get("tests")
+            if isinstance(tests_payload, dict):
+                record_test_suite_result(state, tests_payload)
+            self._evaluate_completion_request_for_false_stop(
+                state,
+                tests_payload if isinstance(tests_payload, dict) else None,
+                message,
+            )
+            return
+        if tool_name == "generate_property_tests":
+            record_property_test_result(state, payload)
+            return
+        record_test_suite_result(state, payload)
+
+    def _evaluate_completion_request_for_false_stop(
+        self,
+        state: QuadraCodeState,
+        tests_payload: Dict[str, Any] | None,
+        message: ToolMessage,
+    ) -> None:
+        reason: Optional[str] = None
+        evidence: Dict[str, Any] = {}
+        tests_status = None
+        if tests_payload is None:
+            reason = "missing_tests"
+        else:
+            tests_status = str(tests_payload.get("overall_status") or "").lower()
+            if tests_status not in {"passed", "pass", "success"}:
+                reason = "tests_not_passed"
+                evidence["tests_status"] = tests_status or "unknown"
+
+        if reason is None:
+            property_result = state.get("last_property_test_result")
+            if isinstance(property_result, dict):
+                property_status = str(property_result.get("status") or "").lower()
+                if property_status and property_status not in {"passed", "pass", "success"}:
+                    reason = "property_tests_unresolved"
+                    evidence["property_status"] = property_status
+
+        if reason is None:
+            requirements = state.get("human_clone_requirements")
+            if isinstance(requirements, list):
+                outstanding = [str(item) for item in requirements if str(item).strip()]
+                if outstanding:
+                    reason = "artifact_requirements_pending"
+                    evidence["requirements"] = outstanding
+
+        if reason is None:
+            last_suite = state.get("last_test_suite_result")
+            if isinstance(last_suite, dict):
+                last_status = str(last_suite.get("overall_status") or "").lower()
+                if last_status and last_status not in {"passed", "pass", "success"}:
+                    reason = "prior_tests_failed"
+                    evidence["last_suite_status"] = last_status
+
+        if not reason:
+            return
+
+        evidence_payload = {
+            **evidence,
+            "tests_status": tests_status or ("unknown" if tests_payload else "missing"),
+            "tool_call_id": message.tool_call_id,
+            "tool_name": message.name,
+        }
+        self._handle_false_stop(
+            state,
+            reason=reason,
+            stage="request_final_review",
+            evidence=evidence_payload,
+        )
+
     def _extract_tool_messages(
-        self, state: ContextEngineState
+        self, state: QuadraCodeState
     ) -> List[ToolMessage]:
         messages = state.get("messages") or []
         trailing: List[ToolMessage] = []
@@ -338,7 +550,25 @@ class ContextEngine:
             return "\n".join(body_parts)
         return str(content)
 
-    async def _generate_governor_plan(self, state: ContextEngineState) -> Dict[str, Any]:
+    def _parse_tool_json(self, message: ToolMessage) -> Any:
+        candidates: List[str] = []
+        raw = message.content
+        if isinstance(raw, str):
+            candidates.append(raw)
+        coerced = self._coerce_tool_content(raw)
+        if coerced:
+            candidates.append(coerced)
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+        return None
+
+    async def _generate_governor_plan(self, state: QuadraCodeState) -> Dict[str, Any]:
         override = state.pop("governor_plan_override", None)
         if override:
             return override
@@ -371,8 +601,8 @@ class ContextEngine:
         return self._parse_plan_response(response.content)
 
     async def _apply_governor_plan(
-        self, state: ContextEngineState, plan: Dict[str, Any]
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState, plan: Dict[str, Any]
+    ) -> QuadraCodeState:
         actions = plan.get("actions") or []
         action_counts: Dict[str, int] = {}
         segments_by_id = {segment["id"]: segment for segment in state.get("context_segments", [])}
@@ -488,6 +718,25 @@ class ContextEngine:
         await self._emit_externalization_metrics(state)
         return state
 
+    def _store_deliberative_plan(
+        self,
+        state: QuadraCodeState,
+        artifacts: DeliberativePlanArtifacts,
+    ) -> None:
+        plan_payload = artifacts.to_dict()
+        state["deliberative_plan"] = plan_payload
+        state["deliberative_intermediate_states"] = [
+            dict(item) for item in artifacts.intermediate_states
+        ]
+        state["deliberative_synopsis"] = artifacts.synopsis
+        projection = artifacts.probabilistic_projection
+        state["planning_success_probability"] = projection.success_probability
+        state["planning_uncertainty"] = projection.uncertainty
+        state["counterfactual_register"] = [
+            scenario.to_dict() for scenario in artifacts.counterfactuals
+        ]
+        state["causal_graph_snapshot"] = artifacts.causal_graph.to_dict()
+
     async def _ensure_governor_llm(self):
         if self.governor_model in {"heuristic", ""}:
             raise RuntimeError("Heuristic governor does not use an LLM")
@@ -499,7 +748,7 @@ class ContextEngine:
                 self._governor_llm = init_chat_model(self.governor_model)
         return self._governor_llm
 
-    def _heuristic_governor_plan(self, state: ContextEngineState) -> Dict[str, Any]:
+    def _heuristic_governor_plan(self, state: QuadraCodeState) -> Dict[str, Any]:
         segments = list(state.get("context_segments", []))
         max_segments = max(1, self.config.governor_max_segments)
         sorted_segments = sorted(
@@ -530,7 +779,7 @@ class ContextEngine:
             "prompt_outline": outline,
         }
 
-    def _plan_segments_snapshot(self, state: ContextEngineState) -> List[Dict[str, Any]]:
+    def _plan_segments_snapshot(self, state: QuadraCodeState) -> List[Dict[str, Any]]:
         segments = state.get("context_segments", [])
         limited = segments[-self.config.governor_max_segments :]
         snapshot: List[Dict[str, Any]] = []
@@ -549,7 +798,7 @@ class ContextEngine:
         return snapshot
 
     def _plan_context_summary(
-        self, state: ContextEngineState, segments: List[Dict[str, Any]]
+        self, state: QuadraCodeState, segments: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         return {
             "segments": segments,
@@ -578,7 +827,7 @@ class ContextEngine:
         except json.JSONDecodeError as exc:
             raise ValueError("Context governor returned invalid JSON plan") from exc
 
-    async def _reflect_on_decision(self, state: ContextEngineState) -> ReflectionResult:
+    async def _reflect_on_decision(self, state: QuadraCodeState) -> ReflectionResult:
         timestamp = _utc_now().isoformat()
         quality_score = state.get("context_quality_score", 0.0)
         components = state.get("context_quality_components", {})
@@ -626,8 +875,8 @@ class ContextEngine:
         )
 
     async def _evolve_playbook(
-        self, state: ContextEngineState, reflection: ReflectionResult
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState, reflection: ReflectionResult
+    ) -> QuadraCodeState:
         playbook = state["context_playbook"]
 
         iterations = playbook.get("iterations", 0) + 1
@@ -662,8 +911,8 @@ class ContextEngine:
         return state
 
     async def _enforce_limits(
-        self, state: ContextEngineState
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState
+    ) -> QuadraCodeState:
         state = self._recompute_context_usage(state)
         max_tokens = state.get("context_window_max") or self.config.context_window_max
         state["context_window_max"] = max_tokens
@@ -680,7 +929,7 @@ class ContextEngine:
 
         return state
 
-    def _should_checkpoint(self, state: ContextEngineState) -> bool:
+    def _should_checkpoint(self, state: QuadraCodeState) -> bool:
         frequency = self.config.checkpoint_frequency
         if not frequency:
             return False
@@ -689,8 +938,8 @@ class ContextEngine:
         return iteration > 0 and iteration % frequency == 0
 
     def _ensure_state_defaults(
-        self, state: ContextEngineState
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState
+    ) -> QuadraCodeState:
         defaults = make_initial_context_engine_state(
             context_window_max=self.config.context_window_max
         )
@@ -701,6 +950,9 @@ class ContextEngine:
         if not state["context_window_max"]:
             state["context_window_max"] = self.config.context_window_max
 
+        state = self._normalize_refinement_ledger(state)
+        state["refinement_memory_block"] = self._render_refinement_memory(state)
+
         return state
 
     @staticmethod
@@ -710,8 +962,8 @@ class ContextEngine:
         return f"{content[:limit]}…"
 
     def _recompute_context_usage(
-        self, state: ContextEngineState
-    ) -> ContextEngineState:
+        self, state: QuadraCodeState
+    ) -> QuadraCodeState:
         total = sum(
             max(segment.get("token_count", 0), 0)
             for segment in state.get("context_segments", [])
@@ -719,8 +971,587 @@ class ContextEngine:
         state["context_window_used"] = int(total)
         return state
 
+    def _normalize_refinement_ledger(self, state: QuadraCodeState) -> QuadraCodeState:
+        ledger_entries: List[RefinementLedgerEntry] = []
+        raw_entries = state.get("refinement_ledger", [])
+        for entry in raw_entries:
+            resolved = self._coerce_ledger_entry(entry)
+            if resolved:
+                ledger_entries.append(resolved)
+        state["refinement_ledger"] = ledger_entries
+        return state
+
+    def _coerce_ledger_entry(
+        self, entry: Any
+    ) -> RefinementLedgerEntry | None:
+        if isinstance(entry, RefinementLedgerEntry):
+            return entry
+        if not isinstance(entry, dict):
+            return None
+        payload = dict(entry)
+        timestamp = payload.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                payload["timestamp"] = datetime.fromisoformat(timestamp)
+            except ValueError:
+                payload["timestamp"] = _utc_now()
+        elif isinstance(timestamp, datetime):
+            payload["timestamp"] = timestamp
+        else:
+            payload["timestamp"] = _utc_now()
+        exhaustion_value = payload.get("exhaustion_trigger")
+        if isinstance(exhaustion_value, str):
+            try:
+                payload["exhaustion_trigger"] = ExhaustionMode(exhaustion_value)
+            except ValueError:
+                payload["exhaustion_trigger"] = None
+        dependencies = payload.get("dependencies")
+        if isinstance(dependencies, list):
+            payload["dependencies"] = [
+                str(dep).strip()
+                for dep in dependencies
+                if str(dep).strip()
+            ]
+        else:
+            payload["dependencies"] = []
+        novelty_basis = payload.get("novelty_basis")
+        if isinstance(novelty_basis, list):
+            payload["novelty_basis"] = [str(item) for item in novelty_basis]
+        else:
+            payload["novelty_basis"] = []
+        causal_links = payload.get("causal_links")
+        if isinstance(causal_links, list):
+            payload["causal_links"] = [
+                dict(link)
+                for link in causal_links
+                if isinstance(link, dict)
+            ]
+        else:
+            payload["causal_links"] = []
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            payload["metadata"] = dict(metadata)
+        else:
+            payload["metadata"] = {}
+        try:
+            return RefinementLedgerEntry(**payload)
+        except Exception:
+            return None
+
+    def _render_refinement_memory(self, state: QuadraCodeState) -> str:
+        ledger_entries = state.get("refinement_ledger", [])
+        if not ledger_entries:
+            return ""
+        limit = getattr(self.config, "refinement_memory_limit", 5) or 5
+        recent_entries = sorted(ledger_entries, key=lambda item: item.timestamp)[-limit:]
+        formatted_lines = [
+            f"- {entry.formatted_summary()}" for entry in recent_entries
+        ]
+        return "Refinement Ledger (latest cycles):\n" + "\n".join(formatted_lines)
+
+    async def _update_exhaustion_mode(
+        self,
+        state: QuadraCodeState,
+        *,
+        stage: str,
+        tool_response: Any | None = None,
+    ) -> QuadraCodeState:
+        previous_mode = self._coerce_exhaustion_mode(state.get("exhaustion_mode"))
+        mode, probability = self._classify_exhaustion(
+            state,
+            stage=stage,
+            tool_response=tool_response,
+            previous_mode=previous_mode,
+        )
+        state["exhaustion_mode"] = mode
+        state["exhaustion_probability"] = float(probability)
+
+        if mode == previous_mode:
+            return state
+
+        if mode is ExhaustionMode.LLM_STOP:
+            self._handle_false_stop(
+                state,
+                reason="llm_stop",
+                stage=stage,
+                evidence={
+                    "probability": float(probability),
+                    "previous_mode": previous_mode.value,
+                },
+            )
+
+        if mode is not ExhaustionMode.NONE:
+            self._handle_workspace_integrity_event(
+                state,
+                stage=stage,
+                mode=mode,
+            )
+
+        action = None
+        if mode is not ExhaustionMode.NONE:
+            action = await self._apply_exhaustion_strategy(
+                state,
+                mode,
+                stage=stage,
+                previous_mode=previous_mode,
+                tool_response=tool_response,
+            )
+        else:
+            action = "cleared"
+            self._record_recovery_action(state, stage, mode, action)
+
+        await self.metrics.emit(
+            state,
+            "exhaustion_update",
+            {
+                "stage": stage,
+                "mode": mode.value,
+                "previous_mode": previous_mode.value,
+                "probability": float(probability),
+                "context_ratio": self._context_ratio(state),
+                "ledger_size": len(state.get("refinement_ledger", [])),
+                "action": action,
+            },
+        )
+        if mode != previous_mode:
+            try:
+                self._meta_observer.publish_exhaustion_event(
+                    state,
+                    stage=stage,
+                    previous_mode=previous_mode,
+                    mode=mode,
+                    probability=float(probability),
+                )
+            except Exception:  # pragma: no cover - observability is best-effort
+                pass
+            self.time_travel.log_transition(
+                state,
+                event="exhaustion_update",
+                payload={
+                    "stage": stage,
+                    "from": previous_mode.value,
+                    "to": mode.value,
+                    "action": action,
+                },
+                state_update={
+                    "exhaustion_mode": mode.value,
+                    "exhaustion_probability": float(probability),
+                },
+            )
+        return state
+
+    def _classify_exhaustion(
+        self,
+        state: QuadraCodeState,
+        *,
+        stage: str,
+        tool_response: Any | None = None,
+        previous_mode: ExhaustionMode,
+    ) -> tuple[ExhaustionMode, float]:
+        ledger: Sequence[RefinementLedgerEntry] = state.get("refinement_ledger", [])
+        probability = self.exhaustion_predictor.predict_probability(ledger)
+        candidates: List[tuple[int, ExhaustionMode]] = []
+
+        if stage == "pre_process" and probability >= self.exhaustion_predictor.threshold:
+            candidates.append((0, ExhaustionMode.PREDICTED_EXHAUSTION))
+        elif (
+            previous_mode is ExhaustionMode.PREDICTED_EXHAUSTION
+            and probability >= self.exhaustion_predictor.threshold * 0.9
+        ):
+            candidates.append((0, ExhaustionMode.PREDICTED_EXHAUSTION))
+
+        context_ratio = self._context_ratio(state)
+        if context_ratio >= 0.98:
+            candidates.append((1, ExhaustionMode.CONTEXT_SATURATION))
+        elif context_ratio >= 0.9:
+            candidates.append((3, ExhaustionMode.CONTEXT_SATURATION))
+
+        backlog = len(state.get("prefetch_queue", []))
+        if backlog > getattr(self.config, "prefetch_queue_limit", 20):
+            candidates.append((2, ExhaustionMode.TOOL_BACKPRESSURE))
+
+        if self._ledger_has_test_failure(ledger):
+            candidates.append((2 if stage == "handle_tool_response" else 4, ExhaustionMode.TEST_FAILURE))
+
+        recent_exhaustions = [
+            entry.exhaustion_trigger
+            for entry in ledger[-3:]
+            if entry.exhaustion_trigger
+        ]
+        if any(mode is ExhaustionMode.HYPOTHESIS_EXHAUSTED for mode in recent_exhaustions):
+            candidates.append((2, ExhaustionMode.HYPOTHESIS_EXHAUSTED))
+
+        recent_failures = self._recent_failure_count(ledger, window=3)
+        if recent_failures >= 3:
+            candidates.append((2, ExhaustionMode.RETRY_DEPLETION))
+        elif recent_failures >= 2 and stage == "govern_context":
+            candidates.append((3, ExhaustionMode.RETRY_DEPLETION))
+
+        working_memory = state.get("working_memory", {})
+        if isinstance(working_memory, dict) and working_memory.get("llm_stop"):
+            candidates.append((1, ExhaustionMode.LLM_STOP))
+
+        if self._tool_indicates_llm_stop(tool_response):
+            candidates.append((1, ExhaustionMode.LLM_STOP))
+
+        if not candidates:
+            return ExhaustionMode.NONE, float(probability)
+
+        candidates.sort(key=lambda item: item[0])
+        mode = candidates[0][1]
+        return mode, float(probability)
+
+    @staticmethod
+    def _context_ratio(state: QuadraCodeState) -> float:
+        max_tokens = state.get("context_window_max") or 0
+        used = state.get("context_window_used", 0)
+        if not max_tokens or used <= 0:
+            return 0.0
+        return float(min(1.0, max(0.0, used / max_tokens)))
+
+    def _recent_failure_count(
+        self, ledger: Sequence[RefinementLedgerEntry], *, window: int
+    ) -> int:
+        if window <= 0:
+            return 0
+        recent = ledger[-window:]
+        return sum(1 for entry in recent if self._status_is_failure(entry.status))
+
+    @staticmethod
+    def _status_is_failure(status: Optional[str]) -> bool:
+        if not status:
+            return False
+        lowered = status.lower()
+        return any(keyword in lowered for keyword in {"fail", "reject", "error", "timeout"})
+
+    @staticmethod
+    def _status_is_success(status: Optional[str]) -> bool:
+        if not status:
+            return False
+        lowered = status.lower()
+        return any(keyword in lowered for keyword in {"success", "pass", "complete", "resolved"})
+
+    def _ledger_has_test_failure(
+        self, ledger: Sequence[RefinementLedgerEntry]
+    ) -> bool:
+        if not ledger:
+            return False
+        last_entry = ledger[-1]
+        if last_entry.exhaustion_trigger is ExhaustionMode.TEST_FAILURE:
+            return True
+        results = last_entry.test_results
+        if isinstance(results, dict):
+            for key, value in results.items():
+                key_lower = str(key).lower()
+                if "fail" in key_lower and value:
+                    return True
+        elif isinstance(results, list):
+            return any("fail" in str(item).lower() for item in results)
+        elif isinstance(results, str):
+            if "fail" in results.lower():
+                return True
+        return self._status_is_failure(last_entry.status)
+
+    def _tool_indicates_llm_stop(self, tool_response: Any | None) -> bool:
+        if not isinstance(tool_response, ToolMessage):
+            return False
+        content = self._render_tool_message(tool_response).lower()
+        return "stop sequence" in content or "max_tokens" in content
+
+    async def _apply_exhaustion_strategy(
+        self,
+        state: QuadraCodeState,
+        mode: ExhaustionMode,
+        *,
+        stage: str,
+        previous_mode: ExhaustionMode,
+        tool_response: Any | None = None,
+    ) -> Optional[str]:
+        action_taken: Optional[str] = None
+
+        if mode is ExhaustionMode.CONTEXT_SATURATION:
+            state = await self.curator.optimize(state)
+            state = self._recompute_context_usage(state)
+            action_taken = "context_compaction"
+        elif mode is ExhaustionMode.TOOL_BACKPRESSURE:
+            backlog = list(state.get("prefetch_queue", []))
+            limit = getattr(self.config, "prefetch_queue_limit", 20)
+            if len(backlog) > limit:
+                state["prefetch_queue"] = backlog[:limit]
+            action_taken = "prefetch_throttled"
+        elif mode in {ExhaustionMode.RETRY_DEPLETION, ExhaustionMode.TEST_FAILURE, ExhaustionMode.HYPOTHESIS_EXHAUSTED}:
+            self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
+            action_taken = "hypothesis_refinement"
+        elif mode is ExhaustionMode.LLM_STOP:
+            working_memory = state.setdefault("working_memory", {})
+            if isinstance(working_memory, dict):
+                working_memory["llm_resume_hint"] = True
+            action_taken = "llm_resume_hint"
+        elif mode is ExhaustionMode.PREDICTED_EXHAUSTION:
+            self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
+            action_taken = "preemptive_refinement"
+
+        if action_taken:
+            self._record_recovery_action(state, stage, mode, action_taken)
+            await self.metrics.emit(
+                state,
+                "exhaustion_recovery",
+                {
+                    "stage": stage,
+                    "mode": mode.value,
+                    "previous_mode": previous_mode.value,
+                    "action": action_taken,
+                    "context_ratio": self._context_ratio(state),
+                },
+            )
+
+        return action_taken
+
+    def _record_recovery_action(
+        self, state: QuadraCodeState, stage: str, mode: ExhaustionMode, action: str
+    ) -> None:
+        log = state.setdefault("exhaustion_recovery_log", [])
+        if isinstance(log, list):
+            log.append(
+                {
+                    "timestamp": _utc_now().isoformat(),
+                    "stage": stage,
+                    "mode": mode.value,
+                    "action": action,
+                }
+            )
+            if len(log) > 50:
+                del log[0]
+
+    def _handle_workspace_integrity_event(
+        self,
+        state: QuadraCodeState,
+        *,
+        stage: str,
+        mode: ExhaustionMode,
+    ) -> None:
+        reason = f"exhaustion::{mode.value}"
+        validation = validate_workspace_integrity(
+            state,
+            reason=reason,
+            auto_restore=True,
+        )
+        metadata = {
+            "stage": stage,
+            "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
+        }
+        if validation is not None:
+            if validation.restored:
+                metadata["validation_status"] = "restored"
+            elif validation.valid:
+                metadata["validation_status"] = "clean"
+            else:
+                metadata["validation_status"] = "drift_detected"
+        capture_workspace_snapshot(
+            state,
+            reason=reason,
+            stage=stage,
+            exhaustion_mode=mode,
+            metadata=metadata,
+        )
+
+    def _record_stage_observability(self, state: QuadraCodeState, stage: str) -> None:
+        try:
+            self._meta_observer.track_stage_tokens(state, stage=stage)
+        except Exception:  # pragma: no cover - observability is best-effort
+            pass
+        metrics_snapshot = state.get("hypothesis_cycle_metrics")
+        if isinstance(metrics_snapshot, dict):
+            try:
+                self.time_travel.log_snapshot(
+                    state,
+                    reason=f"stage::{stage}",
+                    payload={"cycle_metrics": metrics_snapshot},
+                )
+            except Exception:  # pragma: no cover - best-effort
+                pass
+
+    async def _enforce_hotpath_residency(self, state: QuadraCodeState) -> None:
+        if not self.registry_url:
+            return
+        agents = await self._fetch_hotpath_agents()
+        if not isinstance(agents, list):
+            return
+        unhealthy = [agent for agent in agents if str(agent.get("status", "")).lower() != "healthy"]
+        if not unhealthy:
+            state["_hotpath_violation_agents"] = []
+            return
+        violation_ids = sorted(
+            {
+                str(agent.get("agent_id"))
+                for agent in unhealthy
+                if agent.get("agent_id")
+            }
+        )
+        previous_ids = sorted(
+            {
+                str(agent)
+                for agent in state.get("_hotpath_violation_agents", [])
+                if agent
+            }
+        )
+        if violation_ids == previous_ids:
+            return
+        state["_hotpath_violation_agents"] = violation_ids
+        payload = {
+            "agents": [
+                {
+                    "agent_id": agent.get("agent_id"),
+                    "status": agent.get("status"),
+                    "last_heartbeat": agent.get("last_heartbeat"),
+                }
+                for agent in unhealthy
+            ],
+            "registry_url": self.registry_url,
+        }
+        telemetry = state.setdefault("prp_telemetry", [])
+        if isinstance(telemetry, list):
+            telemetry.append({"event": "hotpath_violation", "payload": payload})
+        invariants = state.setdefault("invariants", {})
+        if isinstance(invariants, dict):
+            log = invariants.setdefault("violation_log", [])
+            if isinstance(log, list):
+                log.append(
+                    {
+                        "timestamp": _utc_now().isoformat(),
+                        "invariant": "hotpath_residency",
+                        "details": payload,
+                    }
+                )
+        try:
+            self._meta_observer.publish_autonomous_event("hotpath_violation", payload)
+        except Exception:  # pragma: no cover - best-effort
+            LOGGER.debug("Failed to publish hotpath violation event", exc_info=True)
+        self.time_travel.log_transition(
+            state,
+            event="hotpath_violation",
+            payload=payload,
+        )
+
+    async def _fetch_hotpath_agents(self) -> List[Dict[str, Any]]:
+        if not self.registry_url:
+            return []
+        url = f"{self.registry_url}/agents/hotpath"
+        try:
+            async with httpx.AsyncClient(timeout=self._hotpath_probe_timeout) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict):
+                    agents = data.get("agents")
+                    if isinstance(agents, list):
+                        return agents
+                if isinstance(data, list):
+                    return data
+        except Exception as exc:  # pragma: no cover - best-effort
+            LOGGER.debug("Hotpath registry probe failed: %s", exc)
+        return []
+
+    @staticmethod
+    def _coerce_exhaustion_mode(value: Any) -> ExhaustionMode:
+        if isinstance(value, ExhaustionMode):
+            return value
+        if isinstance(value, str):
+            try:
+                return ExhaustionMode(value)
+            except ValueError:
+                return ExhaustionMode.NONE
+        return ExhaustionMode.NONE
+
+    def _apply_prp_transition(
+        self,
+        state: QuadraCodeState,
+        target_state: PRPState,
+        *,
+        human_clone_triggered: bool = False,
+        strict: bool = False,
+    ) -> None:
+        apply_prp_transition(
+            state,
+            target_state,
+            exhaustion_mode=state.get("exhaustion_mode"),
+            human_clone_triggered=human_clone_triggered,
+            strict=strict,
+        )
+
+    def _handle_false_stop(
+        self,
+        state: QuadraCodeState,
+        *,
+        reason: str,
+        stage: str,
+        evidence: Dict[str, Any] | None = None,
+    ) -> None:
+        payload = flag_false_stop_event(
+            state,
+            reason=reason,
+            stage=stage,
+            evidence=evidence or {},
+        )
+        self._record_skepticism_gate(
+            state,
+            source="false_stop",
+            reason=reason,
+            evidence=payload,
+        )
+        self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
+
+    def _record_skepticism_gate(
+        self,
+        state: QuadraCodeState,
+        *,
+        source: str,
+        reason: str,
+        evidence: Dict[str, Any] | None = None,
+    ) -> None:
+        record_skepticism_challenge(
+            state,
+            source=source,
+            reason=reason,
+            evidence=evidence or {},
+        )
+
+    def _maybe_issue_skepticism_challenge(
+        self,
+        state: QuadraCodeState,
+        message: ToolMessage,
+    ) -> None:
+        invariants = state.get("invariants")
+        if isinstance(invariants, dict) and invariants.get("skepticism_gate_satisfied"):
+            return
+        excerpt = self._coerce_tool_content(message.content)[:280]
+        evidence = {
+            "tool": message.name,
+            "tool_call_id": message.tool_call_id,
+            "excerpt": excerpt,
+        }
+        self._record_skepticism_gate(
+            state,
+            source="tool_response",
+            reason=message.name or "tool_output",
+            evidence=evidence,
+        )
+
+    async def _flush_prp_metrics(self, state: QuadraCodeState) -> None:
+        queued_events = list(state.get("prp_telemetry", []))
+        if not queued_events:
+            return
+        state["prp_telemetry"] = []
+        for record in queued_events:
+            event = record.get("event", "prp_transition")
+            payload = record.get("payload", {})
+            if event == "invariant_violation":
+                # Keep invariant telemetry internal/minimal to avoid reordering user-facing metrics
+                continue
+            await self.metrics.emit(state, event, payload)
+
     async def _emit_curation_metrics(
-        self, state: ContextEngineState, *, reason: str
+        self, state: QuadraCodeState, *, reason: str
     ) -> None:
         summary = state.get("last_curation_summary") or {}
         payload = {
@@ -737,7 +1568,7 @@ class ContextEngine:
         await self.metrics.emit(state, "curation", payload)
         state["last_curation_summary"] = {}
 
-    async def _emit_load_metrics(self, state: ContextEngineState) -> None:
+    async def _emit_load_metrics(self, state: QuadraCodeState) -> None:
         load_events = list(state.get("recent_loads", []))
         if not load_events:
             return
@@ -749,7 +1580,7 @@ class ContextEngine:
         await self.metrics.emit(state, "load", payload)
         state["recent_loads"] = []
 
-    async def _emit_externalization_metrics(self, state: ContextEngineState) -> None:
+    async def _emit_externalization_metrics(self, state: QuadraCodeState) -> None:
         events = list(state.get("recent_externalizations", []))
         if not events:
             return
@@ -761,7 +1592,7 @@ class ContextEngine:
         state["recent_externalizations"] = []
 
     def _recommendations_for_metric(
-        self, metric: str, state: ContextEngineState
+        self, metric: str, state: QuadraCodeState
     ) -> List[str]:
         suggestions: Dict[str, List[str]] = {
             "relevance": [
@@ -797,7 +1628,7 @@ class ContextEngine:
                 recs = recs + [f"load context types: {', '.join(sorted(missing))}"]
         return recs
 
-    def _missing_context_types(self, state: ContextEngineState) -> List[str]:
+    def _missing_context_types(self, state: QuadraCodeState) -> List[str]:
         expected = set(self.config.context_priorities.keys())
         present = {
             segment.get("type", "").split(":", 1)[0]
@@ -815,7 +1646,7 @@ class ContextEngine:
         return result
 
     def _update_curation_rules(
-        self, state: ContextEngineState, reflection: ReflectionResult
+        self, state: QuadraCodeState, reflection: ReflectionResult
     ) -> None:
         rules = state["curation_rules"]
         focus = reflection.focus_metric
@@ -833,5 +1664,5 @@ class ContextEngine:
 
 
 class _NoOpExternalMemory:
-    async def save_checkpoint(self, state: ContextEngineState) -> str:
+    async def save_checkpoint(self, state: QuadraCodeState) -> str:
         return f"checkpoint-{len(state['memory_checkpoints']) + 1}"
