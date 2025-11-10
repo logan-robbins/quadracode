@@ -12,6 +12,8 @@ dependencies = [
   "quadracode-agent-registry",
   "quadracode-ui",
   "watchdog>=6.0.0",
+  "python-dotenv>=1.0.0",
+  "pytest>=8.2",
 ]
 
 [tool.uv.sources]
