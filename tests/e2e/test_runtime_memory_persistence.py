@@ -48,9 +48,6 @@ def _extract_ai_contents(payload_raw: str) -> list[str]:
 def test_runtime_checkpoint_survives_orchestrator_restart():
     require_prerequisites()
 
-    if shutil.which("docker") is None:
-        pytest.fail("Docker CLI must be installed and available on PATH for runtime memory test")
-
     run_compose(["down", "-v"], check=False)
     run_compose(
         [
