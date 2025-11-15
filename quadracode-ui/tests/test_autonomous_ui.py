@@ -1,3 +1,4 @@
+"""Tests for autonomous mode UI components and state management."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,6 +7,8 @@ from quadracode_ui import app
 
 
 class _StubStreamlit:
+    """A stub for the `streamlit` module for isolated testing."""
+
     def __init__(self) -> None:
         self.session_state = {}
 
@@ -14,6 +17,13 @@ class _StubStreamlit:
 
 
 def test_load_autonomous_events_parses_payload(monkeypatch):
+    """
+    Verifies that `_load_autonomous_events` correctly parses JSON payloads.
+
+    This test ensures that the function deserializes the `payload` field from
+    Redis stream entries into a dictionary, making it accessible for rendering
+    in the UI. It uses a `DummyRedis` to provide controlled input.
+    """
     stub = _StubStreamlit()
     monkeypatch.setattr(app, "st", stub)
 
@@ -33,6 +43,13 @@ def test_load_autonomous_events_parses_payload(monkeypatch):
 
 
 def test_current_autonomous_settings(monkeypatch):
+    """
+    Ensures `_current_autonomous_settings` correctly reads from session state.
+
+    This test populates the `session_state` with mock autonomous mode settings
+    and verifies that the `_current_autonomous_settings` function retrieves
+    and formats them correctly into a dictionary.
+    """
     stub = _StubStreamlit()
     stub.session_state.update(
         {

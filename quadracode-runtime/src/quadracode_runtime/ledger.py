@@ -1,5 +1,16 @@
-"""Refinement ledger management utilities and tool handlers."""
+"""
+This module provides the utilities for managing the "refinement ledger," a key 
+data structure in the Quadracode runtime that tracks the history of the 
+Plan-Refine-Play (PRP) loop.
 
+The refinement ledger is a chronological record of all the hypotheses that have 
+been proposed, the strategies that have been employed, and the outcomes that have 
+been achieved. This module provides the `process_manage_refinement_ledger_tool_response` 
+function, which is a tool handler that processes requests to update and query the 
+ledger. It also includes a set of helper functions for analyzing the ledger, such 
+as for calculating the novelty of a new hypothesis and for predicting the 
+likelihood of its success.
+"""
 from __future__ import annotations
 
 import json
@@ -49,6 +60,9 @@ class ManageLedgerPayload(BaseModel):
 
 @dataclass(slots=True)
 class NoveltyAnalysis:
+    """
+    Represents the results of a novelty analysis for a new hypothesis.
+    """
     score: float
     basis: List[str]
     blockers: List[str]
@@ -59,7 +73,22 @@ def process_manage_refinement_ledger_tool_response(
     state: QuadraCodeState,
     tool_response: Any,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
-    """Handle manage_refinement_ledger tool invocations."""
+    """
+    Handles tool invocations for the `manage_refinement_ledger` tool.
+
+    This function is the main entry point for all interactions with the 
+    refinement ledger. It parses the tool message, validates the payload, and 
+    then dispatches to the appropriate handler for the requested operation 
+    (e.g., `propose_hypothesis`, `conclude_hypothesis`).
+
+    Args:
+        state: The current state of the system.
+        tool_response: The raw tool message from the LangGraph.
+
+    Returns:
+        A tuple containing the updated state and an optional dictionary 
+        representing the event that was processed.
+    """
 
     if not isinstance(tool_response, ToolMessage):
         return state, None
@@ -87,6 +116,7 @@ def process_manage_refinement_ledger_tool_response(
         )
         return state, None
 
+    # Dispatch to the appropriate handler
     operation = payload.operation
     if operation == "propose_hypothesis":
         return _handle_propose(state, payload, tool_response)
@@ -105,6 +135,7 @@ def _handle_propose(
     payload: ManageLedgerPayload,
     tool_response: ToolMessage,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
+    """Handles the 'propose_hypothesis' operation."""
     hypothesis = (payload.hypothesis or "").strip()
     if not hypothesis:
         return _reject_operation(
@@ -177,6 +208,7 @@ def _handle_conclude(
     payload: ManageLedgerPayload,
     tool_response: ToolMessage,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
+    """Handles the 'conclude_hypothesis' operation."""
     cycle_id = (payload.cycle_id or "").strip()
     if not cycle_id:
         return _reject_operation(state, "cycle_id is required", payload, tool_response)
@@ -238,6 +270,7 @@ def _handle_query_failures(
     payload: ManageLedgerPayload,
     tool_response: ToolMessage,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
+    """Handles the 'query_past_failures' operation."""
     limit = payload.limit or 5
     filter_text = (payload.filter or "").strip().lower()
     failures: List[RefinementLedgerEntry] = []
@@ -295,6 +328,7 @@ def _handle_infer_causal_chain(
     payload: ManageLedgerPayload,
     tool_response: ToolMessage,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
+    """Handles the 'infer_causal_chain' operation."""
     ledger_entries = [
         entry
         for entry in state.get("refinement_ledger", [])
@@ -367,6 +401,7 @@ def _reject_operation(
     payload: ManageLedgerPayload,
     tool_response: ToolMessage,
 ) -> Tuple[QuadraCodeState, Dict[str, Any] | None]:
+    """Rejects a ledger operation and records the reason."""
     _append_system_message(
         state,
         f"Refinement ledger request rejected: {reason}",
@@ -399,6 +434,10 @@ def _analyze_novelty(
     strategy: str | None,
     dependencies: Sequence[str],
 ) -> NoveltyAnalysis:
+    """
+    Analyzes the novelty of a new hypothesis by comparing it to the existing 
+    entries in the ledger.
+    """
     ledger_entries = [
         entry
         for entry in state.get("refinement_ledger", [])
@@ -455,6 +494,10 @@ def _predict_success_probability(
     strategy: str | None,
     novelty_score: float,
 ) -> float:
+    """
+    Predicts the likelihood of success for a new hypothesis based on historical 
+    data from the ledger.
+    """
     ledger_entries: List[RefinementLedgerEntry] = [
         entry
         for entry in state.get("refinement_ledger", [])
@@ -488,6 +531,7 @@ def _predict_success_probability(
 
 
 def _build_dependency_graph(entries: Iterable[RefinementLedgerEntry]) -> nx.DiGraph:
+    """Builds a NetworkX DiGraph from the dependencies in the ledger."""
     graph = nx.DiGraph()
     for entry in entries:
         graph.add_node(entry.cycle_id, status=entry.status)
@@ -497,6 +541,7 @@ def _build_dependency_graph(entries: Iterable[RefinementLedgerEntry]) -> nx.DiGr
 
 
 def _find_entry(state: QuadraCodeState, cycle_id: str) -> RefinementLedgerEntry | None:
+    """Finds a ledger entry by its cycle ID."""
     for entry in state.get("refinement_ledger", []):
         if isinstance(entry, RefinementLedgerEntry) and entry.cycle_id == cycle_id:
             return entry
@@ -509,6 +554,7 @@ def _append_system_message(
     *,
     metadata: Dict[str, Any] | None = None,
 ) -> None:
+    """Appends a `SystemMessage` to the state."""
     message = SystemMessage(
         content=content,
         additional_kwargs={
@@ -521,6 +567,7 @@ def _append_system_message(
 
 
 def _parse_tool_message(message: ToolMessage) -> Dict[str, Any] | None:
+    """Parses the JSON content of a `ToolMessage`."""
     content = message.content
     if isinstance(content, str):
         text = content
@@ -548,10 +595,12 @@ def _parse_tool_message(message: ToolMessage) -> Dict[str, Any] | None:
 
 
 def _tokenize(text: str) -> set[str]:
+    """Tokenizes a string of text into a set of unique words."""
     return set(_TOKEN_PATTERN.findall(text.lower()))
 
 
 def _token_similarity(lhs: set[str], rhs: set[str]) -> float:
+    """Calculates the Jaccard similarity between two sets of tokens."""
     if not lhs or not rhs:
         return 0.0
     intersection = len(lhs & rhs)
@@ -562,6 +611,7 @@ def _token_similarity(lhs: set[str], rhs: set[str]) -> float:
 
 
 def _normalize_identifiers(values: Sequence[Union[str, int]]) -> List[str]:
+    """Normalizes a sequence of identifiers into a list of strings."""
     normalized: List[str] = []
     for value in values:
         text = str(value).strip()
@@ -571,6 +621,7 @@ def _normalize_identifiers(values: Sequence[Union[str, int]]) -> List[str]:
 
 
 def _next_cycle_id(state: QuadraCodeState) -> str:
+    """Generates the next unique cycle ID."""
     ledger = state.get("refinement_ledger", [])
     existing_ids = {
         entry.cycle_id
@@ -586,6 +637,7 @@ def _next_cycle_id(state: QuadraCodeState) -> str:
 
 
 def _record_metric(state: QuadraCodeState, event: str, payload: Dict[str, Any]) -> None:
+    """Records a metric in the state's metrics log."""
     metrics_log = state.setdefault("metrics_log", [])
     if isinstance(metrics_log, list):
         metrics_log.append({"event": event, "payload": payload})

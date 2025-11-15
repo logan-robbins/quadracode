@@ -1,4 +1,14 @@
-"""Configuration for the context engineering node."""
+"""
+This module defines the configuration schema for the ContextEngine, a core 
+component of the Quadracode runtime responsible for managing the contextual 
+information available to the language models.
+
+The `ContextEngineConfig` class provides a centralized, strongly-typed
+dataclass for all the tunable parameters that govern the context engine's 
+behavior. This includes settings for token limits, memory management, quality 
+thresholds, and the various sub-frameworks that the context engine employs, such 
+as ACE (Adaptive Context Engineering) and MemAct (Memory Activation).
+"""
 
 from __future__ import annotations
 
@@ -10,7 +20,20 @@ from typing import Dict, List, Optional
 
 @dataclass(slots=True)
 class ContextEngineConfig:
-    """Runtime configuration for the ContextEngine component."""
+    """
+    Provides a structured configuration for the ContextEngine component.
+
+    This dataclass encapsulates all the settings that control the behavior of 
+    the context engine. It is designed to be instantiated with sensible 
+    defaults, which can be selectively overridden by environment variables for 
+    flexible deployment.
+
+    Attributes:
+        context_window_max: The maximum number of tokens allowed in the context window.
+        target_context_size: The desired size of the context window to aim for.
+        quality_threshold: The minimum quality score for a context segment to be included.
+        ... and many others, see the class definition for a full list.
+    """
 
     # Token limits
     context_window_max: int = 128_000
@@ -114,27 +137,21 @@ class ContextEngineConfig:
 
     @classmethod
     def from_environment(cls) -> "ContextEngineConfig":
-        """Create a config instance, allowing environment overrides.
+        """
+        Creates a `ContextEngineConfig` instance, with values overridden by 
+        environment variables where available.
 
-        Supported environment variables (optional):
-        - QUADRACODE_CONTEXT_WINDOW_MAX (int)
-        - QUADRACODE_TARGET_CONTEXT_SIZE (int)
-        - QUADRACODE_MAX_TOOL_PAYLOAD_CHARS (int)
-        - QUADRACODE_REDUCER_MODEL (str or 'heuristic')
-        - QUADRACODE_REDUCER_CHUNK_TOKENS (int)
-        - QUADRACODE_REDUCER_TARGET_TOKENS (int)
-        - QUADRACODE_GOVERNOR_MODEL (str or 'heuristic')
-        - QUADRACODE_GOVERNOR_MAX_SEGMENTS (int)
-        - QUADRACODE_METRICS_ENABLED (bool: '1'/'true'/'yes')
-        - QUADRACODE_METRICS_EMIT_MODE ("stream"|"log")
-        - QUADRACODE_METRICS_REDIS_URL (str)
-        - QUADRACODE_METRICS_STREAM_KEY (str)
-        - QUADRACODE_AUTONOMOUS_STREAM_KEY (str)
-        - QUADRACODE_EXTERNALIZE_WRITE_ENABLED (bool)
-        - QUADRACODE_QUALITY_THRESHOLD (float 0..1)
+        This factory method provides a convenient way to configure the context 
+        engine in different environments without modifying the code. It checks for a 
+        predefined set of environment variables and applies their values to the 
+        configuration object, with robust parsing for different data types.
+
+        Returns:
+            A `ContextEngineConfig` instance with environment-specific overrides.
         """
 
         def _int(name: str, default: int) -> int:
+            """Safely parses an integer from an environment variable."""
             raw = os.environ.get(name)
             if raw is None:
                 return default
@@ -144,6 +161,7 @@ class ContextEngineConfig:
                 return default
 
         def _float(name: str, default: float) -> float:
+            """Safely parses a float from an environment variable."""
             raw = os.environ.get(name)
             if raw is None:
                 return default
@@ -153,6 +171,7 @@ class ContextEngineConfig:
                 return default
 
         def _bool(name: str, default: bool) -> bool:
+            """Safely parses a boolean from an environment variable."""
             raw = os.environ.get(name)
             if raw is None:
                 return default

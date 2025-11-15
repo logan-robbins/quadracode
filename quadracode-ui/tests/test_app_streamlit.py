@@ -1,3 +1,12 @@
+"""
+Unit and integration tests for the Quadracode Streamlit application.
+
+This module uses Streamlit's `AppTest` harness to simulate user interactions
+and verify the application's behavior in a controlled environment. A `FakeRedis`
+class is used to stub out Redis interactions, allowing tests to assert on
+message passing and state changes without a live Redis instance. Tests cover
+chat functionality, context metrics parsing, and workspace panel rendering.
+"""
 from __future__ import annotations
 
 import json
@@ -25,7 +34,14 @@ def run_app() -> None:
 
 
 class FakeRedis:
-    """Minimal Redis stub to drive the Streamlit app during tests."""
+    """
+    A minimal Redis client stub for testing the Streamlit application.
+
+    This class simulates the Redis commands used by the UI, such as `xadd`,
+    `xread`, and `xrevrange`, allowing the app to run without a live Redis
+    server. It captures sent messages and can be pre-loaded with mock stream
+    entries to drive test scenarios for chat, metrics, and workspace events.
+    """
 
     def __init__(self, metrics_stream: str) -> None:
         self._delivered = False
@@ -38,9 +54,11 @@ class FakeRedis:
         self._populate_metrics()
 
     def ping(self) -> None:
+        """Simulates a successful Redis ping."""
         return
 
     def scan_iter(self, pattern: str) -> Iterable[str]:
+        """Yields a predefined set of mailbox keys to populate the stream viewer."""
         yield MAILBOX_HUMAN
 
     def _build_entry(
@@ -51,6 +69,7 @@ class FakeRedis:
         ticket_id: str,
         entry_id: str,
     ) -> Tuple[str, Dict[str, str]]:
+        """Constructs a mock Redis stream entry for a chat message."""
         payload: Dict[str, Any] = {"chat_id": chat_id, "ticket_id": ticket_id, "messages": []}
         if self.workspace_descriptor:
             payload["workspace"] = self.workspace_descriptor
@@ -63,6 +82,7 @@ class FakeRedis:
         return entry_id, envelope.to_stream_fields()
 
     def xrevrange(self, key: str, count: int = 1) -> List[Tuple[str, Dict[str, str]]]:
+        """Simulates reading the latest entries from a stream in reverse order."""
         if key != MAILBOX_HUMAN:
             if key == self.metrics_stream:
                 return list(reversed(self.metrics_entries))[:count]
@@ -90,6 +110,9 @@ class FakeRedis:
         block: int | None = None,
         count: int | None = None,
     ) -> List[Tuple[str, List[Tuple[str, Dict[str, str]]]]]:
+        """
+        Simulates a blocking read from a stream, delivering a mock response once.
+        """
         if self._delivered:
             return []
 
@@ -108,9 +131,11 @@ class FakeRedis:
         return [(MAILBOX_HUMAN, [entry])]
 
     def xadd(self, key: str, fields: Dict[str, str]) -> None:
+        """Captures messages sent by the UI for later assertion."""
         self.xadd_envelopes.append((key, MessageEnvelope.from_stream_fields(fields)))
 
     def _populate_metrics(self) -> None:
+        """Pre-loads the fake Redis instance with sample context metrics data."""
         now = datetime.now(timezone.utc)
         sample = [
             (
@@ -228,6 +253,14 @@ def _clear_cached_client() -> None:
 
 @pytest.fixture
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    """
+    Pytest fixture to inject the `FakeRedis` stub into the application.
+
+    This fixture uses `monkeypatch` to replace the actual `redis.Redis` client
+    with an instance of `FakeRedis`. It also stubs out the agent registry
+    snapshot and the background mailbox watcher to isolate the test to the
+    UI's rendering and state management logic.
+    """
     import quadracode_ui.app as app_module
 
     stub = FakeRedis(app_module.CONTEXT_METRICS_STREAM)
@@ -243,6 +276,9 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
 
 
 def test_chat_fragment_pulls_responses(fake_redis: FakeRedis) -> None:
+    """
+    Verifies that the UI correctly polls for and displays new chat messages.
+    """
     tester = AppTest.from_function(run_app, default_timeout=3.0)
     tester.run()
 
@@ -253,6 +289,9 @@ def test_chat_fragment_pulls_responses(fake_redis: FakeRedis) -> None:
 
 
 def test_chat_input_enqueues_messages(fake_redis: FakeRedis) -> None:
+    """
+    Ensures that submitting a message in the chat input sends it to the orchestrator.
+    """
     tester = AppTest.from_function(run_app, default_timeout=3.0)
     tester.run()
 
@@ -269,6 +308,9 @@ def test_chat_input_enqueues_messages(fake_redis: FakeRedis) -> None:
 
 
 def test_load_context_metrics_parses_extended_events(fake_redis: FakeRedis) -> None:
+    """
+    Tests that the context metrics loader correctly parses various event types.
+    """
     import quadracode_ui.app as app_module
 
     entries = app_module._load_context_metrics(fake_redis, limit=20)
@@ -281,6 +323,10 @@ def test_load_context_metrics_parses_extended_events(fake_redis: FakeRedis) -> N
 
 
 def test_workspace_panel_renders_descriptor_and_events(fake_redis: FakeRedis) -> None:
+    """
+    Verifies that the workspace panel in the sidebar correctly displays the
+    workspace descriptor and a filterable list of workspace events.
+    """
     from quadracode_ui import app as app_module
 
     descriptor = {

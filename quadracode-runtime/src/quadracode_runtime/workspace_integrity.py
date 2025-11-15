@@ -1,4 +1,30 @@
-"""Workspace snapshotting, validation, and restoration utilities."""
+"""
+Utilities for snapshotting, validating, and restoring agent workspaces.
+
+This module provides the `WorkspaceIntegrityManager`, a class responsible for
+managing the state of an agent's workspace, which can be a host directory or a
+Docker volume. It ensures that the workspace can be reliably captured at key
+moments, validated against a known-good state, and restored if unexpected
+changes or corruption are detected.
+
+Key functionalities include:
+- **Snapshotting**: Creating a compressed tarball (`.tar.gz`) of the workspace
+  and generating a detailed manifest of its contents, including file paths,
+  sizes, and SHA256 checksums.
+- **Checksumming**: Calculating an aggregate checksum of the entire manifest to
+  provide a single, efficient identifier for the workspace's state.
+- **Diffing**: Generating a textual diff between the manifests of two snapshots,
+  highlighting changes to the workspace over time.
+- **Validation**: Comparing the live state of a workspace against a reference
+  snapshot's checksum to detect any drift or unauthorized modifications.
+- **Restoration**: Automatically restoring a workspace to the state of a given
+  snapshot from its archive, either by clearing and extracting to a host path
+  or by managing a Docker volume.
+
+The module is designed to be robust, using thread-safe operations and handling
+both local file systems and Docker environments. It integrates with the runtime
+state (`QuadraCodeState`) to log its activities and respond to system-level events.
+"""
 
 from __future__ import annotations
 
@@ -26,16 +52,28 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
+    """Returns the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class WorkspaceIntegrityError(RuntimeError):
+    """Custom exception raised for failures in workspace integrity operations."""
     """Raised when workspace integrity operations fail."""
 
 
 @dataclass(slots=True)
 class WorkspaceValidationResult:
-    """Result payload for workspace validation attempts."""
+    """
+    A structured data class for the outcome of a workspace validation check.
+
+    Attributes:
+        valid: A boolean indicating if the workspace's checksum matches the expected one.
+        actual_checksum: The checksum of the workspace at the time of validation.
+        expected_checksum: The reference checksum from the snapshot.
+        restored: A boolean indicating if a restoration was attempted and successful.
+        error: An optional error message if validation or restoration failed.
+        timestamp: The ISO 8601 timestamp of when the validation was performed.
+    """
 
     valid: bool
     actual_checksum: Optional[str]
@@ -46,7 +84,23 @@ class WorkspaceValidationResult:
 
 
 class WorkspaceIntegrityManager:
-    """Coordinates workspace snapshotting, diffing, and restoration."""
+    """
+    Orchestrates the lifecycle of workspace management: snapshotting, diffing, validation, and restoration.
+
+    This manager abstracts the complexities of handling different workspace types
+    (host paths vs. Docker volumes) and provides a consistent API for integrity
+    operations. It manages a local cache of snapshot artifacts (archives, manifests)
+    and uses a thread-safe lock to ensure that concurrent operations do not
+    interfere with each other.
+
+    Configuration can be provided during instantiation or via environment variables
+    like `QUADRACODE_WORKSPACE_SNAPSHOT_ROOT` and `QUADRACODE_DOCKER_BIN`.
+
+    Attributes:
+        snapshot_root: The base directory where all snapshot artifacts are stored.
+        docker_bin: The path to the Docker executable.
+        snapshot_image: The Docker image used for volume operations (e.g., 'alpine').
+    """
 
     SNAPSHOT_LIMIT = 5
 
@@ -79,7 +133,30 @@ class WorkspaceIntegrityManager:
         metadata: Optional[Dict[str, Any]] = None,
         previous_snapshot: WorkspaceSnapshotRecord | None = None,
     ) -> WorkspaceSnapshotRecord:
-        """Capture a persistent snapshot and optional diff for the workspace."""
+        """
+        Creates a persistent, versioned snapshot of the agent's workspace.
+
+        This method archives the workspace content, generates a file manifest with
+        individual checksums, computes an aggregate checksum for the entire state,
+        and optionally creates a diff against a previous snapshot. The resulting
+        `WorkspaceSnapshotRecord` contains all metadata and paths to the generated
+        artifacts.
+
+        Args:
+            descriptor: A mapping that describes the workspace (e.g., containing
+                        `workspace_id` and `host_path` or `volume`).
+            reason: A human-readable string explaining why the snapshot was taken.
+            exhaustion_mode: The `ExhaustionMode` active when the snapshot was triggered.
+            metadata: An optional dictionary for additional, unstructured metadata.
+            previous_snapshot: An optional previous snapshot to diff against.
+
+        Returns:
+            A `WorkspaceSnapshotRecord` detailing the newly created snapshot.
+
+        Raises:
+            WorkspaceIntegrityError: If the workspace descriptor is invalid or if
+                                     the archival process fails.
+        """
 
         with self._lock:
             workspace_id = self._coerce_workspace_id(descriptor)
@@ -129,7 +206,24 @@ class WorkspaceIntegrityManager:
         reference: WorkspaceSnapshotRecord,
         auto_restore: bool = False,
     ) -> WorkspaceValidationResult:
-        """Validate current workspace checksum against a reference snapshot."""
+        """
+        Validates the current state of a workspace against a reference snapshot.
+
+        This method computes the checksum of the live workspace and compares it
+        to the checksum stored in the `reference` snapshot. If they do not match,
+        it indicates that the workspace has drifted. If `auto_restore` is enabled,
+        it will attempt to restore the workspace from the reference snapshot's
+        archive upon detecting a mismatch.
+
+        Args:
+            descriptor: A mapping that describes the workspace to be validated.
+            reference: The `WorkspaceSnapshotRecord` to use as the source of truth.
+            auto_restore: If `True`, automatically attempts to restore the workspace
+                          if validation fails.
+
+        Returns:
+            A `WorkspaceValidationResult` object summarizing the outcome of the check.
+        """
 
         with self._lock:
             workspace_dir = self._prepare_workspace_dir(reference.workspace_id)
@@ -394,6 +488,19 @@ def get_workspace_integrity_manager() -> WorkspaceIntegrityManager:
 
 
 def _last_snapshot(state: QuadraCodeState) -> WorkspaceSnapshotRecord | None:
+    """
+    Safely retrieves the most recent workspace snapshot from the state.
+
+    It iterates through the `workspace_snapshots` list in reverse, handling
+    both `WorkspaceSnapshotRecord` objects and raw dictionaries, and returns
+    the first valid snapshot it finds.
+
+    Args:
+        state: The `QuadraCodeState` containing the snapshot history.
+
+    Returns:
+        The most recent `WorkspaceSnapshotRecord`, or `None` if none exist.
+    """
     snapshots = state.get("workspace_snapshots") or []
     for entry in reversed(snapshots):
         if isinstance(entry, WorkspaceSnapshotRecord):
@@ -415,6 +522,26 @@ def capture_workspace_snapshot(
     metadata: Optional[Dict[str, Any]] = None,
     max_snapshots: int | None = None,
 ) -> WorkspaceSnapshotRecord | None:
+    """
+    High-level function to capture a workspace snapshot and update the runtime state.
+
+    This function acts as a convenient wrapper around the `WorkspaceIntegrityManager`.
+    It extracts the workspace descriptor from the state, calls the manager to
+    capture the snapshot, appends the new snapshot record to the state, prunes
+    old snapshots to enforce a limit, and logs relevant metrics.
+
+    Args:
+        state: The `QuadraCodeState` to read from and update.
+        reason: A human-readable reason for the snapshot.
+        stage: The optional stage of the graph where the snapshot is being taken.
+        exhaustion_mode: The optional `ExhaustionMode` at the time of capture.
+        metadata: Optional dictionary for additional metadata.
+        max_snapshots: The maximum number of snapshots to retain in the state.
+                       Defaults to `WorkspaceIntegrityManager.SNAPSHOT_LIMIT`.
+
+    Returns:
+        The created `WorkspaceSnapshotRecord`, or `None` if snapshotting failed.
+    """
     descriptor = state.get("workspace")
     if not isinstance(descriptor, Mapping):
         return None
@@ -469,6 +596,23 @@ def validate_workspace_integrity(
     reason: str,
     auto_restore: bool = False,
 ) -> WorkspaceValidationResult | None:
+    """
+    High-level function to validate the workspace and update the runtime state.
+
+    This function orchestrates the validation process. It retrieves the workspace
+    descriptor and the last snapshot from the state, calls the manager to perform
+    the validation (and potential restoration), updates the `workspace_validation`
+    field in the state with the result, and logs relevant metrics.
+
+    Args:
+        state: The `QuadraCodeState` to read from and update.
+        reason: A human-readable reason for the validation check.
+        auto_restore: If `True`, enables automatic restoration on validation failure.
+
+    Returns:
+        A `WorkspaceValidationResult` summarizing the outcome, or `None` if the
+        preconditions for validation (e.g., an existing snapshot) are not met.
+    """
     descriptor = state.get("workspace")
     if not isinstance(descriptor, Mapping):
         return None
@@ -528,6 +672,19 @@ def _update_validation_state(
     checksum: Optional[str],
     error: Optional[str],
 ) -> None:
+    """
+    Updates the 'workspace_validation' dictionary within the `QuadraCodeState`.
+
+    This helper centralizes the logic for modifying the validation status,
+    ensuring that the timestamp, checksum, and failure counts are updated
+    consistently.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        status: The new validation status (e.g., "clean", "drift_detected", "restored").
+        checksum: The latest checksum of the workspace.
+        error: An optional error message to record.
+    """
     validation = state.setdefault("workspace_validation", {})
     validation.update(
         {
@@ -546,6 +703,14 @@ def _record_workspace_metric(
     event: str,
     payload: Dict[str, Any],
 ) -> None:
+    """
+    Appends a structured metric event to the 'metrics_log' in the state.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        event: The name of the event (e.g., "workspace_snapshot").
+        payload: A dictionary of data associated with the event.
+    """
     metrics = state.setdefault("metrics_log", [])
     metrics.append(
         {

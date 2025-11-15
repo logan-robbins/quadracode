@@ -1,3 +1,11 @@
+# This module defines the default system prompt for the Quadracode orchestrator.
+#
+# This prompt outlines the orchestrator's core capabilities, including its
+# control over tool usage, agent fleet management, and workspace provisioning. It
+# provides detailed instructions on when and how to spawn or delete agents, and
+# it establishes the strict policies for workspace interaction. This prompt is
+# used when the system is not in autonomous mode, guiding the orchestrator to act
+# as a powerful but human-supervised coordinator.
 SYSTEM_PROMPT = """
 You are an autonomous orchestrator agent with complete control over tool usage and agent management.
 

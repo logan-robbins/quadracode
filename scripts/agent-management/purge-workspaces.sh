@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
-# Purge stale Quadracode workspace containers and volumes.
-# Default behaviour removes workspace containers that are not running
-# and older than the configured max age (in hours). Matching volumes
-# are removed once their container is deleted.
+#
+# Purges stale Quadracode workspace containers and associated Docker volumes.
+#
+# This script identifies workspace containers by the `qc-ws-` prefix. By default,
+# it removes containers that are stopped and older than a specified age threshold.
+# The corresponding Docker volume is removed only if no other container references
+# it. The age calculation is performed by parsing the container's creation
+# timestamp via `docker inspect` and comparing it against a cutoff calculated in
+# Python. This ensures reliable timezone-aware age comparison.
+#
+# The script supports a `--force` flag to remove running containers and a
+# `--dry-run` mode to preview actions without making changes.
 #
 # Usage:
 #   purge-workspaces.sh [--max-age-hours HOURS] [--force] [--dry-run]
 #
 # Flags:
-#   --max-age-hours HOURS  Maximum age threshold in hours (default: 24)
-#   --force                Remove containers even if they are running
-#   --dry-run              Print actions without removing resources
+#   --max-age-hours HOURS  Maximum age for a container to be considered stale.
+#                          (default: 24)
+#   --force                Remove containers even if they are in a running state.
+#   --dry-run              Print the actions that would be taken without executing
+#                          the removal operations.
+#
 
 set -euo pipefail
 
@@ -19,6 +30,7 @@ FORCE=0
 DRY_RUN=0
 
 print_usage() {
+    # Fetches the usage text from the script's own header comments.
     sed -n '2,16p' "$0"
 }
 

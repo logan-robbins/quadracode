@@ -1,3 +1,15 @@
+"""
+This module provides the `make_driver` factory function, which is responsible for 
+creating the core decision-making component (the "driver") of the LangGraph.
+
+The driver is the node in the graph that is responsible for interpreting the 
+current state and deciding on the next action, which is typically to call a tool 
+or to respond to the user. This module supports two types of drivers: a simple, 
+heuristic-based driver for testing and a more powerful, LLM-based driver for 
+production. The choice of driver is determined by the `QUADRACODE_DRIVER_MODEL` 
+environment variable, allowing for flexible configuration of the runtime's core 
+logic.
+"""
 from __future__ import annotations
 
 import os
@@ -29,11 +41,35 @@ def _coerce_text(content) -> str:
 
 
 def make_driver(system_prompt: str, tools: list) -> callable:
+    """
+    Factory function that creates and returns the appropriate driver for the 
+    LangGraph.
+
+    This function reads the `QUADRACODE_DRIVER_MODEL` environment variable to 
+    determine whether to create a simple heuristic-based driver or a more 
+    sophisticated LLM-based driver. The driver is a key component of the graph, 
+    responsible for making decisions based on the current state.
+
+    Args:
+        system_prompt: The base system prompt for the driver.
+        tools: A list of tools that the driver can use.
+
+    Returns:
+        A callable that serves as the driver for the LangGraph.
+    """
     driver_model = os.environ.get("QUADRACODE_DRIVER_MODEL", "").strip().lower()
 
     if driver_model == "heuristic":
 
         def heuristic_driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
+            """
+            A simple, heuristic-based driver for testing and development.
+
+            This driver uses a set of simple rules to respond to messages and 
+            call tools. It is not intended for production use but is useful for 
+            testing the basic mechanics of the graph without incurring the cost 
+            and latency of an LLM.
+            """
             msgs: list[AnyMessage] = state.get("messages", [])
             if not msgs:
                 return {"messages": [AIMessage(content="Acknowledged.")] }
@@ -73,6 +109,14 @@ def make_driver(system_prompt: str, tools: list) -> callable:
     llm = init_chat_model("anthropic:claude-sonnet-4-20250514")
 
     def driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
+        """
+        An LLM-based driver that uses a language model to make decisions.
+
+        This driver dynamically constructs a detailed system prompt by combining 
+        the base prompt with contextual information from the state, such as the 
+        governor's plan, active skills, and memory guidance. It then invokes the 
+        LLM with this context to generate the next action.
+        """
         msgs: list[AnyMessage] = state["messages"]
         outline = state.get("governor_prompt_outline", {}) if isinstance(state, dict) else {}
         system_sections = [system_prompt]

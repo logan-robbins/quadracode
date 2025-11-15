@@ -1,4 +1,15 @@
-"""Hypothesis-driven critique processing and translation utilities."""
+"""
+This module provides the core utilities for processing and translating 
+hypothesis-driven critiques within the Quadracode runtime.
+
+It is a key component of the autonomous loop, responsible for taking structured 
+critiques from the `hypothesis_critique` tool and applying their insights to the 
+orchestrator's state. This includes updating the refinement ledger, managing the 
+critique backlog, and recording relevant metrics and error history. The module's 
+primary function, `apply_hypothesis_critique`, orchestrates this entire process, 
+ensuring that critiques are not just recorded, but are translated into actionable 
+next steps for the autonomous system.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +69,22 @@ def apply_hypothesis_critique(
     state: QuadraCodeState,
     record: HypothesisCritiqueRecord,
 ) -> Dict[str, Any]:
-    """Translate a critique and apply it to orchestrator state."""
+    """
+    Translates a hypothesis critique and applies it to the orchestrator's state.
+
+    This function serves as the main entry point for processing a critique. It 
+    orchestrates the translation of the critique into actionable items and then 
+    updates the relevant parts of the state, including the refinement ledger, 
+    the critique backlog, and the error history.
+
+    Args:
+        state: The current state of the orchestrator.
+        record: The `HypothesisCritiqueRecord` to be processed.
+
+    Returns:
+        A dictionary summarizing the translation of the critique, which is 
+        used for event logging.
+    """
 
     translation = _translate(record)
     _update_ledger(state, record, translation)
@@ -76,6 +102,20 @@ def apply_hypothesis_critique(
 
 
 def _translate(record: HypothesisCritiqueRecord) -> _Translation:
+    """
+    Translates a `HypothesisCritiqueRecord` into a structured set of actions.
+
+    This function takes a critique and converts it into a `_Translation` object, 
+    which includes a list of proposed improvements, a corresponding set of 
+    tests, a severity score, and a high-level directive for the next hypothesis 
+    cycle.
+
+    Args:
+        record: The critique record to translate.
+
+    Returns:
+        A `_Translation` object containing the actionable items.
+    """
     category = _enum_value(record.category)
     template = _CATEGORY_TEMPLATES.get(category, _CATEGORY_TEMPLATES["code_quality"])
     base_text = record.qualitative_feedback.strip() or record.critique_summary.strip()
@@ -128,6 +168,10 @@ def _translate(record: HypothesisCritiqueRecord) -> _Translation:
 
 
 def _severity_score(severity: Any, improvement_count: int) -> float:
+    """
+    Calculates a numerical severity score based on the critique's severity and 
+    the number of proposed improvements.
+    """
     value = _enum_value(severity)
     base = _SEVERITY_WEIGHTS.get(value, 0.5)
     modifier = min(0.2, 0.05 * max(0, improvement_count - 1))
@@ -139,6 +183,7 @@ def _update_ledger(
     record: HypothesisCritiqueRecord,
     translation: _Translation,
 ) -> None:
+    """Updates the refinement ledger with the results of the critique."""
     entry = _find_ledger_entry(state, record.cycle_id)
     critique_payload = {
         "category": _enum_value(record.category),
@@ -168,6 +213,7 @@ def _update_backlog(
     record: HypothesisCritiqueRecord,
     translation: _Translation,
 ) -> None:
+    """Adds the critique to the prioritized critique backlog."""
     backlog = state.setdefault("critique_backlog", [])
     if not isinstance(backlog, list):
         backlog = []
@@ -194,6 +240,7 @@ def _record_error_history(
     record: HypothesisCritiqueRecord,
     translation: _Translation,
 ) -> None:
+    """Records the critique as a non-fatal error in the error history."""
     errors = state.setdefault("error_history", [])
     entry: AutonomousErrorRecord = {
         "error_type": f"critique::{_enum_value(record.category)}",
@@ -211,6 +258,7 @@ def _record_metric(
     record: HypothesisCritiqueRecord,
     translation: _Translation,
 ) -> None:
+    """Records a metric for the critique event."""
     metrics = state.setdefault("metrics_log", [])
     metrics.append(
         {
@@ -230,6 +278,7 @@ def _find_ledger_entry(
     state: QuadraCodeState,
     cycle_id: str,
 ) -> RefinementLedgerEntry | None:
+    """Finds a specific entry in the refinement ledger by its cycle ID."""
     ledger = state.get("refinement_ledger")
     if not isinstance(ledger, list):
         return None
@@ -247,12 +296,14 @@ def _find_ledger_entry(
 
 
 def _explode_sentences(text: str) -> List[str]:
+    """Splits a block of text into a list of sentences."""
     chunks = re.split(r"[\n\.;!?]+", text)
     sentences = [chunk.strip() for chunk in chunks if chunk.strip()]
     return sentences[:5]
 
 
 def _enum_value(value: Any) -> str:
+    """Safely extracts the string value from an enum member."""
     if hasattr(value, "value"):
         return str(value.value)
     return str(value)

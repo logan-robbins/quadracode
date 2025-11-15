@@ -1,3 +1,15 @@
+"""
+This module is responsible for defining and enforcing the invariants of the 
+Plan-Refine-Play (PRP) state machine.
+
+Invariants are a set of rules that must hold true at specific points in the 
+PRP cycle. They are a critical mechanism for ensuring the robustness and 
+predictability of the autonomous loop. This module provides a set of functions for 
+marking the state with the necessary flags to track these invariants, as well as 
+a `check_transition_invariants` function that is called during state transitions 
+to verify that the invariants have been met. Any violations are logged, providing 
+a clear audit trail for debugging and analysis.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,6 +21,7 @@ def _now_iso() -> str:
 
 
 def _log_violation(state: MutableMapping[str, Any], code: str, details: Dict[str, Any]) -> None:
+    """Logs an invariant violation to the state."""
     bucket = state.setdefault("invariants", {})
     if not isinstance(bucket, dict):
         bucket = {}
@@ -23,12 +36,20 @@ def _log_violation(state: MutableMapping[str, Any], code: str, details: Dict[str
 
 
 def mark_context_updated(state: MutableMapping[str, Any]) -> None:
+    """
+    Marks the 'context_updated_in_cycle' invariant as satisfied for the 
+    current cycle.
+    """
     bucket = state.setdefault("invariants", {})
     if isinstance(bucket, dict):
         bucket["context_updated_in_cycle"] = True
 
 
 def mark_rejection_requires_tests(state: MutableMapping[str, Any]) -> None:
+    """
+    Sets the 'needs_test_after_rejection' invariant, indicating that a test 
+    must be run before the next conclusion or proposal.
+    """
     bucket = state.setdefault("invariants", {})
     if isinstance(bucket, dict):
         bucket["needs_test_after_rejection"] = True
@@ -36,6 +57,10 @@ def mark_rejection_requires_tests(state: MutableMapping[str, Any]) -> None:
 
 
 def clear_test_requirement(state: MutableMapping[str, Any]) -> None:
+    """
+    Clears the 'needs_test_after_rejection' invariant, typically after a test 
+    has been successfully run.
+    """
     bucket = state.setdefault("invariants", {})
     if isinstance(bucket, dict):
         bucket["needs_test_after_rejection"] = False
@@ -47,11 +72,21 @@ def check_transition_invariants(
     from_state: str,
     to_state: str,
 ) -> List[Dict[str, Any]]:
-    """Evaluate invariants on PRP transitions; return any violations.
+    """
+    Evaluates the state against a set of predefined invariants before a PRP 
+    state transition.
 
-    Invariants enforced:
-    - test_after_rejection: After PROPOSE→HYPOTHESIZE (HumanClone rejection), a test must run before CONCLUDE/PROPOSE.
-    - context_update_per_cycle: Every cycle should include a context update before CONCLUDE/PROPOSE.
+    This function is the core of the invariant enforcement system. It checks for 
+    violations of key invariants, such as ensuring that a test is run after a 
+    rejection, and logs any violations that are found.
+
+    Args:
+        state: The current state of the system.
+        from_state: The source state of the transition.
+        to_state: The target state of the transition.
+
+    Returns:
+        A list of any invariant violations that were detected.
     """
 
     violations: List[Dict[str, Any]] = []

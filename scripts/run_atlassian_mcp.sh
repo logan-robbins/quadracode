@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+#
+# Launches the Atlassian Rovo MCP (Managed Compute Platform) proxy client.
+#
+# This script uses `npx` to run the `mcp-remote` package, which establishes a
+# secure connection to the Atlassian MCP SSE (Server-Sent Events) endpoint.
+# It configures a local cache directory for MCP resources, which defaults to
+# `$HOME/.cache/mcp-remote` but can be overridden by the `MCP_REMOTE_CACHE_DIR`
+# environment variable.
+#
+# This is a prerequisite for agents that need to access Atlassian-hosted
+# resources like Jira or Confluence through the MCP infrastructure.
+#
+# Requires Node.js and npx to be installed.
+#
+# Usage:
+#   scripts/run_atlassian_mcp.sh
+#
+
 set -euo pipefail
 
 URL="https://mcp.atlassian.com/v1/sse"

@@ -1,4 +1,14 @@
-"""Progressive context loading implementation with real repository queries."""
+"""
+This module implements the `ProgressiveContextLoader`, a component of the context 
+engine that is responsible for loading context artifacts on demand.
+
+The `ProgressiveContextLoader` is a key part of the context engine's strategy for 
+managing large and complex contexts. Instead of loading all possible context at 
+the beginning of a task, this component analyzes the current state to determine 
+what context is most likely to be needed next, and then loads only that context. 
+This "progressive" approach helps to keep the context window focused and to avoid 
+unnecessary overhead.
+"""
 
 from __future__ import annotations
 
@@ -16,9 +26,28 @@ from ..state import ContextEngineState, ContextSegment
 
 
 class ProgressiveContextLoader:
-    """Loads context artifacts on demand based on current task signals."""
+    """
+    Loads context artifacts on demand based on the current signals in the state.
+
+    This class implements the core logic for the progressive loading process. It 
+    analyzes the current state to identify the most pressing context needs, and 
+    then orchestrates the loading of the corresponding artifacts. It also manages 
+    a prefetch queue to proactively load context that is likely to be needed in 
+    the near future.
+
+    Attributes:
+        config: The configuration for the context engine.
+        project_root: The root directory of the project.
+        ... and other configuration-derived paths.
+    """
 
     def __init__(self, config: ContextEngineConfig) -> None:
+        """
+        Initializes the `ProgressiveContextLoader`.
+
+        Args:
+            config: The configuration for the context engine.
+        """
         self.config = config
         self.project_root = Path(config.project_root).resolve()
         self.documentation_paths = [self.project_root / path for path in config.documentation_paths]
@@ -26,6 +55,19 @@ class ProgressiveContextLoader:
         self._skills_cache: Dict[str, Dict[str, Any]] = {}
 
     async def prepare_context(self, state: ContextEngineState) -> ContextEngineState:
+        """
+        Prepares the context by analyzing needs and loading required artifacts.
+
+        This is the main public method of the `ProgressiveContextLoader`. It 
+        orchestrates the entire process of analyzing context needs, loading 
+        the required artifacts, and integrating them into the state.
+
+        Args:
+            state: The current state of the context engine.
+
+        Returns:
+            The updated state with the newly loaded context.
+        """
         needs = await self._analyze_context_needs(state)
         already_loaded = self._get_loaded_context_types(state)
         pending_needs = needs - already_loaded
@@ -56,6 +98,9 @@ class ProgressiveContextLoader:
         return state
 
     async def _analyze_context_needs(self, state: ContextEngineState) -> Set[str]:
+        """
+        Analyzes the current state to determine the most immediate context needs.
+        """
         needs: Set[str] = set()
 
         if state.get("messages"):
@@ -78,6 +123,7 @@ class ProgressiveContextLoader:
         return needs
 
     def _get_loaded_context_types(self, state: ContextEngineState) -> Set[str]:
+        """Returns the set of context types that are already loaded."""
         loaded: Set[str] = set()
         for segment in state.get("context_segments", []):
             segment_type = segment.get("type", "").split(":", 1)[0]
@@ -85,6 +131,9 @@ class ProgressiveContextLoader:
         return loaded
 
     async def _load_context(self, context_type: str, state: ContextEngineState) -> Optional[ContextSegment]:
+        """
+        Dispatches to the appropriate loader function for a given context type.
+        """
         loaders = {
             "code_context": self._load_code_context,
             "file_structure": self._load_file_structure,
@@ -99,6 +148,7 @@ class ProgressiveContextLoader:
         return await loader(state) if loader else None
 
     async def _integrate_context(self, state: ContextEngineState, segment: Optional[ContextSegment]) -> ContextEngineState:
+        """Integrates a new context segment into the state."""
         if not segment:
             return state
 
@@ -131,12 +181,17 @@ class ProgressiveContextLoader:
         return state
 
     def _has_capacity(self, state: ContextEngineState, context_type: str) -> bool:
+        """
+        Checks if there is enough capacity in the context window to load a new 
+        context type.
+        """
         estimate = self._estimate_context_size(context_type)
         max_tokens = state.get("context_window_max", self.config.context_window_max)
         projected = state.get("context_window_used", 0) + estimate
         return projected <= max_tokens * 0.85
 
     def _estimate_context_size(self, context_type: str) -> int:
+        """Estimates the token size of a given context type."""
         estimates = {
             "code_context": 1500,
             "file_structure": 600,
@@ -152,6 +207,7 @@ class ProgressiveContextLoader:
         return estimates.get(context_type, 500)
 
     def _need_priority(self, need: str | ContextSegment) -> int:
+        """Returns the priority of a given context need."""
         if isinstance(need, dict):
             return need.get("priority", 5)
         priorities = {
@@ -169,6 +225,7 @@ class ProgressiveContextLoader:
         return priorities.get(str(need), 3)
 
     async def _extract_intent(self, message: Any) -> Set[str]:
+        """Extracts the user's intent from a message."""
         content = "".join(message.content) if hasattr(message, "content") else str(message)
         lowered = content.lower()
         intent_markers = {
@@ -184,6 +241,7 @@ class ProgressiveContextLoader:
         return detected
 
     async def _load_code_context(self, state: ContextEngineState) -> Optional[ContextSegment]:
+        """Loads a segment with general information about the codebase."""
         lines: List[str] = []
         pyproject = self.project_root / "pyproject.toml"
         if pyproject.exists():
@@ -235,6 +293,7 @@ class ProgressiveContextLoader:
         )
 
     async def _load_file_structure(self, state: ContextEngineState) -> Optional[ContextSegment]:
+        """Loads a segment with an overview of the file structure."""
         roots = [
             self.project_root / "quadracode-runtime",
             self.project_root / "quadracode-tools",
@@ -707,6 +766,7 @@ class ProgressiveContextLoader:
         segment_type: str,
         tokens: int,
     ) -> ContextSegment:
+        """Builds a `ContextSegment` dictionary."""
         return {
             "id": segment_id,
             "content": content,
@@ -720,6 +780,9 @@ class ProgressiveContextLoader:
         }
 
     def _get_milestone_context_needs(self, milestone: int | str) -> Set[str]:
+        """
+        Returns the set of context needs for a given milestone.
+        """
         mapping: Dict[str, Set[str]] = {
             "1": {"architecture_docs", "code_context"},
             "2": {"code_context", "file_structure", "test_suite"},

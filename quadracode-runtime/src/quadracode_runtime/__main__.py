@@ -1,3 +1,13 @@
+"""
+This module provides a generic entry point for running a Quadracode runtime 
+service (e.g., an orchestrator or an agent).
+
+It reads the `QUADRACODE_PROFILE` environment variable to determine which 
+profile to load, and then uses the `run_forever` function to start the runtime 
+as a persistent, asynchronous service. This allows for a single, configurable 
+entry point that can be used to launch any type of Quadracode runtime component, 
+which is particularly useful for containerized deployments.
+"""
 from __future__ import annotations
 
 import asyncio

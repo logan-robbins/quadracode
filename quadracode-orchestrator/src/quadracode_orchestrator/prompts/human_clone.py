@@ -1,5 +1,15 @@
 """
-This prompt defines the persona for the HumanClone agent, the ultimate skeptical taskmaster.
+This module defines the system prompt that constitutes the persona for the 
+HumanClone agent.
+
+The HumanClone acts as the ultimate skeptical taskmaster in the Quadracode 
+system. Its role is to be a source of relentless, abstract pressure on the 
+orchestrator, ensuring that the work is not just complete, but thoroughly 
+vetted and of high quality. This prompt instructs the HumanClone on its core 
+directives, which include never being satisfied, demanding more work, and 
+verifying that all testing and quality gates have been passed. The HumanClone's 
+responses are structured as `HumanCloneTrigger` messages, which guide the 
+orchestrator's refinement process.
 """
 
 HUMAN_CLONE_SYSTEM_PROMPT = """

@@ -1,3 +1,12 @@
+"""A central assembly point for collecting and exposing all available Quadracode tools.
+
+This module serves as the primary entry point for the Quadracode runtime to
+discover and register all tools defined within the `quadracode-tools` package. It
+imports the individual tool functions from their respective modules and aggregates
+them into a single list. This centralized approach simplifies the process of
+providing a comprehensive set of capabilities to a LangGraph agent, as the runtime
+only needs to call the `get_tools()` function to access the entire toolset.
+"""
 from __future__ import annotations
 
 from typing import List
@@ -30,6 +39,24 @@ from .tools.test_suite import run_full_test_suite
 
 
 def get_tools() -> List[BaseTool]:
+    """Assembles and returns a list of all standard Quadracode agent tools.
+
+    This function acts as a registry for all the core tools that a Quadracode agent
+    can use. By collecting them in one place, it simplifies the process of
+    configuring the LangGraph runtime, which requires a list of tools to be
+    provided during initialization.
+
+    The returned list includes tools for:
+    - Filesystem operations (`read_file`, `write_file`)
+    - Shell command execution (`bash_shell`, `python_repl`)
+    - Isolated workspace management (`workspace_*`)
+    - Agent lifecycle and discovery (`agent_registry_tool`, `agent_management_tool`)
+    - Automated testing (`run_full_test_suite`, `generate_property_tests`)
+    - Meta-cognitive and autonomous control (`manage_refinement_ledger`, `autonomous_*`)
+
+    Returns:
+        A list of `BaseTool` instances ready to be used by a LangGraph agent.
+    """
     return [
         # Local tools
         python_repl,

@@ -1,4 +1,17 @@
-"""Predictive exhaustion modelling for proactive PRP recovery."""
+"""
+This module implements the `ExhaustionPredictor`, a component that uses a simple 
+machine learning model to forecast the likelihood of "exhaustion" in the 
+Plan-Refine-Play (PRP) loop.
+
+Exhaustion events are critical signals in the autonomous workflow, indicating that 
+the system is stuck or has reached a point of diminishing returns. This predictor 
+analyzes the history of the refinement ledger to learn the patterns that precede 
+these events. By training a logistic regression model on a set of engineered 
+features, it can provide a probabilistic forecast of whether the next cycle is 
+likely to result in exhaustion. This predictive capability allows the orchestrator 
+to take proactive recovery actions, such as preemptively refining its hypothesis, 
+before the exhaustion event actually occurs.
+"""
 
 from __future__ import annotations
 
@@ -42,7 +55,20 @@ def _has_exhaustion(entry: RefinementLedgerEntry | None) -> bool:
 
 @dataclass(slots=True)
 class ExhaustionPredictor:
-    """Train a simple logistic regression over ledger history to forecast exhaustion."""
+    """
+    Trains and uses a simple logistic regression model to forecast the 
+    likelihood of an exhaustion event in the PRP loop.
+
+    This class encapsulates the entire lifecycle of the exhaustion predictor, 
+    from feature engineering and model training to prediction. It is designed to 
+    be a self-contained component that can be easily integrated into the main 
+    runtime.
+
+    Attributes:
+        threshold: The probability threshold for preemptive action.
+        max_history: The maximum number of ledger entries to use for training.
+        solver: The solver to use for the logistic regression model.
+    """
 
     threshold: float = 0.7
     max_history: int = 128
@@ -53,7 +79,17 @@ class ExhaustionPredictor:
     _last_trained_size: int = field(default=0, init=False)
 
     def fit(self, ledger: Sequence[RefinementLedgerEntry]) -> None:
-        """Fit (or refit) the predictor using the supplied ledger."""
+        """
+        Fits (or re-fits) the logistic regression model using the provided 
+        ledger history.
+
+        This method builds a dataset from the ledger, engineers a set of 
+        features, and then trains a `LogisticRegression` model. The model is 
+        stored internally for later use in prediction.
+
+        Args:
+            ledger: A sequence of `RefinementLedgerEntry` objects.
+        """
 
         dataset, labels = self._build_dataset(ledger)
         if not dataset or len(set(labels)) < 2:
@@ -79,7 +115,20 @@ class ExhaustionPredictor:
     def predict_probability(
         self, ledger: Sequence[RefinementLedgerEntry]
     ) -> float:
-        """Return the probability that the next cycle will hit exhaustion."""
+        """
+        Predicts the probability that the next cycle will result in an 
+        exhaustion event.
+
+        This method first ensures that the model is trained on the latest 
+        ledger data, and then uses the model to generate a probability for the 
+        current state.
+
+        Args:
+            ledger: The current sequence of `RefinementLedgerEntry` objects.
+
+        Returns:
+            A probability between 0.0 and 1.0.
+        """
 
         if not ledger:
             return self._class_prior
@@ -95,13 +144,24 @@ class ExhaustionPredictor:
         return float(min(1.0, max(0.0, probability)))
 
     def should_preempt(self, ledger: Sequence[RefinementLedgerEntry]) -> bool:
-        """Whether the orchestrator should pre-emptively refine the hypothesis."""
+        """
+        Determines whether the orchestrator should take preemptive action to 
+        avoid an impending exhaustion event.
+
+        Args:
+            ledger: The current sequence of `RefinementLedgerEntry` objects.
+
+        Returns:
+            True if the predicted probability of exhaustion exceeds the configured 
+            threshold.
+        """
 
         return self.predict_probability(ledger) >= self.threshold
 
     def _build_dataset(
         self, ledger: Sequence[RefinementLedgerEntry]
     ) -> tuple[List[List[float]], List[int]]:
+        """Builds a feature dataset and corresponding labels from the ledger."""
         dataset: List[List[float]] = []
         labels: List[int] = []
         history: List[RefinementLedgerEntry] = []
@@ -114,6 +174,14 @@ class ExhaustionPredictor:
     def _compute_features(
         self, history: Sequence[RefinementLedgerEntry]
     ) -> List[float]:
+        """
+        Engineers a set of features from the history of the refinement ledger.
+
+        These features are designed to capture the key signals that are 
+        indicative of impending exhaustion, such as the frequency of recent 
+        failures, the number of consecutive exhaustions, and the complexity of 
+        the hypotheses.
+        """
         if not history:
             return [0.0] * 12
 

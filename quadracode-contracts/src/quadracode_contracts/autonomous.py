@@ -1,4 +1,13 @@
-"""Contracts for HUMAN_OBSOLETE autonomous mode routing."""
+"""
+This module defines the data contracts that govern the behavior of the 
+Quadracode system when operating in autonomous mode.
+
+These Pydantic models are used to structure the communication and state 
+management required for autonomous orchestration. They cover routing directives, 
+progress checkpoints, hypothesis critiques, and escalation procedures. By 
+enforcing a strict schema for these interactions, this module ensures that the 
+autonomous workflow is robust, predictable, and transparent.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +23,14 @@ def _utc_now() -> str:
 
 
 class AutonomousRoutingDirective(BaseModel):
-    """Routing instructions emitted during autonomous orchestration."""
+    """
+    Defines the routing instructions emitted by the autonomous orchestrator.
+
+    This model is used to signal how a particular message or result should be 
+    handled, such as whether it needs to be delivered to a human for review or 
+    if a fatal error requires escalation. It provides a structured way for the 
+    orchestrator to control the flow of information in the system.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -40,7 +56,21 @@ class AutonomousRoutingDirective(BaseModel):
         cls,
         payload: Any,
     ) -> Optional["AutonomousRoutingDirective"]:
-        """Create a directive from an arbitrary payload value."""
+        """
+        Safely creates a directive from an arbitrary payload.
+
+        This class method is designed to be resilient to malformed or 
+        unstructured data. It attempts to parse a dictionary-like payload into 
+        a strongly-typed `AutonomousRoutingDirective`, filtering out any 
+        unrecognized fields.
+
+        Args:
+            payload: The raw payload to parse.
+
+        Returns:
+            An instance of `AutonomousRoutingDirective`, or `None` if the 
+            payload is not a valid directive.
+        """
 
         if not isinstance(payload, dict):
             return None
@@ -62,13 +92,28 @@ class AutonomousRoutingDirective(BaseModel):
                 return None
 
     def to_payload(self) -> dict[str, Any]:
-        """Return a JSON-serialisable payload for message envelopes."""
+        """
+        Serializes the directive to a JSON-compatible dictionary.
+
+        This method is used to prepare the directive for inclusion in a message 
+        envelope.
+
+        Returns:
+            A dictionary representation of the directive.
+        """
 
         return self.dict()
 
 
 class AutonomousCheckpointRecord(BaseModel):
-    """Structured checkpoint entry for HUMAN_OBSOLETE autonomous mode."""
+    """
+    Represents a structured checkpoint entry recorded during autonomous 
+    operation.
+
+    Checkpoints are used to track the progress of a long-running autonomous 
+    task. They provide a snapshot of the task's status at a given milestone, 
+    including a summary of the work completed and the planned next steps.
+    """
 
     milestone: int = Field(..., ge=1)
     status: Literal["in_progress", "complete", "blocked"]
@@ -82,7 +127,12 @@ class AutonomousCheckpointRecord(BaseModel):
 
 
 class CritiqueCategory(str, Enum):
-    """Categorisation buckets for hypothesis critiques."""
+    """
+    Defines the categorization buckets for hypothesis critiques.
+
+    This enumeration is used to classify critiques based on the aspect of the 
+    system they are addressing.
+    """
 
     CODE_QUALITY = "code_quality"
     ARCHITECTURE = "architecture"
@@ -91,7 +141,12 @@ class CritiqueCategory(str, Enum):
 
 
 class CritiqueSeverity(str, Enum):
-    """Severity rankings used to prioritise critiques."""
+    """
+    Defines the severity rankings used to prioritize critiques.
+
+    This enumeration allows for the classification of critiques based on their 
+    urgency and impact.
+    """
 
     LOW = "low"
     MODERATE = "moderate"
@@ -100,7 +155,13 @@ class CritiqueSeverity(str, Enum):
 
 
 class HypothesisCritiqueRecord(BaseModel):
-    """Structured critique data tied to a refinement hypothesis."""
+    """
+    Represents a structured critique of a refinement hypothesis.
+
+    This model is used to capture detailed feedback on a proposed change or 
+    hypothesis. It includes a summary of the critique, qualitative feedback, 
+    and a categorization based on severity and area of concern.
+    """
 
     cycle_id: str = Field(..., min_length=1)
     hypothesis: str = Field(..., min_length=1)
@@ -113,7 +174,15 @@ class HypothesisCritiqueRecord(BaseModel):
 
 
 class AutonomousEscalationRecord(BaseModel):
-    """Escalation event data captured when contacting a human."""
+    """
+
+    Represents the data captured when an autonomous process needs to escalate 
+    an issue to a human.
+
+    This model is used to create a detailed record of an escalation event, 
+    including the type of error, a description of the problem, and a list of 
+    any recovery attempts that were made.
+    """
 
     error_type: str = Field(..., min_length=1)
     description: str = Field(..., min_length=1)

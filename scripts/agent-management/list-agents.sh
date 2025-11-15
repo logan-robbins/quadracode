@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# List Quadracode agent containers/pods
-# Usage: list-agents.sh
-# Environment: AGENT_RUNTIME_PLATFORM (docker|kubernetes), defaults to docker
+#
+# Lists running and stopped Quadracode agents on Docker or Kubernetes.
+#
+# This script discovers agent instances based on predefined naming conventions
+# and labels. It supports two platforms, determined by the `AGENT_RUNTIME_PLATFORM`
+# environment variable:
+#   - `docker`: Uses `docker ps` with a name filter (`qc-agent-`) to find agent
+#     containers and extracts their name, status, and ID.
+#   - `kubernetes`: Uses `kubectl get pods` with a label selector (`app=quadracode-agent`)
+#     to find agent Pods and extracts their metadata and status.
+#
+# The output is a JSON object containing a list of discovered agents and their
+# high-level status, suitable for programmatic use.
+#
+# Usage:
+#   list-agents.sh
+#
+# Environment Variables:
+#   AGENT_RUNTIME_PLATFORM: The container platform ('docker' or 'kubernetes').
+#                          Defaults to 'docker'.
+#
 
 set -euo pipefail
 
@@ -10,6 +28,14 @@ PLATFORM="${AGENT_RUNTIME_PLATFORM:-docker}"
 
 # JSON output helper
 json_output() {
+    # Generates a JSON-formatted string with the list of agents.
+    #
+    # Args:
+    #   $1: Success status ("true" or "false").
+    #   $2: A human-readable message.
+    #   $3: A JSON array string of the container/pod list.
+    #   $4: (Optional) An error message.
+    #
     local success="$1"
     local message="$2"
     local containers_json="$3"
@@ -39,6 +65,12 @@ EOF
 
 # Docker implementation
 list_docker() {
+    # Lists Quadracode agent containers running on Docker.
+    #
+    # Executes `docker ps -a` to find all containers matching the `qc-agent-`
+    # name prefix. It parses the output to construct a JSON array of the
+    # found agents, including their ID, name, and status.
+    #
     local output
     if ! output=$(docker ps -a --filter "name=qc-agent-" --format "{{.Names}}\t{{.Status}}\t{{.ID}}" 2>&1); then
         json_output "false" "Failed to list containers" "[]" "${output}"
@@ -66,6 +98,13 @@ list_docker() {
 
 # Kubernetes implementation
 list_kubernetes() {
+    # Lists Quadracode agent Pods running on Kubernetes.
+    #
+    # Executes `kubectl get pods -l app=quadracode-agent` to find all Pods with
+    # the correct label. It uses `jq` to parse the JSON output from `kubectl`
+    # and transform it into a simplified list of agents with their name,
+    # status, and namespace.
+    #
     local namespace="${QUADRACODE_NAMESPACE:-default}"
     local output
 

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 import redis
 import streamlit as st
-from streamlit.runtime.scriptrunner_utils.script_run_context import (
+from streamlit.runtime.scriptrunner_utils.script_run_ctx import (
     add_script_run_ctx,
     get_script_run_ctx,
 )
@@ -37,6 +37,12 @@ from quadracode_tools.tools.workspace import (
 
 
 def _int_env(var_name: str, default: int) -> int:
+    """
+    Safely reads an integer value from an environment variable.
+
+    If the environment variable is not set or cannot be parsed as an integer,
+    the default value is returned.
+    """
     value = os.environ.get(var_name)
     if value is None:
         return default
@@ -66,10 +72,21 @@ MAILBOX_HUMAN = mailbox_key(HUMAN_RECIPIENT)
 
 @st.cache_resource(show_spinner=False)
 def get_redis_client() -> redis.Redis:
+    """
+    Initializes and returns a Redis client instance.
+
+    The client connection is cached as a Streamlit resource to ensure that a
+    single connection is reused across reruns.
+    """
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
 def _active_supervisor() -> str:
+    """
+    Returns the ID of the currently active supervisor.
+
+    Defaults to `HUMAN_RECIPIENT` if the value in the session state is invalid.
+    """
     value = st.session_state.get("supervisor_recipient")
     if value in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT}:
         return value
@@ -77,6 +94,12 @@ def _active_supervisor() -> str:
 
 
 def _set_supervisor(recipient: str, chat_id: str | None = None) -> None:
+    """
+    Sets the active supervisor for the application and optionally for a specific chat.
+
+    Updates the global `supervisor_recipient` in the session state and also
+    associates the supervisor with a chat ID if provided.
+    """
     target = recipient if recipient in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT} else HUMAN_RECIPIENT
     st.session_state.supervisor_recipient = target
     supervisors = st.session_state.get("chat_supervisors")
@@ -88,10 +111,17 @@ def _set_supervisor(recipient: str, chat_id: str | None = None) -> None:
 
 
 def _supervisor_mailbox() -> str:
+    """Returns the Redis mailbox key for the currently active supervisor."""
     return mailbox_key(_active_supervisor())
 
 
 def _get_last_seen(chat_id: str, supervisor: str) -> str | None:
+    """
+    Retrieves the last-seen message ID for a specific chat and supervisor.
+
+    Handles both the current nested dictionary format and the legacy string
+    format for last-seen IDs in the session state.
+    """
     last_seen_map = st.session_state.chat_last_seen  # type: ignore[attr-defined]
     entry = last_seen_map.get(chat_id) if isinstance(last_seen_map, dict) else None
     if isinstance(entry, dict):
@@ -105,10 +135,16 @@ def _get_last_seen(chat_id: str, supervisor: str) -> str | None:
 
 
 def _set_last_seen(chat_id: str, supervisor: str, entry_id: str) -> None:
+    """
+    Stores the last-seen message ID for a given chat and supervisor.
+
+    Manages a nested dictionary in the session state to track the latest
+    message ID consumed by the UI for each supervisor within each chat. This
+    handles the legacy format where only a single ID was stored per chat.
+    """
     last_seen_map = st.session_state.chat_last_seen  # type: ignore[attr-defined]
     if not isinstance(last_seen_map, dict):
         last_seen_map = {}
-        st.session_state.chat_last_seen = last_seen_map  # type: ignore[attr-defined]
     existing = last_seen_map.get(chat_id)
     if isinstance(existing, dict):
         existing[supervisor] = entry_id
@@ -119,12 +155,25 @@ def _set_last_seen(chat_id: str, supervisor: str, entry_id: str) -> None:
 
 
 def _baseline_last_seen(client: redis.Redis, supervisor: str) -> str:
+    """
+    Gets the ID of the very last entry in a supervisor's mailbox.
+
+    This is used to initialize the last-seen ID for a chat, so that the UI
+    only shows messages that arrive after the chat was created or activated.
+    """
     mailbox = mailbox_key(supervisor)
     latest = client.xrevrange(mailbox, count=1)
     return latest[0][0] if latest else "0-0"
 
 
 def _reset_last_seen_for_active_chat(client: redis.Redis) -> None:
+    """
+    Resets the last-seen message ID for the active chat to the newest message.
+
+    This is used when switching supervisors for a chat, ensuring that the UI
+    doesn't miss messages from the new supervisor's mailbox by starting from
+    the correct point in the stream.
+    """
     chat_id = st.session_state.chat_id
     if not chat_id:
         return
@@ -135,6 +184,7 @@ def _reset_last_seen_for_active_chat(client: redis.Redis) -> None:
 
 
 def _ensure_session_defaults() -> None:
+    """Initializes the Streamlit session state with default values at startup."""
     st.session_state.setdefault("chats", [])
     st.session_state.setdefault("chat_histories", {})
     st.session_state.setdefault("chat_last_seen", {})
@@ -159,6 +209,7 @@ def _ensure_session_defaults() -> None:
 
 
 def _get_chat_entry(chat_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves the metadata entry for a given chat ID from the session state."""
     for chat in st.session_state.chats:  # type: ignore[attr-defined]
         if chat["id"] == chat_id:
             return chat
@@ -166,6 +217,7 @@ def _get_chat_entry(chat_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _promote_chat(chat_id: str) -> None:
+    """Moves a chat to the top of the recent chats list in the sidebar."""
     chats = st.session_state.chats  # type: ignore[attr-defined]
     entry = None
     remainder = []
@@ -178,6 +230,18 @@ def _promote_chat(chat_id: str) -> None:
         st.session_state.chats = [entry, *remainder]  # type: ignore[attr-defined]
 
 def _set_active_chat(chat_id: str, *, client: Optional[redis.Redis] = None) -> None:
+    """
+    Sets the specified chat as the active one in the UI.
+
+    This function updates the session state to reflect the new active chat,
+    loading its history, last-seen message ID, and autonomous mode settings.
+    It also promotes the chat to the top of the recent chats list. If the
+    last-seen ID is not yet set, it baselines it from Redis.
+
+    Args:
+        chat_id: The ID of the chat to make active.
+        client: An optional Redis client, required for baselining last-seen IDs.
+    """
     entry = _get_chat_entry(chat_id)
     if entry is None:
         return
@@ -229,6 +293,20 @@ def _set_active_chat(chat_id: str, *, client: Optional[redis.Redis] = None) -> N
 
 
 def _create_chat(client: redis.Redis, *, title: Optional[str] = None) -> str:
+    """
+    Creates a new chat session.
+
+    Generates a new chat ID, initializes its history and metadata, sets it as
+    the active chat, and synchronizes the last-seen message ID with the current
+    state of the human supervisor's mailbox.
+
+    Args:
+        client: The Redis client, used to baseline the last-seen message ID.
+        title: An optional title for the new chat.
+
+    Returns:
+        The ID of the newly created chat.
+    """
     chat_id = uuid.uuid4().hex
     entry = {
         "id": chat_id,
@@ -252,6 +330,19 @@ def _append_history(
     trace: List[Dict[str, Any]] | None = None,
     sender: str | None = None,
 ) -> None:
+    """
+    Appends a new entry to the active chat's history.
+
+    Also handles updating the chat's title with a snippet of the first user
+    message if the title has not been manually set.
+
+    Args:
+        role: The role of the message sender (e.g., 'user', 'assistant').
+        content: The message content.
+        ticket_id: An optional tracking ID for the message.
+        trace: Optional trace data to include with the message.
+        sender: The original sender of the message.
+    """
     entry: Dict[str, Any] = {"role": role, "content": content}
     if ticket_id:
         entry["ticket_id"] = ticket_id
@@ -278,6 +369,7 @@ def _append_history(
 
 
 def _render_history() -> None:
+    """Renders the chat history for the active session."""
     for item in st.session_state.history:  # type: ignore[attr-defined]
         role = item.get("role", "assistant")
         content = item.get("content", "")
@@ -294,6 +386,13 @@ def _render_history() -> None:
 
 
 def _current_autonomous_settings() -> Dict[str, Any]:
+    """
+    Retrieves the current autonomous mode settings from the session state.
+
+    Returns:
+        A dictionary with the current values for max_iterations, max_hours,
+        and max_agents, read from the session state.
+    """
     return {
         "max_iterations": int(st.session_state.get("autonomous_max_iterations", 1000)),
         "max_hours": float(st.session_state.get("autonomous_max_hours", 48.0)),
@@ -302,6 +401,17 @@ def _current_autonomous_settings() -> Dict[str, Any]:
 
 
 def _persist_autonomous_settings(chat_id: str | None) -> None:
+    """
+    Saves or removes the autonomous mode settings for the given chat ID.
+
+    If autonomous mode is enabled for the current chat, this function stores
+    its configuration (max iterations, hours, agents) in the session state,
+    associated with the chat ID. If disabled, it removes any existing settings.
+    It also persists the active supervisor for the chat.
+
+    Args:
+        chat_id: The ID of the chat whose settings are to be persisted.
+    """
     if not chat_id:
         return
     settings_map = st.session_state.autonomous_chat_settings  # type: ignore[attr-defined]
@@ -320,6 +430,22 @@ def _persist_autonomous_settings(chat_id: str | None) -> None:
 
 
 def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> str:
+    """
+    Constructs and sends a message envelope to the orchestrator.
+
+    This function prepares a `MessageEnvelope` with the user's message, current
+    chat context, and active supervisor settings. If autonomous mode is enabled,
+    it includes the relevant settings in the payload. The message is then added
+    to the orchestrator's mailbox stream.
+
+    Args:
+        client: The Redis client.
+        message: The text content of the message.
+        reply_to: (Currently unused) The recipient for a direct reply.
+
+    Returns:
+        The `ticket_id` for the sent message, used for tracking.
+    """
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
     # Orchestrator owns routing. The UI does not set reply_to.
@@ -346,6 +472,16 @@ def _send_message(client: redis.Redis, message: str, reply_to: str | None) -> st
 
 
 def _send_emergency_stop(client: redis.Redis) -> None:
+    """
+    Sends an emergency stop signal to the orchestrator for the current chat.
+
+    This function constructs and sends a message to the orchestrator to
+    immediately halt any ongoing autonomous operations for the active chat.
+    It also appends a record of this action to the local chat history.
+
+    Args:
+        client: The Redis client for sending the message.
+    """
     ticket_id = uuid.uuid4().hex
     payload = {"chat_id": st.session_state.chat_id, "ticket_id": ticket_id}
     payload["autonomous_control"] = {"action": "emergency_stop"}
@@ -367,6 +503,17 @@ def _send_emergency_stop(client: redis.Redis) -> None:
 
 
 def _update_workspace_descriptor(chat_id: str | None, payload: Dict[str, Any]) -> None:
+    """
+    Updates the workspace descriptor for a chat from a message payload.
+
+    If a message payload contains a 'workspace' key with a valid descriptor,
+    this function updates the session state to store it, associating it with
+    the given chat ID.
+
+    Args:
+        chat_id: The ID of the chat associated with the workspace.
+        payload: The message payload, which may contain a workspace descriptor.
+    """
     if not chat_id:
         return
     descriptor = payload.get("workspace")
@@ -380,6 +527,16 @@ def _update_workspace_descriptor(chat_id: str | None, payload: Dict[str, Any]) -
 
 
 def _push_workspace_message(kind: str, message: str) -> None:
+    """
+    Adds a temporary message to the workspace UI panel.
+
+    These messages are displayed in the sidebar to provide feedback on workspace
+    operations. They are cleared after the next UI rerun.
+
+    Args:
+        kind: The type of message ('success', 'warning', 'error', 'info').
+        message: The message text to display.
+    """
     messages = st.session_state.workspace_messages  # type: ignore[attr-defined]
     if not isinstance(messages, list):
         messages = []
@@ -394,6 +551,12 @@ def _push_workspace_message(kind: str, message: str) -> None:
 
 
 def _active_workspace_descriptor() -> Optional[Dict[str, Any]]:
+    """
+    Retrieves the workspace descriptor for the currently active chat.
+
+    Returns:
+        The descriptor dictionary if found, otherwise None.
+    """
     workspace_map = st.session_state.workspace_descriptors  # type: ignore[attr-defined]
     chat_id = st.session_state.chat_id
     if isinstance(workspace_map, dict) and isinstance(chat_id, str):
@@ -407,6 +570,24 @@ def _invoke_workspace_tool(
     tool: Any,
     params: Dict[str, Any],
 ) -> tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Invokes a workspace tool and standardizes its output.
+
+    This wrapper function calls the `invoke` method of a given tool, captures
+    any exceptions, and parses the JSON result. It normalizes the success status
+    and error message, providing a consistent return format for all workspace
+    tool interactions.
+
+    Args:
+        tool: The tool object to invoke (e.g., `workspace_create`).
+        params: The dictionary of parameters to pass to the tool.
+
+    Returns:
+        A tuple containing:
+        - A boolean indicating success.
+        - The parsed JSON data from the tool's response, if any.
+        - An error message string, if the operation failed.
+    """
     try:
         raw_result = tool.invoke(params)
     except Exception as exc:  # noqa: BLE001
@@ -437,6 +618,17 @@ def _invoke_workspace_tool(
 
 
 def _handle_workspace_create(chat_id: str) -> None:
+    """
+    Handles the UI action to create a new workspace.
+
+    Invokes the `workspace_create` tool using the chat ID as the workspace ID.
+    If successful, it stores the returned workspace descriptor in the session
+    state and pushes a confirmation message. On failure, it reports the error.
+    Finally, it triggers a UI rerun.
+
+    Args:
+        chat_id: The ID for the new workspace, derived from the active chat.
+    """
     success, data, error_message = _invoke_workspace_tool(
         workspace_create,
         {"workspace_id": chat_id},
@@ -463,6 +655,16 @@ def _handle_workspace_create(chat_id: str) -> None:
 
 
 def _handle_workspace_destroy(chat_id: str) -> None:
+    """
+    Handles the UI action to destroy a workspace.
+
+    Invokes the `workspace_destroy` tool, cleans up the corresponding workspace
+    descriptor and log selection from the session state, and pushes a status
+    message to the UI. Triggers a rerun to reflect the changes.
+
+    Args:
+        chat_id: The ID of the workspace to destroy.
+    """
     success, data, error_message = _invoke_workspace_tool(
         workspace_destroy,
         {
@@ -494,6 +696,19 @@ def _handle_workspace_destroy(chat_id: str) -> None:
 
 
 def _handle_workspace_copy_out(chat_id: str, source: str, destination: str) -> None:
+    """
+    Handles the UI action for copying files out of a workspace.
+
+    This function is triggered by the "Copy Out" form. It validates the source
+    and destination paths, invokes the `workspace_copy_from` tool, and pushes
+    a status message (success or error) to the UI. It then triggers a rerun
+    to display the message.
+
+    Args:
+        chat_id: The ID of the workspace.
+        source: The source path inside the workspace.
+        destination: The destination path on the host filesystem.
+    """
     clean_source = source.strip()
     if not clean_source:
         _push_workspace_message("error", "Source path inside the workspace is required.")
@@ -531,6 +746,17 @@ def _handle_workspace_copy_out(chat_id: str, source: str, destination: str) -> N
 
 
 def _invoke_workspace_exec(chat_id: str, command: str) -> tuple[bool, str, str]:
+    """
+    Invokes the `workspace_exec` tool to run a command inside a workspace.
+
+    Args:
+        chat_id: The ID of the target workspace.
+        command: The shell command to execute.
+
+    Returns:
+        A tuple of (success, stdout, stderr), where stderr may contain a fallback
+        error message if the tool invocation itself fails.
+    """
     success, data, error_message = _invoke_workspace_tool(
         workspace_exec,
         {
@@ -552,6 +778,19 @@ def _invoke_workspace_exec(chat_id: str, command: str) -> tuple[bool, str, str]:
 
 
 def _list_workspace_logs(chat_id: str) -> List[str]:
+    """
+    Lists the most recent log files available in the workspace's log directory.
+
+    Executes a shell command within the workspace to list files in `/workspace/logs`,
+    sorted by modification time (newest first), and limited to a configurable
+    number of entries.
+
+    Args:
+        chat_id: The ID of the workspace to query.
+
+    Returns:
+        A list of log file names.
+    """
     command = (
         "if [ -d /workspace/logs ]; then "
         f"ls -1t /workspace/logs | head -{WORKSPACE_LOG_LIST_LIMIT}; "
@@ -564,6 +803,20 @@ def _list_workspace_logs(chat_id: str) -> List[str]:
 
 
 def _read_workspace_log(chat_id: str, log_name: str) -> tuple[bool, str]:
+    """
+    Reads the trailing content of a specified log file from within a workspace.
+
+    Executes a `tail` command inside the workspace container to retrieve the
+    last `WORKSPACE_LOG_TAIL_LINES` of a given log file. This provides a way to
+    preview log files without copying the entire file out.
+
+    Args:
+        chat_id: The workspace ID.
+        log_name: The name of the log file under `/workspace/logs`.
+
+    Returns:
+        A tuple of (success, content), where content is the log text or an error.
+    """
     if not log_name:
         return False, "Select a log file to preview."
     safe_path = shlex.quote(f"/workspace/logs/{log_name}")
@@ -583,6 +836,15 @@ def _read_workspace_log(chat_id: str, log_name: str) -> tuple[bool, str]:
 
 
 def _workspace_stream_key(workspace_id: str) -> str:
+    """
+    Constructs the Redis stream key for a given workspace's events.
+
+    Args:
+        workspace_id: The unique identifier for the workspace.
+
+    Returns:
+        The fully-qualified Redis stream key, or an empty string if the ID is blank.
+    """
     suffix = workspace_id.strip()
     if not suffix:
         return ""
@@ -590,6 +852,17 @@ def _workspace_stream_key(workspace_id: str) -> str:
 
 
 def _load_workspace_events(client: redis.Redis, workspace_id: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    Loads and parses the most recent events from a workspace-specific stream.
+
+    Args:
+        client: The Redis client.
+        workspace_id: The ID of the workspace, used to construct the stream key.
+        limit: The maximum number of events to load.
+
+    Returns:
+        A list of parsed event dictionaries, from newest to oldest.
+    """
     if limit <= 0:
         return []
     stream_key = _workspace_stream_key(workspace_id)
@@ -624,6 +897,20 @@ def _load_workspace_events(client: redis.Redis, workspace_id: str, limit: int) -
 
 
 def _summarize_workspace_event(payload: Dict[str, Any]) -> str:
+    """
+    Generates a concise, human-readable summary of a workspace event payload.
+
+    This function inspects a workspace event payload and extracts a summary string
+    from common keys like 'message', 'summary', or 'command'. If these are not
+    present, it constructs a summary from other known fields or falls back to a
+    truncated JSON representation.
+
+    Args:
+        payload: The event payload dictionary.
+
+    Returns:
+        A short summary string.
+    """
     if not isinstance(payload, dict) or not payload:
         return ""
     for key in ("message", "summary", "description", "command"):
@@ -643,6 +930,20 @@ def _summarize_workspace_event(payload: Dict[str, Any]) -> str:
 
 
 def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
+    """
+    Polls the active supervisor's mailbox for new messages.
+
+    Performs a non-blocking read of the Redis stream for the current supervisor.
+    It filters messages to include only those relevant to the active chat session,
+    updates the last-seen message ID in the session state, and extracts any
+    workspace descriptors from message payloads.
+
+    Args:
+        client: The Redis client.
+
+    Returns:
+        A list of new `MessageEnvelope` objects for the current chat.
+    """
     last_id = st.session_state.last_seen_id
     mailbox = _supervisor_mailbox()
     try:
@@ -678,6 +979,17 @@ def _poll_updates(client: redis.Redis) -> List[MessageEnvelope]:
 
 @st.cache_data(ttl=5.0, show_spinner=False)
 def _registry_snapshot() -> Dict[str, Any]:
+    """
+    Fetches a snapshot of agent and statistics data from the agent registry.
+
+    This function queries the agent registry's `/agents` and `/stats` endpoints
+    to get the current list of registered agents and aggregate health statistics.
+    The results are cached for a short duration to reduce load on the registry.
+    It handles cases where the registry is not configured or in bare UI mode.
+
+    Returns:
+        A dictionary containing a list of agents, statistics, and any error info.
+    """
     if UI_BARE:
         return {"agents": [], "stats": None, "error": "bare mode"}
     if not AGENT_REGISTRY_URL:
@@ -705,6 +1017,15 @@ def _registry_snapshot() -> Dict[str, Any]:
 
 
 def _list_mailboxes(client: redis.Redis) -> List[str]:
+    """
+    Scans for and returns a sorted list of all Quadracode mailbox stream keys.
+
+    Args:
+        client: The Redis client to use for the SCAN operation.
+
+    Returns:
+        A sorted list of stream keys matching the mailbox prefix.
+    """
     try:
         keys = sorted({key for key in client.scan_iter(f"{MAILBOX_PREFIX}*")})
     except redis.RedisError as exc:  # noqa: BLE001
@@ -714,6 +1035,18 @@ def _list_mailboxes(client: redis.Redis) -> List[str]:
 
 
 def _render_stream_view(client: redis.Redis) -> None:
+    """
+    Renders an interactive Redis stream viewer.
+
+    This function provides a UI for inspecting the contents of Redis streams,
+    primarily intended for debugging Quadracode mailboxes. It allows the user to
+    select a stream from a list of discovered mailboxes, control the number
+    of entries to display, and choose the sort order (newest or oldest first).
+    The content of each stream entry is displayed in a collapsible JSON viewer.
+
+    Args:
+        client: The Redis client for listing streams and reading entries.
+    """
     mailboxes = _list_mailboxes(client)
     if not mailboxes:
         st.info("No mailboxes discovered yet.")
@@ -768,6 +1101,21 @@ def _render_stream_view(client: redis.Redis) -> None:
 
 
 def _load_context_metrics(client: redis.Redis, limit: int) -> List[Dict[str, Any]]:
+    """
+    Loads and parses the most recent context metrics from the Redis stream.
+
+    Retrieves the latest `limit` entries from the context metrics stream,
+    parsing each from the Redis-native dictionary format into a structured
+    dictionary. The JSON payload within the stream entry is also deserialized.
+    The resulting list of metrics is returned in chronological order.
+
+    Args:
+        client: The Redis client instance.
+        limit: The maximum number of metric entries to load.
+
+    Returns:
+        A list of parsed context metric dictionaries, from oldest to newest.
+    """
     try:
         raw_entries = client.xrevrange(CONTEXT_METRICS_STREAM, count=limit)
     except redis.ResponseError:
@@ -798,6 +1146,21 @@ def _load_context_metrics(client: redis.Redis, limit: int) -> List[Dict[str, Any
 
 
 def _load_autonomous_events(client: redis.Redis, limit: int) -> List[Dict[str, Any]]:
+    """
+    Loads and parses the most recent autonomous mode events from Redis.
+
+    Reads a specified number of the latest entries from the autonomous events
+    stream. Each entry is parsed from the Redis stream format into a dictionary,
+    with the JSON payload deserialized. The events are returned in chronological
+    order (oldest to newest).
+
+    Args:
+        client: The Redis client for stream access.
+        limit: The maximum number of events to retrieve.
+
+    Returns:
+        A list of parsed event dictionaries.
+    """
     try:
         raw_entries = client.xrevrange(AUTONOMOUS_EVENTS_STREAM, count=limit)
     except redis.ResponseError:
@@ -823,11 +1186,23 @@ def _load_autonomous_events(client: redis.Redis, limit: int) -> List[Dict[str, A
                 "payload": payload,
             }
         )
-
     return list(reversed(parsed))
 
 
 def _render_metrics_dashboard(client: redis.Redis) -> None:
+    """
+    Renders the dashboard for visualizing context engineering metrics.
+
+    Fetches context metrics from the corresponding Redis stream and displays them
+    in a dashboard format. This includes key performance indicators like quality
+    score, focus metric, and context token usage. It also visualizes trends
+    over time for quality and context window size, and shows the distribution
+    of different tool operations. A slider allows adjusting the history depth,
+    and a raw JSON view is provided for detailed analysis.
+
+    Args:
+        client: The Redis client instance used to fetch metrics data.
+    """
     limit = st.slider(
         "History depth",
         min_value=50,
@@ -929,6 +1304,19 @@ def _render_metrics_dashboard(client: redis.Redis) -> None:
 
 
 def _render_autonomous_dashboard(client: redis.Redis) -> None:
+    """
+    Renders the dashboard for monitoring autonomous mode events.
+
+    This function fetches and displays events from the autonomous events stream,
+    providing insights into the system's behavior during self-directed operation.
+    It shows the latest event, aggregate counts of different event types,
+    milestone status, guardrail triggers, escalations, and recent critiques.
+    A slider controls the number of historical events to load, and a raw
+    event viewer is available for detailed inspection.
+
+    Args:
+        client: The Redis client instance for reading the autonomous events stream.
+    """
     limit = st.slider(
         "Event history depth",
         min_value=50,
@@ -1021,6 +1409,14 @@ def _render_autonomous_dashboard(client: redis.Redis) -> None:
 
 
 def _queue_session_rerun() -> None:
+    """
+    Requests a rerun of the current Streamlit script run.
+
+    This function safely retrieves the current script run context and queues a
+    rerun request. It is designed to be called from a background thread, such
+    as the mailbox watcher, to trigger a refresh of the main UI. The rerun is
+    marked as an auto-rerun to distinguish it from user-initiated actions.
+    """
     ctx = get_script_run_ctx()
     if ctx is None or ctx.script_requests is None:
         return
@@ -1034,6 +1430,20 @@ def _queue_session_rerun() -> None:
 
 
 def _ensure_mailbox_watcher(client: redis.Redis) -> None:
+    """
+    Spawns a background thread to watch for new messages in the active mailbox.
+
+    This function ensures that a single, long-lived background thread is running
+    to monitor the Redis stream corresponding to the current supervisor's mailbox.
+    It handles changes in the active chat session or supervisor by updating the
+    stream key and last-seen message ID. When a new message relevant to the
+    current chat is detected, it queues a rerun request in the Streamlit runtime,
+    triggering a UI refresh to display the new content. This avoids the need for
+    manual polling from the main render thread.
+
+    Args:
+        client: The Redis client instance used for stream operations.
+    """
     if UI_BARE:
         return
     thread: Thread | None = st.session_state.get("_mailbox_watcher_thread")  # type: ignore[attr-defined]
@@ -1108,6 +1518,17 @@ def _ensure_mailbox_watcher(client: redis.Redis) -> None:
 
 
 def main() -> None:
+    """
+    Initializes and renders the main Quadracode Streamlit user interface.
+
+    Sets up the page configuration, ensures default session state values,
+    and establishes a connection to Redis. It then handles chat session
+    management, polls for new messages, and renders the tab-based layout
+    for chat, stream viewing, metrics, and autonomous operations. The sidebar
+    is populated with chat controls, autonomous mode settings, and workspace
+    management tools. A background thread is started to watch for incoming
+    mailbox messages to trigger UI refreshes automatically.
+    """
     st.set_page_config(page_title="Quadracode UI", layout="wide")
     _ensure_session_defaults()
 

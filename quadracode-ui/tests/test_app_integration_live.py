@@ -1,3 +1,12 @@
+"""
+Integration tests for the Quadracode Streamlit application using a live Redis.
+
+These tests verify the application's core functionality of sending and receiving
+messages over Redis Streams. They are marked as 'integration' tests and require a
+running Redis instance to be available. The tests simulate user input to send
+a message and then check the orchestrator's mailbox. They also simulate the
+orchestrator sending a message back and verify that the UI correctly displays it.
+"""
 from __future__ import annotations
 
 import os
@@ -16,6 +25,11 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
 
 def _live_redis() -> redis.Redis:
+    """
+    Establishes and returns a connection to a live Redis server.
+
+    Pings the server to ensure connectivity. Fails if Redis is not available.
+    """
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     r.ping()
     return r
@@ -23,11 +37,14 @@ def _live_redis() -> redis.Redis:
 
 @pytest.mark.integration
 def test_live_send_writes_to_orchestrator_stream() -> None:
-    """Runs the real app and verifies chat input writes to Redis Streams.
+    """
+    Runs the real app and verifies chat input writes to Redis Streams.
 
-    This uses a live Redis (no stubs). It asserts that a new entry appears on
-    the orchestrator mailbox with the expected payload, including the active
-    chat_id from the app session.
+    This test uses a live Redis connection (no stubs). It simulates a user
+    entering a message in the chat input and asserts that a corresponding new
+    entry appears on the orchestrator's mailbox stream. It validates the
+    payload of the message, including the active `chat_id` from the app's
+    session state, to ensure correct message formation and delivery.
     """
     try:
         r = _live_redis()
@@ -61,8 +78,14 @@ def test_live_send_writes_to_orchestrator_stream() -> None:
 
 @pytest.mark.integration
 def test_live_receive_updates_when_human_stream_gets_entry() -> None:
-    """Runs the real app and verifies it renders assistant messages when a new
-    entry is appended to the human mailbox with the active chat_id.
+    """
+    Verifies the app renders assistant messages from the human mailbox.
+
+    This test runs the app against a live Redis instance. It simulates an
+    external process (like the orchestrator) adding a new message to the
+    human's mailbox stream, targeted at the app's active `chat_id`. It then
+    triggers a rerun of the Streamlit app and asserts that the new message is
+    rendered correctly in the chat history.
     """
     try:
         r = _live_redis()
@@ -97,7 +120,25 @@ def test_live_receive_updates_when_human_stream_gets_entry() -> None:
     last = tester.chat_message[-1]
     assert last.markdown
     assert last.markdown[0].value == "Hello from Redis"
+
+
 def _state_get(session_state, key: str, default=None):
+    """
+    Safely retrieves a value from the Streamlit session state.
+
+    This helper handles potential `KeyError` exceptions and provides a consistent
+    way to access session state values, returning a default if the key is not
+    found. It is necessary for compatibility with different Streamlit versions
+    and testing contexts where direct dictionary access might fail.
+
+    Args:
+        session_state: The Streamlit session state object.
+        key: The key of the value to retrieve.
+        default: The default value to return if the key is not found.
+
+    Returns:
+        The value from the session state, or the default.
+    """
     getter = getattr(session_state, "get", None)
     if callable(getter):
         try:

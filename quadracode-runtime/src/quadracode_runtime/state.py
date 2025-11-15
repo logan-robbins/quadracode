@@ -1,3 +1,24 @@
+"""
+Core data structures and state management for the Quadracode runtime.
+
+This module defines the TypedDicts, Pydantic models, and enumerations that constitute
+the `QuadraCodeState`, the central state object passed through the LangGraph workflow.
+It includes definitions for:
+
+- `RuntimeState`: Basic execution state for autonomous operation.
+- `ContextEngineState`: State related to context management, memory, and progressive loading.
+- `QuadraCodeState`: The comprehensive orchestrator state, including meta-cognitive
+  signals from the Perpetual Refinement Protocol (PRP).
+- `ExhaustionMode`: Enumeration of conditions that can trigger a refinement cycle.
+- `PRPState`: Operational states within the PRP finite state machine.
+- `PRPStateMachine`: The logic governing valid transitions between PRP states.
+- `RefinementLedgerEntry`: A structured record of a single PRP cycle.
+
+Utility functions are provided for state serialization/deserialization, initialization,
+and state modification (e.g., recording test results, applying PRP transitions).
+These functions ensure that state changes are observable, auditable through time-travel
+logging, and compliant with runtime invariants.
+"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -29,7 +50,21 @@ from .invariants import check_transition_invariants, mark_rejection_requires_tes
 
 
 class AutonomousMilestone(TypedDict, total=False):
-    """Autonomous milestone tracking record."""
+    """
+    Represents a single milestone in an autonomous task.
+
+    This structure tracks the progress, status, and summary of a discrete
+    unit of work within a larger autonomous goal, facilitating both machine
+    and human-readable progress monitoring.
+
+    Attributes:
+        milestone: A unique integer identifier for the milestone.
+        title: An optional, human-readable title for the milestone.
+        status: The current state of the milestone (e.g., "pending", "in_progress").
+        summary: A brief description of the milestone's outcome or current state.
+        next_steps: A list of proposed actions to advance from this milestone.
+        updated_at: An ISO 8601 timestamp of the last update.
+    """
 
     milestone: int
     title: Optional[str]
@@ -40,7 +75,22 @@ class AutonomousMilestone(TypedDict, total=False):
 
 
 class AutonomousErrorRecord(TypedDict, total=False):
-    """Autonomous error history record."""
+    """
+    A structured record of an error encountered during autonomous operation.
+
+    This record captures essential details about an error, including its type,
+    attempts made at recovery, and whether it was escalated or resolved. This
+    information is critical for debugging, learning from failures, and improving
+    the system's resilience.
+
+    Attributes:
+        error_type: The class or category of the error (e.g., "ToolExecutionError").
+        description: A human-readable description of what went wrong.
+        recovery_attempts: A list of actions taken to try and recover from the error.
+        escalated: A boolean flag indicating if the error required human intervention.
+        resolved: A boolean flag indicating if the error was successfully handled.
+        timestamp: An ISO 8601 timestamp of when the error occurred.
+    """
 
     error_type: str
     description: str
@@ -51,10 +101,36 @@ class AutonomousErrorRecord(TypedDict, total=False):
 
 
 class _RuntimeStateRequired(TypedDict):
+    """Internal base class defining fields required by all runtime states."""
     messages: Annotated[list[AnyMessage], add_messages]
 
 
 class RuntimeState(_RuntimeStateRequired, total=False):
+    """
+    Base TypedDict for core runtime state tracking in autonomous mode.
+
+    This structure holds fundamental information about the execution of an
+    autonomous task, such as its goal, current phase, and operational limits.
+    It serves as the foundation upon which more specialized states like
+    `ContextEngineState` and `QuadraCodeState` are built.
+
+    Attributes:
+        messages: The sequence of messages forming the conversation history.
+        autonomous_mode: A flag indicating if the system is operating autonomously.
+        task_goal: The high-level objective defined for the current task.
+        current_phase: The name of the current operational phase (e.g., "planning", "execution").
+        iteration_count: The number of cycles or iterations completed.
+        milestones: A list of `AutonomousMilestone` records tracking progress.
+        error_history: A list of `AutonomousErrorRecord` instances.
+        autonomous_started_at: Timestamp when autonomous mode was initiated.
+        last_iteration_at: Timestamp of the last completed iteration.
+        iteration_limit_triggered: Flag indicating if the iteration limit was reached.
+        runtime_limit_triggered: Flag indicating if the total runtime limit was reached.
+        autonomous_routing: A dictionary containing dynamic routing decisions.
+        autonomous_settings: Configuration settings for the autonomous session.
+        thread_id: The identifier for the current execution thread.
+        workspace: A dictionary representing the state of the agent's workspace.
+    """
     autonomous_mode: bool
     task_goal: Optional[str]
     current_phase: Optional[str]
@@ -72,7 +148,26 @@ class RuntimeState(_RuntimeStateRequired, total=False):
 
 
 class ContextSegment(TypedDict):
-    """Individual context segment metadata for ACE/MemAct."""
+    """
+    Metadata for a single, manageable unit of context within the context window.
+
+    This structure represents a chunk of information (e.g., a file snippet, a
+    tool output) that the context engine manages. It includes metadata used for
+    prioritization, decay, compression, and potential externalization to long-term
+    memory, forming the core of the ACE/MemAct context management strategy.
+
+    Attributes:
+        id: A unique identifier for the context segment.
+        content: The actual text or data of the segment.
+        type: The category of the content (e.g., "file", "tool_output", "user_message").
+        priority: An integer score indicating the segment's importance.
+        token_count: The number of tokens in the content.
+        timestamp: The ISO 8601 timestamp of when the segment was created or last accessed.
+        decay_rate: A float indicating how quickly the segment's priority should decrease over time.
+        compression_eligible: A boolean flag indicating if the segment can be summarized or compressed.
+        restorable_reference: An optional reference (e.g., file path and line numbers)
+                              allowing the full content to be reloaded from an external source.
+    """
 
     id: str
     content: str
@@ -86,7 +181,23 @@ class ContextSegment(TypedDict):
 
 
 class MemoryCheckpoint(TypedDict):
-    """Persisted snapshot of context state."""
+    """
+    Represents a persisted, restorable snapshot of the agent's context state.
+
+    A memory checkpoint is a point-in-time capture of the agent's working memory
+    and context, saved to an external store. This allows for long-term persistence
+    of state across sessions and provides a mechanism for time-travel debugging
+    or restoring a previous state.
+
+    Attributes:
+        checkpoint_id: A unique identifier for the checkpoint.
+        timestamp: The ISO 8601 timestamp when the checkpoint was created.
+        milestone: An optional integer linking the checkpoint to an `AutonomousMilestone`.
+        summary: A human-readable summary of the agent's state at the time of the checkpoint.
+        full_context_path: The file path or URI where the full serialized context is stored.
+        token_count: The total number of tokens in the captured context.
+        quality_score: A metric evaluating the coherence and relevance of the captured context.
+    """
 
     checkpoint_id: str
     timestamp: str
@@ -98,7 +209,24 @@ class MemoryCheckpoint(TypedDict):
 
 
 class ExhaustionMode(str, Enum):
-    """Enumerated exhaustion modes for PRP cycles and context operations."""
+    """
+    Enumeration of triggers that signal the need for cognitive refinement.
+
+    Exhaustion modes are specific conditions detected by the runtime that indicate
+    a simple reactive loop is insufficient and a more deliberate, meta-cognitive
+    approach is needed. These triggers activate the Perpetual Refinement Protocol (PRP),
+    shifting the agent from execution to hypothesis and refinement.
+
+    Attributes:
+        NONE: No exhaustion is currently active.
+        CONTEXT_SATURATION: The context window is full, preventing new information from being added.
+        RETRY_DEPLETION: An action has failed repeatedly, exceeding its retry limit.
+        TOOL_BACKPRESSURE: A tool is consistently failing or indicating it is overloaded.
+        LLM_STOP: The language model has produced a stop sequence, indicating it cannot proceed.
+        TEST_FAILURE: A validation or regression test has failed, indicating the current approach is flawed.
+        HYPOTHESIS_EXHAUSTED: The current line of reasoning has failed to produce a viable solution.
+        PREDICTED_EXHAUSTION: A predictive model anticipates that the current strategy is likely to fail.
+    """
 
     NONE = "none"
     CONTEXT_SATURATION = "context_saturation"
@@ -115,7 +243,32 @@ ExhaustionEnum = ExhaustionMode
 
 
 class RefinementLedgerEntry(BaseModel):
-    """Structured record capturing PRP refinement cycle metadata."""
+    """
+
+    A structured log entry detailing a single cycle of the Perpetual Refinement Protocol (PRP).
+
+    This model captures the complete state of a refinement loop, from the initial
+    hypothesis to the final outcome. It includes metadata about the strategy employed,
+    the novelty of the approach, and causal links to previous events. The ledger
+    provides a detailed, auditable history of the agent's meta-cognitive
+    problem-solving process.
+
+    Attributes:
+        cycle_id: A unique identifier for this refinement cycle.
+        timestamp: The start time of the cycle.
+        hypothesis: The proposed idea or solution being investigated.
+        status: The current status of the cycle (e.g., "in_progress", "completed", "failed").
+        outcome_summary: A concise summary of the cycle's result.
+        exhaustion_trigger: The `ExhaustionMode` that initiated this PRP cycle.
+        test_results: A dictionary containing outcomes from validation tests.
+        strategy: The name of the refinement strategy used (e.g., "backtracking", "analogy").
+        novelty_score: A float measuring the newness of the hypothesis compared to previous attempts.
+        novelty_basis: A list of identifiers or reasons justifying the novelty score.
+        dependencies: A list of cycle_ids or other dependencies for this cycle.
+        predicted_success_probability: A score predicting the likelihood of the hypothesis succeeding.
+        causal_links: Structured data linking this cycle to preceding events or states.
+        metadata: An open dictionary for any other relevant telemetry.
+    """
 
     cycle_id: str
     timestamp: datetime
@@ -133,7 +286,16 @@ class RefinementLedgerEntry(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def formatted_summary(self) -> str:
-        """Return a compact string summary for prompt injection."""
+        """
+        Generates a compact, single-line string summary of the ledger entry.
+
+        This summary is designed for inclusion in prompts or concise logging,
+        providing the most critical information about the cycle's identity,
+        status, hypothesis, and outcome in a dense format.
+
+        Returns:
+            A pipe-separated string summarizing the entry.
+        """
 
         trigger = (
             f" (triggered by {self.exhaustion_trigger.value})"
@@ -166,6 +328,7 @@ class RefinementLedgerEntry(BaseModel):
         return " | ".join(lines)
 
     def _format_test_results(self) -> str:
+        """Internal helper to create a compact summary of test results."""
         if not self.test_results:
             return "n/a"
         if isinstance(self.test_results, str):
@@ -187,7 +350,19 @@ class RefinementLedgerEntry(BaseModel):
 
 
 class PRPState(str, Enum):
-    """Operational states for the Perpetual Refinement Protocol."""
+    """
+    Enumerates the distinct operational states within the Perpetual Refinement Protocol (PRP) FSM.
+
+    Each state represents a specific phase of the meta-cognitive loop, guiding the
+    agent through a structured process of hypothesis, execution, testing, and conclusion.
+
+    Attributes:
+        HYPOTHESIZE: The state for generating a new hypothesis or refining an existing one.
+        EXECUTE: The state for planning and executing actions based on the current hypothesis.
+        TEST: The state for validating the outcome of the execution phase against defined criteria.
+        CONCLUDE: The state for synthesizing the results and determining the success of the hypothesis.
+        PROPOSE: The state for packaging the conclusion into a formal proposal for review (e.g., by a HumanClone).
+    """
 
     HYPOTHESIZE = "hypothesize"
     EXECUTE = "execute"
@@ -197,7 +372,25 @@ class PRPState(str, Enum):
 
 
 class PRPTransition(BaseModel):
-    """Transition rule within the PRP finite state automaton."""
+    """
+    Defines a single, guarded transition rule within the PRP finite state machine.
+
+    This model specifies a valid move from a source state to a target state, along
+    with conditions that must be met for the transition to be allowed. These guards
+    can be based on the current exhaustion mode or other runtime signals, ensuring
+
+    the PRP state machine operates in a controlled and predictable manner.
+
+    Attributes:
+        source: The starting `PRPState` for this transition.
+        target: The destination `PRPState`.
+        description: A human-readable explanation of the transition's purpose.
+        allow_if_exhaustion_in: A set of `ExhaustionMode`s under which this transition is permitted.
+                                If None, it's allowed for any exhaustion mode (unless blocked).
+        block_if_exhaustion_in: A set of `ExhaustionMode`s that explicitly forbid this transition.
+        requires_human_clone: A boolean flag indicating if this transition requires
+                              an action or approval from a HumanClone agent.
+    """
 
     source: PRPState
     target: PRPState
@@ -208,7 +401,18 @@ class PRPTransition(BaseModel):
 
 
 class PRPInvalidTransitionError(RuntimeError):
-    """Raised when a PRP transition violates configured guards."""
+    """
+    Exception raised when a requested PRP state transition violates a defined guard.
+
+    This error is thrown by the `PRPStateMachine` when an attempt is made to move
+    between states in a way that is not permitted by the configured transition
+    rules (e.g., blocked by the current exhaustion mode). It captures detailed
+    telemetry about the failed transition attempt for debugging and analysis.
+
+    Attributes:
+        telemetry: A dictionary containing details of the invalid transition,
+                   including source/target states, exhaustion mode, and the reason for failure.
+    """
 
     def __init__(
         self,
@@ -235,7 +439,21 @@ class PRPInvalidTransitionError(RuntimeError):
 
 
 class PRPStateMachine:
-    """Finite-state automaton describing the PRP control loop."""
+    """
+    A finite-state automaton that governs the Perpetual Refinement Protocol (PRP) control loop.
+
+    This class manages the lifecycle of the PRP by defining the valid states, the
+    transitions between them, and the guards that must be satisfied for a
+    transition to occur. It provides a `validate_transition` method to enforce
+    these rules, ensuring that the agent's meta-cognitive process follows a
+    structured and robust path.
+
+    The state machine is initialized with a set of `PRPTransition` rules and a
+    defined initial state.
+
+    Attributes:
+        initial_state: The `PRPState` where the machine begins.
+    """
 
     def __init__(
         self,
@@ -249,6 +467,16 @@ class PRPStateMachine:
             self._graph.setdefault(transition.source, {})[transition.target] = transition
 
     def get_transition(self, source: PRPState, target: PRPState) -> PRPTransition | None:
+        """
+        Retrieves the transition rule for a given source and target state.
+
+        Args:
+            source: The starting `PRPState`.
+            target: The destination `PRPState`.
+
+        Returns:
+            The corresponding `PRPTransition` object if a rule exists, otherwise `None`.
+        """
         return self._graph.get(source, {}).get(target)
 
     def validate_transition(
@@ -259,6 +487,26 @@ class PRPStateMachine:
         exhaustion_mode: ExhaustionMode,
         human_clone_triggered: bool,
     ) -> PRPTransition:
+        """
+        Checks if a transition is valid based on current runtime conditions.
+
+        This method enforces the guards defined in the `PRPTransition` rules.
+        It will raise a `PRPInvalidTransitionError` if the requested transition
+        is not defined, is blocked by the current exhaustion mode, or fails to
+        meet other preconditions like `requires_human_clone`.
+
+        Args:
+            source: The current `PRPState`.
+            target: The desired next `PRPState`.
+            exhaustion_mode: The active `ExhaustionMode`.
+            human_clone_triggered: A flag indicating if a HumanClone action has occurred.
+
+        Returns:
+            The `PRPTransition` object if the transition is valid.
+
+        Raises:
+            PRPInvalidTransitionError: If the transition violates any defined guards.
+        """
         transition = self.get_transition(source, target)
         if transition is None:
             raise PRPInvalidTransitionError(
@@ -377,7 +625,43 @@ PRP_STATE_MACHINE = PRPStateMachine(DEFAULT_PRP_TRANSITIONS)
 
 
 class ContextEngineState(RuntimeState):
-    """Extended runtime state used by the context engineering node."""
+    """
+    Extends `RuntimeState` with detailed tracking for advanced context management.
+
+    This state object is used by the context engineering nodes of the graph to
+    manage the agent's working memory, external memory, and the progressive
+    loading of context. It includes fields for tracking context window usage,
+    quality scores, memory checkpoints, and the various components of the
+    ACE (Adaptive Contextual Engagement) and MemAct systems.
+
+    Attributes:
+        context_window_used: The number of tokens currently in the context window.
+        context_window_max: The maximum capacity of the context window.
+        context_quality_score: A composite score evaluating the relevance and coherence of the current context.
+        working_memory: A dictionary representing fast-access, in-context memory.
+        context_segments: A list of `ContextSegment` objects currently in the context window.
+        external_memory_index: An index mapping keys to references in external storage (e.g., file system).
+        memory_checkpoints: A list of `MemoryCheckpoint` snapshots.
+        pending_context: A queue of context items waiting to be loaded.
+        context_hierarchy: A structure defining priority and relationships between context elements.
+        prefetch_queue: A queue for speculative loading of context.
+        context_playbook: A set of rules or strategies for managing context.
+        reflection_log: A log of the context engine's self-reflection and adjustments.
+        curation_rules: A list of rules for automated context curation.
+        compression_ratio: A metric for how effectively context is being compressed.
+        retrieval_accuracy: A metric for the accuracy of information retrieval from memory.
+        attention_distribution: A map showing how attention is distributed across context segments.
+        context_quality_components: A breakdown of the factors contributing to the quality score.
+        metrics_log: A time-series log of context-related metrics.
+        governor_plan: The plan generated by the context governor for prompt construction.
+        governor_prompt_outline: A structured outline of the prompt to be built.
+        skills_catalog: A catalog of available skills or tools for context manipulation.
+        active_skills_metadata: Metadata for the currently active skills.
+        loaded_skills: The skill implementations currently loaded into memory.
+        last_curation_summary: A summary of the last context curation action.
+        recent_loads: A log of recently loaded context segments.
+        recent_externalizations: A log of recently externalized context segments.
+    """
 
     # Context Management
     context_window_used: int
@@ -419,7 +703,50 @@ class ContextEngineState(RuntimeState):
 
 
 class QuadraCodeState(ContextEngineState, total=False):
-    """Primary orchestrator state including meta-cognitive signals."""
+    """
+    The primary, comprehensive state object for the Quadracode orchestrator.
+
+    This `TypedDict` aggregates all other state definitions (`RuntimeState`,
+    `ContextEngineState`) and adds fields specifically for the meta-cognitive
+    and deliberative capabilities of the system, centered around the Perpetual
+    Refinement Protocol (PRP). It is the single source of truth that is passed
+    between all nodes in the LangGraph workflow.
+
+    Attributes:
+        is_in_prp: A flag indicating if the system is currently in a PRP cycle.
+        prp_cycle_count: The number of PRP cycles completed.
+        prp_state: The current `PRPState` in the state machine.
+        refinement_ledger: A list of `RefinementLedgerEntry` objects, logging the history of PRP cycles.
+        exhaustion_mode: The current `ExhaustionMode` that triggered or is active within the PRP.
+        exhaustion_probability: A predicted probability of entering an exhaustion state.
+        exhaustion_recovery_log: A log of attempts to recover from exhaustion states.
+        refinement_memory_block: A synthesized block of text summarizing recent refinements for prompt injection.
+        prp_telemetry: A detailed log of events and metrics related to the PRP.
+        human_clone_requirements: A list of conditions or information needed from a HumanClone agent.
+        human_clone_trigger: Data related to the event that triggered a need for HumanClone intervention.
+        last_test_suite_result: The result of the last full test suite run.
+        last_property_test_result: The result of the last property-based test.
+        property_test_results: A list of recent property-based test outcomes.
+        debugger_agents: A list of specialized agents spawned for debugging purposes.
+        workspace_snapshots: A history of `WorkspaceSnapshotRecord`s.
+        workspace_validation: State concerning the integrity and validation of the workspace.
+        critique_backlog: A list of critiques or suggested improvements to be addressed.
+        hypothesis_cycle_metrics: Metrics specifically tracking the performance of hypothesis generation.
+        time_travel_log: A log of state transitions for debugging and replay.
+        invariants: A dictionary tracking the status of system invariants.
+        autonomy_counters: Counters for events like false stops and skepticism challenges.
+        deliberative_plan: The output of a deliberative planning process.
+        deliberative_intermediate_states: Intermediate states generated during planning.
+        deliberative_synopsis: A summary of the deliberative plan.
+        counterfactual_register: A log of counterfactual reasoning explorations.
+        causal_graph_snapshot: A snapshot of the system's causal model.
+        planning_uncertainty: A score representing uncertainty in the current plan.
+        planning_success_probability: The predicted probability of the current plan succeeding.
+        episodic_memory: Memory of specific events or sequences of actions.
+        semantic_memory: Abstracted knowledge and facts derived from experience.
+        memory_consolidation_log: A log of operations that consolidate episodic into semantic memory.
+        memory_guidance: Directives for how memory should be utilized in the current context.
+    """
 
     is_in_prp: bool
     prp_cycle_count: int
@@ -460,7 +787,20 @@ def make_initial_context_engine_state(
     *,
     context_window_max: int = 0,
 ) -> QuadraCodeState:
-    """Create a baseline QuadraCodeState with safe defaults."""
+    """
+    Factory function to create a new, fully-initialized `QuadraCodeState`.
+
+    Initializes the comprehensive `QuadraCodeState` with sensible default values for
+    all its fields, including context management, PRP state, memory, and telemetry
+    logs. This ensures that a new graph execution starts from a clean, predictable
+    state.
+
+    Args:
+        context_window_max: The maximum context window size to configure for this state.
+
+    Returns:
+        A `QuadraCodeState` dictionary populated with default values.
+    """
 
     return cast(
         QuadraCodeState,
@@ -547,7 +887,20 @@ def make_initial_context_engine_state(
 
 
 def serialize_context_engine_state(state: QuadraCodeState) -> Dict[str, Any]:
-    """Produce a JSON-friendly representation of the context state."""
+    """
+    Converts a `QuadraCodeState` object into a JSON-serializable dictionary.
+
+    This function handles the conversion of complex types within the state,
+    such as `AnyMessage`, `RefinementLedgerEntry`, `WorkspaceSnapshotRecord`,
+    and enums (`ExhaustionMode`, `PRPState`), into formats that can be
+    readily stored in JSON files or transmitted over a network.
+
+    Args:
+        state: The `QuadraCodeState` object to serialize.
+
+    Returns:
+        A dictionary containing only JSON-compatible types.
+    """
 
     ledger_payload: List[Dict[str, Any]] = []
     for entry in state.get("refinement_ledger", []):
@@ -584,7 +937,21 @@ def serialize_context_engine_state(state: QuadraCodeState) -> Dict[str, Any]:
 
 
 def deserialize_context_engine_state(payload: Dict[str, Any]) -> QuadraCodeState:
-    """Rehydrate a QuadraCodeState from a serialized payload."""
+    """
+    Rehydrates a `QuadraCodeState` object from a JSON-serializable dictionary.
+
+    This function performs the reverse of `serialize_context_engine_state`,
+    reconstructing the rich object types (`AnyMessage`, `RefinementLedgerEntry`, enums, etc.)
+    from their serialized string or dictionary representations. It includes robust
+    handling of missing keys and type mismatches to ensure backward compatibility
+    with older state formats.
+
+    Args:
+        payload: A dictionary containing the serialized state.
+
+    Returns:
+        A fully-rehydrated `QuadraCodeState` object.
+    """
 
     messages_payload = payload.get("messages", [])
     state = {**payload}
@@ -718,6 +1085,19 @@ def deserialize_context_engine_state(payload: Dict[str, Any]) -> QuadraCodeState
 
 
 def _latest_ledger_entry(state: QuadraCodeState) -> RefinementLedgerEntry | None:
+    """
+    Safely retrieves the most recent entry from the refinement ledger.
+
+    This helper function accesses the `refinement_ledger` list from the state,
+    handles cases where it might be empty or contain unhydrated dictionaries,
+    and returns the last entry as a `RefinementLedgerEntry` object if possible.
+
+    Args:
+        state: The current `QuadraCodeState`.
+
+    Returns:
+        The latest `RefinementLedgerEntry` or `None` if the ledger is empty or invalid.
+    """
     ledger = state.get("refinement_ledger")
     if not isinstance(ledger, list) or not ledger:
         return None
@@ -735,7 +1115,19 @@ def _latest_ledger_entry(state: QuadraCodeState) -> RefinementLedgerEntry | None
 
 
 def active_cycle_id(state: QuadraCodeState) -> str:
-    """Resolve the active refinement cycle identifier for observability."""
+    """
+    Determines the identifier for the current or next PRP refinement cycle.
+
+    This is used for tagging telemetry and logs. It first attempts to get the
+    `cycle_id` from the latest entry in the refinement ledger. If no entry
+    exists, it computes a new ID based on the `prp_cycle_count`.
+
+    Args:
+        state: The current `QuadraCodeState`.
+
+    Returns:
+        A string identifier for the active refinement cycle.
+    """
 
     entry = _latest_ledger_entry(state)
     if entry is not None:
@@ -749,6 +1141,19 @@ def active_cycle_id(state: QuadraCodeState) -> str:
 
 
 def _ensure_test_result_container(entry: RefinementLedgerEntry) -> Dict[str, Any]:
+    """
+    Ensures that the `test_results` attribute of a ledger entry is a dictionary.
+
+    This utility handles cases where `test_results` might be `None` or an older,
+    non-dictionary format. It initializes or migrates the attribute to a
+    dictionary structure, making it safe to add new test results.
+
+    Args:
+        entry: The `RefinementLedgerEntry` to modify.
+
+    Returns:
+        The `test_results` dictionary from the entry.
+    """
     existing = entry.test_results
     if isinstance(existing, dict):
         return existing
@@ -766,6 +1171,15 @@ def _append_test_failure_log(
     message: str,
     extra: Dict[str, Any] | None = None,
 ) -> None:
+    """
+    Appends a structured entry to the exhaustion recovery log for test failures.
+
+    Args:
+        state: The `QuadraCodeState` to be updated.
+        tool: The name of the tool or process that reported the failure.
+        message: A description of the failure.
+        extra: Optional dictionary with additional context about the failure.
+    """
     recovery_log = state.setdefault("exhaustion_recovery_log", [])
     if not isinstance(recovery_log, list):
         return
@@ -783,6 +1197,19 @@ def _append_test_failure_log(
 
 
 def _ensure_autonomy_counters(state: QuadraCodeState) -> Dict[str, Any]:
+    """
+    Initializes the autonomy counters in the state if they don't exist.
+
+    Ensures that the `autonomy_counters` dictionary and its nested keys for
+    tracking events like false stops and skepticism challenges are present
+    and correctly typed.
+
+    Args:
+        state: The `QuadraCodeState` to be checked and updated.
+
+    Returns:
+        The ensured autonomy counters dictionary.
+    """
     bucket = state.setdefault("autonomy_counters", {})
     if not isinstance(bucket, dict):
         bucket = {}
@@ -801,7 +1228,23 @@ def flag_false_stop_event(
     stage: str,
     evidence: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    """Increment false-stop counters and log telemetry for detection events."""
+    """
+    Records the detection of a potential "false stop" event in autonomous mode.
+
+    A false stop occurs when the agent incorrectly concludes its task is complete.
+    This function increments the relevant counters (`false_stop_events`,
+    `false_stop_pending`) and logs detailed telemetry about the event for
+    observability and potential mitigation.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        reason: A description of why a false stop is suspected.
+        stage: The operational stage where the event was detected (e.g., "test", "conclusion").
+        evidence: A dictionary of data supporting the detection.
+
+    Returns:
+        A dictionary containing the payload of the logged telemetry event.
+    """
 
     counters = _ensure_autonomy_counters(state)
     counters["false_stop_events"] = int(counters.get("false_stop_events", 0)) + 1
@@ -835,7 +1278,21 @@ def resolve_false_stop_pending(
     stage: str,
     evidence: Dict[str, Any] | None = None,
 ) -> bool:
-    """Resolve one pending false-stop condition if present."""
+    """
+    Marks one pending false-stop event as mitigated or resolved.
+
+    When the agent successfully proceeds past a point where a false stop was
+    suspected, this function is called to decrement the `false_stop_pending`
+    counter and increment the `false_stop_mitigated` counter.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        stage: The operational stage where the mitigation occurred.
+        evidence: A dictionary of data demonstrating the successful continuation.
+
+    Returns:
+        `True` if a pending event was resolved, `False` otherwise.
+    """
 
     counters = _ensure_autonomy_counters(state)
     pending = int(counters.get("false_stop_pending", 0) or 0)
@@ -872,7 +1329,24 @@ def record_skepticism_challenge(
     reason: str,
     evidence: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    """Record a skepticism challenge event and update invariants."""
+    """
+    Logs a "skepticism challenge" event and updates system invariants.
+
+    A skepticism challenge is an internal mechanism where the system questions
+    its own conclusions or plans, forcing a deeper validation. This function
+    increments the `skepticism_challenges` counter and sets the
+    `skepticism_gate_satisfied` invariant to true, potentially unlocking more
+    rigorous behaviors.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        source: The component or process that initiated the challenge.
+        reason: The reason for the challenge.
+        evidence: Supporting data for the challenge.
+
+    Returns:
+        The telemetry payload for the recorded event.
+    """
 
     counters = _ensure_autonomy_counters(state)
     counters["skepticism_challenges"] = int(counters.get("skepticism_challenges", 0)) + 1
@@ -902,7 +1376,19 @@ def record_skepticism_challenge(
 
 
 def record_test_suite_result(state: QuadraCodeState, result: Dict[str, Any]) -> None:
-    """Persist structured test telemetry and propagate exhaustion signals."""
+    """
+    Processes and records the results from a full test suite run.
+
+    This function updates the `last_test_suite_result` in the state, adds the
+    result to the current refinement ledger entry, and publishes telemetry.
+    Crucially, if the tests fail, it sets the `exhaustion_mode` to
+    `TEST_FAILURE`, triggering a PRP cycle to address the issue. It also
+    clears the invariant that requires testing after a HumanClone rejection.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        result: A dictionary containing the structured results from the test suite.
+    """
 
     normalized = deepcopy(result)
     state["last_test_suite_result"] = normalized
@@ -960,7 +1446,19 @@ def record_test_suite_result(state: QuadraCodeState, result: Dict[str, Any]) -> 
 
 
 def record_property_test_result(state: QuadraCodeState, payload: Dict[str, Any]) -> None:
-    """Persist property-testing telemetry and surface failures."""
+    """
+    Processes and records the results from a property-based test.
+
+    Similar to `record_test_suite_result`, this function updates the state with
+    the latest property test outcome, logs it to the refinement ledger, and
+    publishes telemetry. A failed property test also sets the `exhaustion_mode`
+    to `TEST_FAILURE`, initiating a refinement cycle. It clears the post-rejection
+    testing requirement.
+
+    Args:
+        state: The `QuadraCodeState` to update.
+        payload: A dictionary containing the structured results of the property test.
+    """
 
     source = payload.get("result") if isinstance(payload, dict) else None
     if isinstance(source, dict):
@@ -1037,7 +1535,18 @@ def add_refinement_ledger_entry(
     state: QuadraCodeState,
     entry: RefinementLedgerEntry | Dict[str, Any],
 ) -> None:
-    """Append a ledger entry to the state, normalizing payloads."""
+    """
+    Appends a new entry to the refinement ledger in the state.
+
+    This function handles the addition of a new `RefinementLedgerEntry`. It
+    can accept either a pre-constructed `RefinementLedgerEntry` object or a
+    dictionary, which it will normalize and validate before converting it into
+    the Pydantic model. This ensures data consistency within the ledger.
+
+    Args:
+        state: The `QuadraCodeState` to be updated.
+        entry: The ledger entry to add, as either a model instance or a dictionary.
+    """
 
     if isinstance(entry, dict) and not isinstance(entry, RefinementLedgerEntry):
         payload = dict(entry)
@@ -1098,7 +1607,28 @@ def apply_prp_transition(
     telemetry_callback: Callable[[str, Dict[str, Any]], None] | None = None,
     strict: bool = False,
 ) -> Dict[str, Any]:
-    """Apply a PRP transition with guard enforcement and telemetry logging."""
+    """
+    Executes a state transition within the PRP state machine, enforcing all guards.
+
+    This is the primary function for changing the `prp_state`. It validates the
+    requested transition against the `PRPStateMachine` rules based on the current
+    state and exhaustion mode. If valid, it updates the state, logs extensive
+    telemetry, publishes observability events, and checks for any invariant
+    violations post-transition.
+
+    Args:
+        state: The `QuadraCodeState` to be updated.
+        target_state: The desired destination `PRPState`.
+        exhaustion_mode: The current `ExhaustionMode` to validate against. If not
+                         provided, it's read from the state.
+        human_clone_triggered: Flag indicating if a HumanClone action occurred.
+        telemetry_callback: An optional callback for custom telemetry handling.
+        strict: If `True`, raises `PRPInvalidTransitionError` on failure. If `False`,
+                logs the error and returns gracefully.
+
+    Returns:
+        A dictionary of the state updates that were applied.
+    """
 
     current_state_value = state.get("prp_state", PRP_STATE_MACHINE.initial_state)
     if isinstance(current_state_value, str):

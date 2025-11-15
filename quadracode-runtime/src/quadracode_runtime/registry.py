@@ -1,3 +1,14 @@
+"""
+This module provides the `AgentRegistryIntegration` class, which is responsible 
+for managing an agent's lifecycle with the central agent registry service.
+
+This component handles the initial registration of the agent, the periodic 
+sending of heartbeats to keep the registration alive, and the final 
+unregistration on shutdown. It is designed to be a self-contained, asynchronous 
+component that can be easily integrated into the main agent runtime. The 
+integration is configurable via a set of environment variables, allowing for 
+flexible deployment in different environments.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +54,19 @@ def _env_float(name: str, default: float) -> float:
 
 
 class AgentRegistryIntegration:
-    """Manage agent registration and heartbeat lifecycle with the registry service."""
+    """
+    Manages the registration and heartbeat lifecycle of an agent with the 
+    central registry service.
+
+    This class encapsulates all the logic for communicating with the agent 
+    registry, including registration, heartbeats, and unregistration. It runs 
+    as an asynchronous task, periodically sending heartbeats to the registry to 
+    signal that the agent is still alive.
+
+    Attributes:
+        _agent_id: The unique ID of the agent.
+        ... and other configuration parameters.
+    """
 
     def __init__(
         self,
@@ -55,6 +78,17 @@ class AgentRegistryIntegration:
         base_url: str,
         timeout: float,
     ) -> None:
+        """
+        Initializes the `AgentRegistryIntegration`.
+
+        Args:
+            agent_id: The unique ID of the agent.
+            host: The hostname or IP address of the agent.
+            port: The port on which the agent is running.
+            interval: The interval in seconds for sending heartbeats.
+            base_url: The base URL of the agent registry service.
+            timeout: The timeout in seconds for requests to the registry.
+        """
         self._agent_id = agent_id
         self._host = host
         self._port = port
@@ -67,6 +101,23 @@ class AgentRegistryIntegration:
 
     @classmethod
     def from_environment(cls, profile_name: str, agent_id: str) -> Optional["AgentRegistryIntegration"]:
+        """
+        Creates an `AgentRegistryIntegration` instance from environment 
+        variables.
+
+        This factory method is the preferred way to create an instance of this 
+        class. It reads all the necessary configuration from a predefined set of 
+        environment variables, and it will return `None` if the integration is 
+        disabled or if the profile is not an agent profile.
+
+        Args:
+            profile_name: The name of the runtime profile.
+            agent_id: The unique ID of the agent.
+
+        Returns:
+            An instance of `AgentRegistryIntegration`, or `None` if the 
+            integration is not applicable.
+        """
         if profile_name != "agent":
             return None
         if not _env_flag("QUADRACODE_AGENT_AUTOREGISTER", True):
@@ -93,6 +144,12 @@ class AgentRegistryIntegration:
         )
 
     async def start(self) -> None:
+        """
+        Starts the agent registration and heartbeat loop.
+
+        This method performs the initial registration with the registry and then 
+        starts the background task that sends periodic heartbeats.
+        """
         if self._task:
             return
         print("[AgentRegistryIntegration] start() invoked")
@@ -104,6 +161,9 @@ class AgentRegistryIntegration:
         self._task = asyncio.create_task(self._heartbeat_loop())
 
     async def shutdown(self) -> None:
+        """
+        Shuts down the heartbeat loop and unregisters the agent.
+        """
         if self._task:
             self._task.cancel()
             with suppress(asyncio.CancelledError):

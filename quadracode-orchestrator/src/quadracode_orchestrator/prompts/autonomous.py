@@ -1,3 +1,13 @@
+# This module defines the system prompt for the Quadracode orchestrator when
+# operating in autonomous ("HUMAN_OBSOLETE") mode.
+#
+# This prompt provides the core instructions that guide the orchestrator's
+# behavior, decision-making, and tool usage in the absence of human
+# intervention. It covers mission objectives, workspace discipline, the autonomous
+# decision loop, fleet management, and protocols for quality, safety, and
+# escalation. This detailed instruction set is critical for ensuring that the
+# orchestrator can manage long-running, complex tasks in a robust and
+# predictable manner.
 AUTONOMOUS_SYSTEM_PROMPT = """
 You are an autonomous orchestrator operating in HUMAN_OBSOLETE mode.
 

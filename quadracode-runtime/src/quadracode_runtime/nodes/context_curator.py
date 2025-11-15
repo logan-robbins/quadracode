@@ -1,4 +1,15 @@
-"""Context curation implementation based on MemAct."""
+"""
+This module implements the `ContextCurator`, a key component of the Quadracode 
+runtime's context engine, based on the principles of the MemAct framework.
+
+The `ContextCurator` is responsible for dynamically managing the working context 
+of the language model. It does this by applying a set of "context operations" 
+(e.g., retain, compress, summarize, externalize) to the context segments. The 
+curator's main goal is to keep the context size within a target limit while 
+preserving the most relevant and important information. It uses a heuristic-based 
+scoring system to evaluate the value of each context segment and then selects the 
+most appropriate operation for each one.
+"""
 
 from __future__ import annotations
 
@@ -19,9 +30,29 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ContextCurator:
-    """Applies MemAct operations to manage working context."""
+    """
+    Applies MemAct-inspired operations to manage the working context.
+
+    This class implements the core logic for the context curation process. It 
+    scores context segments, determines the optimal set of operations to apply, 
+    and then executes those operations to produce a new, optimized set of 
+    context segments. It also includes a learning mechanism that adjusts the 
+    scores of the operations based on their impact on the context quality.
+
+    Attributes:
+        config: The configuration for the context engine.
+        operation_history: A deque that keeps track of the most recent operations.
+        operation_scores: A dictionary that stores the learned scores for each 
+                          context operation.
+    """
 
     def __init__(self, config: ContextEngineConfig) -> None:
+        """
+        Initializes the `ContextCurator`.
+
+        Args:
+            config: The configuration for the context engine.
+        """
         self.config = config
         self.operation_history: Deque[str] = deque(maxlen=256)
         self.operation_scores: Dict[ContextOperation, float] = {
@@ -38,19 +69,35 @@ class ContextCurator:
         }
 
     async def optimize(self, state: ContextEngineState) -> ContextEngineState:
-        """Main optimization routine executed before driver decisions."""
+        """
+        Runs the main context optimization routine.
+
+        This method is executed before the driver makes a decision. It orchestrates 
+        the entire curation process, from scoring the segments to applying the 
+        operations and updating the state.
+
+        Args:
+            state: The current state of the context engine.
+
+        Returns:
+            The updated state with the optimized context segments.
+        """
 
         segments = list(state.get("context_segments", ()))
         if not segments:
             return state
 
+        # Score the current context segments
         scores = await self._score_segments(segments)
+        
+        # Determine the best operation for each segment
         decisions = await self._determine_operations(segments, scores, state)
 
         new_segments: List[ContextSegment] = []
         external_refs: List[Dict[str, str]] = []
         operation_counts: Dict[str, int] = {}
 
+        # Apply the chosen operation to each segment
         for segment, operation in decisions:
             handler = self._operation_handler(operation)
             result = await handler(segment, state)
@@ -92,7 +139,18 @@ class ContextCurator:
         return state
 
     async def post_decision_curation(self, state: ContextEngineState) -> ContextEngineState:
-        """Adjust state after the driver has produced an action."""
+        """
+        Performs curation tasks after the driver has made a decision.
+
+        This method is responsible for learning from the outcome of the driver's 
+        decision and for cleaning up any stale context segments.
+
+        Args:
+            state: The current state of the context engine.
+
+        Returns:
+            The updated state.
+        """
 
         await self._learn_from_outcome(state)
         # Remove stale isolated segments
@@ -134,7 +192,24 @@ class ContextCurator:
         scores: List[float],
         state: ContextEngineState,
     ) -> List[Tuple[ContextSegment, ContextOperation]]:
-        """Pick operations per segment using current targets and learned weights."""
+        """
+        Determines the most appropriate context operation for each segment.
+
+        This method uses the segment scores, the current token count, and the 
+        target context size to decide which operation to apply to each segment. 
+        It prioritizes retaining high-priority segments and then applies other 
+        operations (e.g., externalize, discard) to the remaining segments to 
+        stay within the token limit.
+
+        Args:
+            segments: The list of context segments.
+            scores: The corresponding scores for each segment.
+            state: The current state of the context engine.
+
+        Returns:
+            A list of tuples, each containing a segment and the chosen 
+            operation.
+        """
 
         target_tokens = self.config.target_context_size
         current_tokens = 0
@@ -164,6 +239,7 @@ class ContextCurator:
         return decisions
 
     def _operation_handler(self, operation: ContextOperation):
+        """Returns the handler function for a given context operation."""
         mapping = {
             ContextOperation.RETAIN: self._handle_retain,
             ContextOperation.COMPRESS: self._handle_compress,
@@ -181,16 +257,19 @@ class ContextCurator:
     async def _handle_retain(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
+        """Handler for the RETAIN operation (no-op)."""
         return segment
 
     async def _handle_discard(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> None:
+        """Handler for the DISCARD operation."""
         return None
 
     async def _handle_compress(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
+        """Handler for the COMPRESS operation."""
         compressed = self._compress_segment(segment)
         compressed["compression_eligible"] = False
         return compressed
@@ -198,6 +277,7 @@ class ContextCurator:
     async def _handle_summarize(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
+        """Handler for the SUMMARIZE operation."""
         summary = self._summarize_segment(segment)
         summary["restorable_reference"] = segment.get("id")
         summary["compression_eligible"] = False
@@ -207,17 +287,23 @@ class ContextCurator:
     async def _handle_externalize(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> Tuple[ContextSegment, Dict[str, str]]:
+        """Handler for the EXTERNALIZE operation."""
         pointer, reference = self._externalize_segment(segment)
         return pointer, reference
 
     async def _handle_isolate(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
+        """Handler for the ISOLATE operation."""
         isolated = dict(segment)
         isolated["priority"] = max(1, isolated.get("priority", 1) - 1)
         return isolated
 
     async def _learn_from_outcome(self, state: ContextEngineState) -> None:
+        """
+        Adjusts the scores of the context operations based on the quality of 
+        the context.
+        """
         quality = state.get("context_quality_score", 0.5)
         adjustment = (quality - 0.5) * self.config.operation_learning_rate
         for op in self.operation_scores:
@@ -225,6 +311,7 @@ class ContextCurator:
             self.operation_scores[op] = min(max(baseline + adjustment, 0.0), 1.0)
 
     def _truncate(self, text: str, limit: int) -> str:
+        """Truncates a string to a given limit."""
         if len(text) <= limit:
             return text
         return f"{text[:limit]}…"
@@ -355,6 +442,7 @@ class ContextCurator:
             LOGGER.warning("Failed to persist externalized segment %s: %s", path_str, exc)
 
     def _is_stale(self, segment: ContextSegment) -> bool:
+        """Determines if a context segment is stale."""
         timestamp = segment.get("timestamp")
         if not timestamp:
             return False

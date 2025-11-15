@@ -1,3 +1,16 @@
+"""
+This module is a core component of the Quadracode runtime, responsible for 
+processing the outputs of autonomous tools and updating the system's state 
+accordingly.
+
+It acts as a bridge between the raw tool messages and the structured state of the 
+LangGraph. The `process_autonomous_tool_response` function is the main entry 
+point, and it dispatches to specialized handlers for different types of 
+autonomous events, such as checkpoints, escalations, and hypothesis critiques. 
+This module also handles the important tasks of publishing observability events 
+and logging state transitions for time-travel debugging, ensuring that the 
+autonomous process is both transparent and reproducible.
+"""
 from __future__ import annotations
 
 import json
@@ -85,7 +98,22 @@ def process_autonomous_tool_response(
     state: ContextEngineState,
     tool_response: Any,
 ) -> Tuple[ContextEngineState, Dict[str, Any] | None]:
-    """Update state from HUMAN_OBSOLETE autonomous tool invocations."""
+    """
+    Updates the system state based on the output of autonomous tools.
+
+    This function is the central processor for tool messages generated in 
+    autonomous mode. It identifies the type of autonomous event, parses the 
+    corresponding data record, updates the `ContextEngineState`, and publishes 
+    an observability event.
+
+    Args:
+        state: The current state of the context engine.
+        tool_response: The raw tool message from the LangGraph.
+
+    Returns:
+        A tuple containing the updated state and an optional dictionary 
+        representing the event that was processed.
+    """
 
     if not isinstance(tool_response, ToolMessage):
         return state, None
@@ -101,6 +129,7 @@ def process_autonomous_tool_response(
     event = payload.get("event")
     event_record: Dict[str, Any] | None = None
 
+    # Common metadata for all autonomous events
     thread_id = state.get("thread_id")
     exhaustion_mode = state.get("exhaustion_mode", ExhaustionMode.NONE)
     if isinstance(exhaustion_mode, str):
@@ -109,6 +138,7 @@ def process_autonomous_tool_response(
         except ValueError:
             exhaustion_mode = ExhaustionMode.NONE
 
+    # Handle 'checkpoint' events
     if event == "checkpoint":
         record_payload = payload.get("record")
         if not isinstance(record_payload, dict):
@@ -145,6 +175,7 @@ def process_autonomous_tool_response(
         _publish_autonomous_event(event_record, state)
         return state, event_record
 
+    # Handle 'final_review_request' events
     if event == "final_review_request":
         record_payload = payload.get("record")
         if not isinstance(record_payload, dict):
@@ -179,6 +210,7 @@ def process_autonomous_tool_response(
         _publish_autonomous_event(event_record, state)
         return state, event_record
 
+    # Handle 'escalation' events
     if event == "escalation":
         record_payload = payload.get("record")
         routing_payload = payload.get("routing")
@@ -219,6 +251,7 @@ def process_autonomous_tool_response(
         _publish_autonomous_event(event_record, state)
         return state, event_record
 
+    # Handle 'hypothesis_critique' events
     if event == "hypothesis_critique":
         record_payload = payload.get("record")
         if not isinstance(record_payload, dict):
@@ -250,6 +283,18 @@ def process_autonomous_tool_response(
 
 
 def _parse_tool_message(message: ToolMessage) -> Dict[str, Any] | None:
+    """
+    Parses the content of a `ToolMessage` into a dictionary.
+
+    This helper function is designed to robustly extract a JSON payload from a 
+    `ToolMessage`, which may contain content in various formats.
+
+    Args:
+        message: The `ToolMessage` to parse.
+
+    Returns:
+        A dictionary if the content is valid JSON, otherwise `None`.
+    """
     content = message.content
     text: str
     if isinstance(content, str):
@@ -280,6 +325,16 @@ def _parse_tool_message(message: ToolMessage) -> Dict[str, Any] | None:
 
 
 def _upsert_milestone(milestones: List[AutonomousMilestone], entry: AutonomousMilestone) -> None:
+    """
+    Inserts or updates a milestone in the state's milestone list.
+
+    This function ensures that the list of milestones is kept sorted and that 
+    updates to existing milestones are applied correctly.
+
+    Args:
+        milestones: The list of milestones from the current state.
+        entry: The new or updated milestone entry.
+    """
     updated = False
     for idx, existing in enumerate(milestones):
         if existing.get("milestone") == entry.get("milestone"):

@@ -1,3 +1,13 @@
+"""
+This module defines the runtime profile for the Quadracode orchestrator.
+
+It dynamically selects the appropriate system prompt based on whether autonomous 
+mode is enabled, and then customizes the base "orchestrator" profile from the 
+shared `quadracode_runtime`. This module is the central point of configuration for 
+the orchestrator's identity, tools, and behavioral instructions. The resulting 
+`PROFILE` object is used to initialize the orchestrator's runtime environment 
+and graph.
+"""
 from __future__ import annotations
 
 from dataclasses import replace

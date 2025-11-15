@@ -1,5 +1,14 @@
-"""Default prompts for Quadracode runtime profiles."""
+"""
+This module provides the `BASE_PROMPT`, a foundational system prompt for the 
+Quadracode runtime.
 
+This prompt establishes the core identity and operational principles for all 
+agents in the system. It emphasizes their autonomous nature, their control over 
+tool usage, and their responsibility to be both efficient and thorough. This base 
+prompt is intended to be extended and customized by the more specific profiles 
+for the orchestrator and agents, providing a consistent foundation for their 
+behavior.
+"""
 BASE_PROMPT = """
 You are an autonomous agent with complete control over tool usage.
 

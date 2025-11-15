@@ -1,3 +1,15 @@
+"""
+This module is responsible for defining and loading the runtime profiles for the 
+different components of the Quadracode system, such as the orchestrator, agents, 
+and the HumanClone.
+
+A `RuntimeProfile` is a dataclass that encapsulates the core configuration for a 
+runtime component, including its name, default identity, system prompt, and a 
+`RecipientPolicy` that governs its message routing behavior. This module provides 
+a set of specialized `RecipientPolicy` classes and factory functions for creating 
+the different profiles, allowing for a clear and centralized definition of each 
+component's role and behavior within the system.
+"""
 from __future__ import annotations
 
 import os
@@ -39,7 +51,10 @@ def _supervisor_recipient() -> str:
 
 
 def is_autonomous_mode_enabled() -> bool:
-    """Return True if HUMAN_OBSOLETE autonomous mode is enabled."""
+    """
+    Checks environment variables to determine if the system is running in 
+    autonomous ("HUMAN_OBSOLETE") mode.
+    """
 
     for env_var in _AUTONOMOUS_ENV_VARS:
         value = os.environ.get(env_var)
@@ -65,6 +80,21 @@ def _extract_autonomous_directive(
 
 @dataclass(frozen=True)
 class RecipientPolicy:
+    """
+    Defines the rules for resolving the recipients of a message.
+
+    This is the base class for all recipient policies. It provides a default 
+    `resolve` method that can be customized by subclasses to implement more 
+    specialized routing logic.
+
+    Attributes:
+        fallback: The default recipient if no other recipients can be resolved.
+        force: A tuple of recipients that should always be included.
+        include_sender: Whether to include the sender as a recipient if no other 
+                        recipients are specified.
+        mirror_human_when_sender_not: Whether to automatically include the human as 
+                                    a recipient if the sender is not the human.
+    """
     fallback: str | None = None
     force: tuple[str, ...] = ()
     include_sender: bool = True
@@ -109,7 +139,13 @@ class RecipientPolicy:
 
 @dataclass(frozen=True)
 class OrchestratorRecipientPolicy(RecipientPolicy):
-    """Recipient resolution tuned for orchestrator delegation requirements."""
+    """
+    A specialized recipient policy for the orchestrator.
+
+    This policy ensures that the orchestrator's responses are correctly routed 
+    to either the intended agent(s) or back to the human, depending on the 
+    context of the message.
+    """
 
     def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
         recipients = super().resolve(envelope, payload)
@@ -127,7 +163,15 @@ class OrchestratorRecipientPolicy(RecipientPolicy):
 
 @dataclass(frozen=True)
 class AutonomousRecipientPolicy(RecipientPolicy):
-    """Recipient resolution for HUMAN_OBSOLETE autonomous orchestrator mode."""
+    """
+    A specialized recipient policy for the orchestrator when running in 
+    autonomous mode.
+
+    This policy uses the `AutonomousRoutingDirective` to determine whether to 
+    include the human in the list of recipients. It is designed to keep the 
+    communication within the autonomous loop unless an explicit notification or 
+    escalation is required.
+    """
 
     def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
         recipients = super().resolve(envelope, payload)
@@ -164,7 +208,12 @@ class AutonomousRecipientPolicy(RecipientPolicy):
 
 @dataclass(frozen=True)
 class AgentRecipientPolicy(RecipientPolicy):
-    """Recipient resolution for agents: never route directly to human."""
+    """
+    A specialized recipient policy for agents.
+
+    This policy ensures that agents always respond to the orchestrator and never 
+    route messages directly to the human.
+    """
 
     def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
         recipients = super().resolve(envelope, payload)
@@ -177,24 +226,45 @@ class AgentRecipientPolicy(RecipientPolicy):
 
 @dataclass(frozen=True)
 class HumanCloneRecipientPolicy(RecipientPolicy):
-    """Recipient resolution for the HumanClone: always route back to the orchestrator."""
+    """
+    A specialized recipient policy for the HumanClone.
+
+    This policy ensures that the HumanClone's responses are always routed back 
+    to the orchestrator.
+    """
 
     def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
         return [ORCHESTRATOR_RECIPIENT]
 
 @dataclass(frozen=True)
 class RuntimeProfile:
+    """
+    Encapsulates the core configuration for a runtime component.
+
+    Attributes:
+        name: The name of the profile.
+        default_identity: The default identity of the component.
+        system_prompt: The base system prompt for the component.
+        policy: The `RecipientPolicy` to be used for message routing.
+    """
     name: str
     default_identity: str
     system_prompt: str = BASE_PROMPT
     policy: RecipientPolicy = field(default_factory=RecipientPolicy)
 
     def resolve_recipients(self, envelope, payload) -> List[str]:
+        """
+        Resolves the recipients for a message using the profile's recipient 
+        policy.
+        """
         return self.policy.resolve(envelope, payload)
 
 
 def _make_orchestrator_profile() -> RuntimeProfile:
-    """Construct an orchestrator profile using the current mode configuration."""
+    """
+    Constructs the appropriate orchestrator profile based on the current mode 
+    (autonomous or not).
+    """
 
     if is_autonomous_mode_enabled():
         policy: RecipientPolicy = AutonomousRecipientPolicy(
@@ -216,6 +286,7 @@ def _make_orchestrator_profile() -> RuntimeProfile:
 
 
 def _make_agent_profile() -> RuntimeProfile:
+    """Constructs the default agent profile."""
     return RuntimeProfile(
         name="agent",
         default_identity="agent",
@@ -233,6 +304,7 @@ HUMAN_CLONE_PROFILE_CACHE: RuntimeProfile | None = None
 
 
 def _make_human_clone_profile() -> RuntimeProfile:
+    """Constructs the HumanClone profile."""
     try:
         from quadracode_orchestrator.prompts.human_clone import (
             HUMAN_CLONE_SYSTEM_PROMPT,
@@ -250,6 +322,9 @@ def _make_human_clone_profile() -> RuntimeProfile:
 
 
 def get_human_clone_profile() -> RuntimeProfile:
+    """
+    Returns a cached instance of the HumanClone profile.
+    """
     global HUMAN_CLONE_PROFILE_CACHE
     if HUMAN_CLONE_PROFILE_CACHE is None:
         HUMAN_CLONE_PROFILE_CACHE = _make_human_clone_profile()
@@ -261,6 +336,21 @@ AGENT_PROFILE = _make_agent_profile()
 
 
 def load_profile(name: str) -> RuntimeProfile:
+    """
+    Loads a `RuntimeProfile` by name.
+
+    This function is the main entry point for retrieving a profile. It acts as a 
+    factory, returning the appropriate profile based on the provided name.
+
+    Args:
+        name: The name of the profile to load.
+
+    Returns:
+        The requested `RuntimeProfile`.
+
+    Raises:
+        ValueError: If the requested profile is not found.
+    """
     if name == "orchestrator":
         return _make_orchestrator_profile()
     if name == "agent":

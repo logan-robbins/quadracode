@@ -1,4 +1,16 @@
-"""Meta-cognitive observability helpers and Redis publishers."""
+"""
+This module provides the `MetaCognitiveObserver`, a component responsible for 
+publishing real-time observability data about the meta-cognitive signals within 
+the Quadracode runtime.
+
+The `MetaCognitiveObserver` is a key part of the runtime's telemetry system. It 
+provides a centralized interface for publishing events related to the autonomous 
+loop, the refinement ledger, and the PRP state machine. These events are 
+published to a set of dedicated Redis streams, allowing for real-time monitoring 
+and analysis of the system's high-level reasoning processes. This observability 
+is crucial for debugging, performance tuning, and understanding the behavior of 
+the autonomous system.
+"""
 
 from __future__ import annotations
 
@@ -62,7 +74,19 @@ def _coerce_str(value: Any) -> str | None:
 
 
 class MetaCognitiveObserver:
-    """Publishes real-time observability data for meta-cognitive signals."""
+    """
+    Publishes real-time observability data for meta-cognitive signals to a set 
+    of dedicated Redis streams.
+
+    This class provides a set of methods for publishing structured events related 
+    to the autonomous loop, the refinement ledger, and other high-level 
+    reasoning processes. It is designed to be a singleton, with a single 
+    instance being shared across the entire runtime.
+
+    Attributes:
+        redis_url: The URL of the Redis server.
+        ... and the names of the various Redis streams.
+    """
 
     def __init__(
         self,
@@ -75,6 +99,13 @@ class MetaCognitiveObserver:
         test_stream: str,
         client_factory: Callable[[], Any] | None = None,
     ) -> None:
+        """
+        Initializes the `MetaCognitiveObserver`.
+
+        Args:
+            redis_url: The URL of the Redis server.
+            ... and the names of the various Redis streams.
+        """
         self.redis_url = redis_url
         self.autonomous_stream = autonomous_stream
         self.cycle_stream = cycle_stream
@@ -86,6 +117,9 @@ class MetaCognitiveObserver:
 
     @classmethod
     def from_environment(cls) -> "MetaCognitiveObserver":
+        """
+        Creates a `MetaCognitiveObserver` instance from environment variables.
+        """
         redis_url = os.environ.get("QUADRACODE_METRICS_REDIS_URL", "redis://redis:6379/0")
         autonomous_stream = os.environ.get("QUADRACODE_AUTONOMOUS_STREAM_KEY", "qc:autonomous:events")
         cycle_stream = os.environ.get("QUADRACODE_META_CYCLE_STREAM", "qc:meta:cycles")
@@ -102,12 +136,15 @@ class MetaCognitiveObserver:
         )
 
     def publish_autonomous_event(self, event: str, payload: Dict[str, Any]) -> None:
+        """Publishes an event to the autonomous events stream."""
         self._push(self.autonomous_stream, event, payload)
 
     def publish_ledger_event(self, event: str, payload: Dict[str, Any]) -> None:
+        """Publishes an event to the refinement ledger stream."""
         self._push(self.ledger_stream, event, payload)
 
     def publish_test_result(self, test_type: str, payload: Dict[str, Any]) -> None:
+        """Publishes a test result to the test stream."""
         event = f"test_{test_type}"
         self._push(self.test_stream, event, payload)
 
@@ -120,6 +157,7 @@ class MetaCognitiveObserver:
         mode: Any,
         probability: float,
     ) -> None:
+        """Publishes an exhaustion event to the exhaustion stream."""
         payload = {
             "stage": stage,
             "previous_mode": getattr(previous_mode, "value", previous_mode),
@@ -137,6 +175,7 @@ class MetaCognitiveObserver:
         *,
         source: str | None = None,
     ) -> None:
+        """Publishes a snapshot of the current PRP cycle to the cycle stream."""
         cycle_id = self._resolve_cycle_id(state)
         entry = self._latest_ledger_entry(state)
         entry_payload = _as_dict(entry)
@@ -164,6 +203,10 @@ class MetaCognitiveObserver:
         stage: str,
         tokens_override: int | None = None,
     ) -> None:
+        """
+        Tracks the token usage for a given stage of the PRP cycle and publishes 
+        an updated cycle snapshot.
+        """
         if not state:
             return
         cycle_id = self._resolve_cycle_id(state)
@@ -206,6 +249,10 @@ class MetaCognitiveObserver:
         status: str,
         summary: str | None = None,
     ) -> None:
+        """
+        Finalizes the metrics for a given cycle and publishes an updated cycle 
+        snapshot.
+        """
         record = self._ensure_cycle_metrics(state, cycle_id)
         record["status"] = status
         record["outcome_summary"] = summary
@@ -221,6 +268,9 @@ class MetaCognitiveObserver:
         payload: Dict[str, Any],
         test_type: str,
     ) -> None:
+        """
+        Records the result of a test and publishes an updated cycle snapshot.
+        """
         record = self._ensure_cycle_metrics(state, cycle_id)
         normalized_status = (status or "").lower()
         key = f"last_{test_type}_status"
@@ -235,6 +285,7 @@ class MetaCognitiveObserver:
         state: MutableMapping[str, Any],
         cycle_id: str,
     ) -> Dict[str, Any]:
+        """Retrieves the active metrics for a given cycle."""
         metrics_map = state.get("hypothesis_cycle_metrics")
         if isinstance(metrics_map, dict):
             entry = metrics_map.get(cycle_id)
@@ -247,6 +298,10 @@ class MetaCognitiveObserver:
         state: MutableMapping[str, Any],
         cycle_id: str,
     ) -> Dict[str, Any]:
+        """
+        Ensures that a metrics record exists for the given cycle, creating one 
+        if necessary.
+        """
         metrics_map = state.setdefault("hypothesis_cycle_metrics", {})
         if not isinstance(metrics_map, dict):
             metrics_map = {}
@@ -264,12 +319,14 @@ class MetaCognitiveObserver:
         return record
 
     def _latest_ledger_entry(self, state: MutableMapping[str, Any]) -> Any:
+        """Retrieves the latest entry from the refinement ledger."""
         ledger = state.get("refinement_ledger")
         if not isinstance(ledger, list) or not ledger:
             return None
         return ledger[-1]
 
     def _resolve_cycle_id(self, state: MutableMapping[str, Any]) -> str:
+        """Resolves the current cycle ID from the state."""
         ledger_entry = self._latest_ledger_entry(state)
         if ledger_entry is not None:
             value = getattr(ledger_entry, "cycle_id", None)
@@ -282,6 +339,7 @@ class MetaCognitiveObserver:
         return f"cycle-{int(state.get('prp_cycle_count', 0) or 0) + 1}"
 
     def _coerce_enum(self, value: Any) -> str | None:
+        """Safely coerces an enum member to its string value."""
         if value is None:
             return None
         if hasattr(value, "value"):
@@ -289,6 +347,7 @@ class MetaCognitiveObserver:
         return _coerce_str(value)
 
     def _push(self, stream_key: str, event: str, payload: Dict[str, Any]) -> None:
+        """Pushes an event to the specified Redis stream."""
         if not stream_key or not event:
             return
         client = self._ensure_client()
@@ -305,6 +364,9 @@ class MetaCognitiveObserver:
             LOGGER.debug("Failed to publish observability event %s: %s", event, exc)
 
     def _ensure_client(self):
+        """
+        Manages the Redis client connection, ensuring it is initialized.
+        """
         if self._client is not None:
             return self._client
         if self._client_factory:
@@ -325,6 +387,9 @@ _OBSERVER: MetaCognitiveObserver | None = None
 
 
 def get_meta_observer() -> MetaCognitiveObserver:
+    """
+    Returns a singleton instance of the `MetaCognitiveObserver`.
+    """
     global _OBSERVER
     if _OBSERVER is None:
         _OBSERVER = MetaCognitiveObserver.from_environment()

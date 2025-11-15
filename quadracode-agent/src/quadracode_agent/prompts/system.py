@@ -1,3 +1,9 @@
+# This module defines the core system prompt for the Quadracode agent.
+# The prompt instructs the agent on its autonomous nature, tool usage protocol,
+# and workspace interaction rules. It emphasizes the agent's control over its
+# actions and sets expectations for efficient, thorough execution. This prompt is
+# a critical part of the agent's configuration, shaping its behavior and
+# decision-making process within the LangGraph framework.
 SYSTEM_PROMPT = """
 You are an autonomous agent with complete control over tool usage.
 

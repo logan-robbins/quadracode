@@ -1,4 +1,15 @@
-"""Context quality scoring following the ACE framework."""
+"""
+This module implements the `ContextScorer`, a component of the context engine 
+that evaluates the quality of the working context based on the principles of the 
+ACE (Adaptive Context Engineering) framework.
+
+The `ContextScorer` uses a set of lightweight, heuristic-based metrics to assess 
+the context's relevance, coherence, completeness, freshness, diversity, and 
+efficiency. These individual scores are then combined into a single, weighted 
+quality score. This score is a critical signal for the `ContextCurator`, which 
+uses it to trigger optimization routines when the context quality drops below a 
+predefined threshold.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +28,10 @@ from ..state import ContextEngineState, ContextSegment
 
 @dataclass(slots=True)
 class ScoreBreakdown:
+    """
+    Represents the breakdown of the context quality score into its individual 
+    components.
+    """
     relevance: float
     coherence: float
     completeness: float
@@ -26,12 +41,42 @@ class ScoreBreakdown:
 
 
 class ContextScorer:
-    """Evaluates context quality using lightweight ACE-inspired heuristics."""
+    """
+    Evaluates context quality using a set of lightweight, ACE-inspired 
+    heuristics.
+
+    This class provides the `evaluate` method, which is the main entry point for 
+    the scoring process. It calculates each of the quality components and then 
+    combines them into a single, weighted score. The weights can be dynamically 
+    adjusted based on the current phase of the task.
+
+    Attributes:
+        config: The configuration for the context engine.
+    """
 
     def __init__(self, config: ContextEngineConfig) -> None:
+        """
+        Initializes the `ContextScorer`.
+
+        Args:
+            config: The configuration for the context engine.
+        """
         self.config = config
 
     async def evaluate(self, state: ContextEngineState) -> float:
+        """
+        Evaluates the overall quality of the context.
+
+        This is the main public method of the `ContextScorer`. It orchestrates 
+        the calculation of all the individual quality components and then 
+        combines them into a final, weighted score.
+
+        Args:
+            state: The current state of the context engine.
+
+        Returns:
+            A quality score between 0.0 and 1.0.
+        """
         segments = state.get("context_segments", [])
 
         breakdown = ScoreBreakdown(
@@ -60,6 +105,18 @@ class ContextScorer:
         return max(0.0, min(total_score, 1.0))
 
     async def score_tool_output(self, tool_output: object) -> float:
+        """
+        Scores the relevance of a tool's output.
+
+        This method provides a simple, heuristic-based score for a tool's 
+        output based on its length.
+
+        Args:
+            tool_output: The output from the tool.
+
+        Returns:
+            A relevance score between 0.0 and 1.0.
+        """
         if tool_output is None:
             return 0.0
 
@@ -77,6 +134,7 @@ class ContextScorer:
     async def _score_relevance(
         self, segments: Iterable[ContextSegment], state: ContextEngineState
     ) -> float:
+        """Calculates the relevance score of the context."""
         segments = list(segments)
         if not segments:
             return 1.0
@@ -105,6 +163,7 @@ class ContextScorer:
         return max(0.0, min(1.0, cumulative / total_weight))
 
     async def _score_coherence(self, segments: Iterable[ContextSegment]) -> float:
+        """Calculates the coherence score of the context."""
         segments = list(segments)
         if len(segments) < 2:
             return 1.0
@@ -121,6 +180,7 @@ class ContextScorer:
     async def _score_completeness(
         self, segments: Iterable[ContextSegment], state: ContextEngineState
     ) -> float:
+        """Calculates the completeness score of the context."""
         expected_types = set(self.config.context_priorities.keys())
         if not expected_types:
             return 1.0
@@ -136,6 +196,7 @@ class ContextScorer:
         return min(1.0, coverage + hierarchy_bonus)
 
     async def _score_freshness(self, segments: Iterable[ContextSegment]) -> float:
+        """Calculates the freshness score of the context."""
         segments = list(segments)
         if not segments:
             return 1.0
@@ -159,6 +220,7 @@ class ContextScorer:
         return sum(scores) / len(scores) if scores else 1.0
 
     async def _score_diversity(self, segments: Iterable[ContextSegment]) -> float:
+        """Calculates the diversity score of the context."""
         segments = list(segments)
         if not segments:
             return 1.0
@@ -168,6 +230,7 @@ class ContextScorer:
         return min(1.0, diversity)
 
     async def _score_efficiency(self, state: ContextEngineState) -> float:
+        """Calculates the efficiency score of the context."""
         used = state.get("context_window_used", 0)
         max_allowed = state.get("context_window_max", self.config.context_window_max)
         if max_allowed <= 0:
@@ -185,6 +248,10 @@ class ContextScorer:
         return 1.0
 
     def _get_phase_weights(self, state: ContextEngineState) -> Dict[str, float]:
+        """
+        Dynamically adjusts the scoring weights based on the current phase of 
+        the task.
+        """
         weights = dict(self.config.scoring_weights)
         phase = (state.get("current_phase") or "").lower()
         playbook_phase = state.get("context_playbook", {}).get("current_phase")
@@ -205,6 +272,7 @@ class ContextScorer:
         return {k: v / total for k, v in weights.items()}
 
     def _time_gap(self, a: str | None, b: str | None) -> float:
+        """Calculates the time gap between two timestamps."""
         first = self._parse_timestamp(a)
         second = self._parse_timestamp(b)
         if not first or not second:
@@ -213,6 +281,7 @@ class ContextScorer:
         return min(1.0, delta / (3600 * 4))  # 4-hour horizon
 
     def _parse_timestamp(self, value: str | None) -> datetime | None:
+        """Safely parses an ISO-8601 formatted timestamp string."""
         if not value:
             return None
         try:
@@ -225,6 +294,7 @@ class ContextScorer:
             return None
 
     def _determine_goal_text(self, state: ContextEngineState) -> str:
+        """Extracts the current goal from the state."""
         if state.get("task_goal"):
             return str(state["task_goal"])
         messages = state.get("messages") or []
@@ -239,6 +309,10 @@ class ContextScorer:
         return ""
 
     def _embed_text(self, text: str) -> Dict[str, float]:
+        """
+        Creates a simple, normalized bag-of-words embedding for a string of 
+        text.
+        """
         if not text:
             return {}
         tokens = [token for token in re.findall(r"\b\w+\b", text.lower()) if len(token) > 2]
@@ -253,6 +327,7 @@ class ContextScorer:
     def _cosine_similarity(
         self, lhs: Dict[str, float], rhs: Dict[str, float]
     ) -> float:
+        """Calculates the cosine similarity between two bag-of-words embeddings."""
         if not lhs or not rhs:
             return 0.0
         keys = lhs.keys() & rhs.keys()

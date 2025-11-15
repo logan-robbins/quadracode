@@ -1,7 +1,30 @@
 #!/usr/bin/env bash
-# Spawn a new Quadracode agent
-# Usage: spawn-agent.sh [AGENT_ID] [IMAGE] [NETWORK]
-# Environment: AGENT_RUNTIME_PLATFORM (docker|kubernetes), defaults to docker
+#
+# Spawns a new Quadracode agent on either Docker or Kubernetes.
+#
+# This script handles the lifecycle of an agent instance. It can generate a unique
+# agent ID if one is not provided. The script supports two platforms, determined
+# by the `AGENT_RUNTIME_PLATFORM` environment variable:
+#   - `docker`: Spawns a new Docker container with the agent image. It injects
+#     necessary environment variables for configuration (Redis, registry, API keys)
+#     and mounts shared volumes.
+#   - `kubernetes`: Creates a new Kubernetes Pod from a dynamically generated
+#     manifest. It configures the pod with environment variables and mounts
+#     PersistentVolumeClaims for shared data.
+#
+# The script outputs a JSON object indicating success or failure, which is useful
+# for programmatic invocation.
+#
+# Usage:
+#   spawn-agent.sh [AGENT_ID] [IMAGE] [NETWORK]
+#
+# Environment Variables:
+#   AGENT_RUNTIME_PLATFORM: Determines the execution platform ('docker' or 'kubernetes').
+#                          Defaults to 'docker'.
+#   REDIS_HOST, REDIS_PORT: Redis connection details.
+#   AGENT_REGISTRY_URL: URL for the agent registry service.
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.: API keys for various services.
+#
 
 set -euo pipefail
 
@@ -21,6 +44,13 @@ CONTAINER_NAME="qc-${AGENT_ID}"
 
 # JSON output helper
 json_output() {
+    # Generates a JSON-formatted string representing the script's result.
+    #
+    # Args:
+    #   $1: Success status ("true" or "false").
+    #   $2: A human-readable message.
+    #   $3: (Optional) An error message.
+    #
     local success="$1"
     local message="$2"
     local error="${3:-}"
@@ -51,6 +81,15 @@ EOF
 
 # Docker implementation
 spawn_docker() {
+    # Spawns an agent as a Docker container.
+    #
+    # Checks for existing containers, collects environment variables from the
+    # host, and mounts the necessary volumes (`quadracode_shared-data`, etc.).
+    # The container is started in detached mode and configured to restart
+    # unless stopped.
+    #
+    # Returns 1 if the container already exists or if `docker run` fails.
+    #
     # Check if container already exists
     if docker ps -a --filter "name=${CONTAINER_NAME}" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
         json_output "false" "Container already exists" "Container ${CONTAINER_NAME} already exists"
@@ -114,6 +153,15 @@ spawn_docker() {
 
 # Kubernetes implementation
 spawn_kubernetes() {
+    # Spawns an agent as a Kubernetes Pod.
+    #
+    # Checks for an existing Pod with the same name and generates a Pod manifest
+    # dynamically. The manifest configures environment variables, with secrets
+    # sourced from a `quadracode-secrets` Kubernetes Secret. It also mounts
+    # `PersistentVolumeClaim`s for shared data.
+    #
+    # Returns 1 if the Pod already exists or if `kubectl apply` fails.
+    #
     local namespace="${QUADRACODE_NAMESPACE:-default}"
 
     # Check if pod already exists

@@ -1,4 +1,15 @@
-"""Long-term memory management for episodic and semantic knowledge."""
+"""
+This module provides the core functionalities for long-term memory management 
+in the Quadracode runtime.
+
+It is responsible for two key aspects of memory: episodic memory, which is a 
+chronological record of past refinement cycles, and semantic memory, which is a 
+more abstract, consolidated representation of learned patterns and strategies. 
+This module provides functions for recording new episodic memories from the 
+refinement ledger, consolidating these episodes into semantic patterns, and then 
+using these patterns to generate "memory guidance" that can inform future 
+decision-making.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +26,10 @@ from .observability import get_meta_observer
 
 
 class EpisodicMemoryRecord(BaseModel):
+    """
+    Represents a single, atomic record of a past refinement cycle, stored in 
+    episodic memory.
+    """
     cycle_id: str
     timestamp: datetime
     hypothesis: str
@@ -29,6 +44,10 @@ class EpisodicMemoryRecord(BaseModel):
 
 
 class SemanticMemoryPattern(BaseModel):
+    """
+    Represents a consolidated, semantic pattern that has been derived from a 
+    series of episodic memories.
+    """
     pattern_id: str
     timestamp: datetime
     summary: str
@@ -39,6 +58,10 @@ class SemanticMemoryPattern(BaseModel):
 
 
 class MemoryGuidanceFrame(BaseModel):
+    """
+    Represents a frame of "memory guidance" that is generated from semantic 
+    memory and provided to the driver to inform its decision-making.
+    """
     summary: str
     recommendations: List[str]
     supporting_cycles: List[str]
@@ -50,7 +73,21 @@ def record_episode_from_ledger(
     state: QuadraCodeState,
     entry: RefinementLedgerEntry,
 ) -> EpisodicMemoryRecord:
-    """Persist a completed refinement cycle as an episodic memory record."""
+    """
+    Creates and records an `EpisodicMemoryRecord` from a `RefinementLedgerEntry`.
+
+    This function is the primary mechanism for populating the episodic memory. It 
+    is called at the conclusion of a refinement cycle and is responsible for 
+    transforming the ledger entry into a structured memory record that can be 
+    stored and later analyzed.
+
+    Args:
+        state: The current state of the system.
+        entry: The `RefinementLedgerEntry` to be recorded.
+
+    Returns:
+        The newly created `EpisodicMemoryRecord`.
+    """
 
     episodes = state.setdefault("episodic_memory", [])
     record = EpisodicMemoryRecord(
@@ -95,7 +132,23 @@ def consolidate_memory(
     *,
     window: int = 12,
 ) -> SemanticMemoryPattern | None:
-    """Derive semantic memory patterns from recent episodes."""
+    """
+    Analyzes recent episodic memories to derive and store a new semantic memory 
+    pattern.
+
+    This function is the core of the memory consolidation process. It looks for 
+    patterns in the recent history of the episodic memory, such as the success 
+    rate of different strategies, and then synthesizes this information into a 
+    new `SemanticMemoryPattern`.
+
+    Args:
+        state: The current state of the system.
+        window: The number of recent episodes to consider.
+
+    Returns:
+        The newly created `SemanticMemoryPattern`, or `None` if no pattern could 
+        be derived.
+    """
 
     episodes = _hydrate_episodes(state)
     if len(episodes) < 3:
@@ -176,7 +229,20 @@ def consolidate_memory(
 
 
 def update_memory_guidance(state: QuadraCodeState) -> Dict[str, Any]:
-    """Refresh memory guidance hints used during hypothesis generation."""
+    """
+    Refreshes the memory guidance frame in the state based on the latest 
+    semantic memory patterns.
+
+    This function is called after memory consolidation. It takes the most recent 
+    semantic pattern and uses it to generate a new `MemoryGuidanceFrame`, which 
+    is then placed in the state to be used by the driver.
+
+    Args:
+        state: The current state of the system.
+
+    Returns:
+        The updated memory guidance dictionary.
+    """
 
     patterns = _hydrate_patterns(state)
     if not patterns:
@@ -213,6 +279,10 @@ def update_memory_guidance(state: QuadraCodeState) -> Dict[str, Any]:
 
 
 def _hydrate_episodes(state: QuadraCodeState) -> List[EpisodicMemoryRecord]:
+    """
+    Hydrates the episodic memory from the raw state, converting dictionaries to 
+    `EpisodicMemoryRecord` objects.
+    """
     records: List[EpisodicMemoryRecord] = []
     for entry in state.get("episodic_memory", []):
         if isinstance(entry, EpisodicMemoryRecord):
@@ -226,6 +296,10 @@ def _hydrate_episodes(state: QuadraCodeState) -> List[EpisodicMemoryRecord]:
 
 
 def _hydrate_patterns(state: QuadraCodeState) -> List[SemanticMemoryPattern]:
+    """
+    Hydrates the semantic memory from the raw state, converting dictionaries to 
+    `SemanticMemoryPattern` objects.
+    """
     records: List[SemanticMemoryPattern] = []
     for entry in state.get("semantic_memory", []):
         if isinstance(entry, SemanticMemoryPattern):
@@ -241,6 +315,7 @@ def _hydrate_patterns(state: QuadraCodeState) -> List[SemanticMemoryPattern]:
 def _select_best_strategy(
     candidates: Iterable[Dict[str, Any]]
 ) -> Dict[str, Any] | None:
+    """Selects the best strategy from a set of candidates."""
     best: Dict[str, Any] | None = None
     best_score = -math.inf
     for candidate in candidates:
@@ -257,6 +332,7 @@ def _select_best_strategy(
 
 
 def _derive_risk_signals(counter: Counter[str]) -> List[str]:
+    """Derives a list of risk signals from a counter of exhaustion modes."""
     if not counter:
         return []
     common = counter.most_common(3)

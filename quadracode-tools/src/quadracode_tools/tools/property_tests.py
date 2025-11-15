@@ -1,3 +1,14 @@
+"""Provides a LangChain tool for dynamically generating and executing property-based tests.
+
+This module enables an AI agent to use Hypothesis to validate the behavior of
+Python functions against a wide range of auto-generated inputs. The core tool,
+`generate_property_tests`, constructs a temporary Python script that defines a
+Hypothesis test based on a provided data generation strategy and a test body.
+This script is then executed in a subprocess, and its results are captured and
+returned as a structured JSON object. This approach allows agents to perform
+robust, adversarial testing of code without requiring pre-written test suites,
+thereby enhancing their ability to verify correctness and find edge cases.
+"""
 from __future__ import annotations
 
 import json
@@ -13,11 +24,20 @@ from pydantic import BaseModel, Field
 
 
 def _default_workspace_root() -> str:
+    """Determines the default workspace root from environment variables."""
     return os.environ.get("WORKSPACE_ROOT") or os.environ.get("QUADRACODE_WORKSPACE_ROOT") or "/workspace"
 
 
 class PropertyTestRequest(BaseModel):
-    """Input schema for Hypothesis-driven property testing."""
+    """Input schema for Hypothesis-driven property testing, defining a single test case.
+
+    This Pydantic model captures all the necessary components for a dynamic property
+    test. It specifies the target function (`module` and `callable_name`), the data
+    generation logic (`strategy_snippet`), and the invariant-checking logic
+    (`test_body`). It also includes parameters for controlling Hypothesis's execution,
+    such as `max_examples` and `deadline_ms`. The schema ensures that agents provide
+    all required information to construct a valid, executable test script.
+    """
 
     property_name: str = Field(..., description="Identifier for the property being validated.")
     module: str = Field(..., description="Python import path to the module under test (e.g., 'pkg.utils').")
@@ -56,10 +76,20 @@ class PropertyTestRequest(BaseModel):
 
 
 def _indent(block: str, spaces: int = 4) -> str:
+    """A helper function to safely indent a block of code for script generation."""
     return textwrap.indent(textwrap.dedent(block).strip(), " " * spaces)
 
 
 def _build_property_script(params: PropertyTestRequest) -> str:
+    """Constructs the source code for a temporary Python script to run the property test.
+
+    This function dynamically generates a complete Python script as a string. The script
+    imports the necessary libraries (Hypothesis, json, etc.), imports the target module
+    and callable, evaluates the user-provided strategy snippet, and defines a decorated
+    `@given(...)` test function that wraps the user's `test_body`. It also includes
+    instrumentation to capture test results, failing examples, and exceptions, which
+    are then serialized to JSON and printed to stdout.
+    """
     preamble = textwrap.dedent(params.preamble or "").strip()
     preamble_block = f"{preamble}\n" if preamble else ""
     deadline = "None" if params.deadline_ms is None else str(params.deadline_ms)
@@ -165,6 +195,15 @@ print(json.dumps(result, default=str))
 
 
 def _run_property_script(script: str, workspace_root: str) -> Dict[str, Any]:
+    """Executes the generated property test script in a subprocess and captures its output.
+
+    This function writes the provided script content to a temporary file, then runs it
+    using a `python` subprocess within the specified `workspace_root`. It captures
+    `stdout` and `stderr`, attempts to parse the last line of `stdout` as a JSON
+    result object, and handles various error conditions (e.g., script crashing,
+    non-JSON output). This isolation ensures that the agent's main process is not
+    affected by errors or exceptions within the dynamically executed test code.
+    """
     workspace = Path(workspace_root or _default_workspace_root()).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -227,7 +266,25 @@ def generate_property_tests(
     deadline_ms: int | None = 500,
     seed: int | None = None,
 ) -> str:
-    """Run Hypothesis-driven property tests against a callable using adversarial inputs."""
+    """Generates and executes a single Hypothesis-driven property test in a sandbox.
+
+    This tool allows an agent to validate code behavior by defining properties that
+    should hold true for all inputs from a given data strategy. It constructs and
+    runs a self-contained Python script using Hypothesis to check these properties.
+
+    The tool requires:
+    - `property_name`: A unique identifier for the test.
+    - `module` and `callable_name`: The Python function to be tested.
+    - `strategy_snippet`: A Python expression that creates a Hypothesis strategy
+      for generating test inputs. The `st` (strategies) and `module` objects are
+      available in its scope.
+    - `test_body`: A block of Python code that receives a `sample` from the
+      strategy and asserts that the desired property holds. It should raise an
+      `AssertionError` on failure.
+
+    The results, including success status, failing examples, and errors, are
+    returned as a JSON string.
+    """
 
     params = PropertyTestRequest(
         property_name=property_name,

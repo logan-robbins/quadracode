@@ -1,3 +1,15 @@
+"""
+This module is the core of the Quadracode runtime, responsible for running the 
+main event loop that processes incoming messages and drives the LangGraph.
+
+It provides the `RuntimeRunner` class, which encapsulates the main event loop, 
+and the `run_forever` function, which is the primary entry point for starting a 
+runtime service. The `RuntimeRunner` is responsible for fetching messages from 
+the Redis message bus, processing them through the LangGraph, and then publishing 
+the results back to the message bus. It also handles the integration with the 
+agent registry, the management of autonomous mode, and the enforcement of 
+various runtime guardrails.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -295,6 +307,23 @@ def _apply_autonomous_limits(
 
 
 class RuntimeRunner:
+    """
+    Encapsulates the main event loop for a Quadracode runtime service.
+
+    This class is responsible for continuously polling the Redis message bus for 
+    incoming messages, processing them through the LangGraph, and publishing the 
+    results. It is designed to be a long-running, asynchronous service that can 
+    be started and stopped gracefully.
+
+    Attributes:
+        _profile: The `RuntimeProfile` for this runtime instance.
+        _poll_interval: The interval in seconds for polling the message bus.
+        _batch_size: The maximum number of messages to process in each poll.
+        _identity: The unique identity of this runtime instance.
+        _graph: The compiled LangGraph instance.
+        _messaging: The `RedisMCPMessaging` client.
+        _registry: The `AgentRegistryIntegration` instance.
+    """
     def __init__(
         self,
         profile: RuntimeProfile,
@@ -302,6 +331,14 @@ class RuntimeRunner:
         poll_interval: float = 1.0,
         batch_size: int = 5,
     ) -> None:
+        """
+        Initializes the `RuntimeRunner`.
+
+        Args:
+            profile: The `RuntimeProfile` for this runtime instance.
+            poll_interval: The interval in seconds for polling the message bus.
+            batch_size: The maximum number of messages to process in each poll.
+        """
         self._profile = profile
         self._poll_interval = poll_interval
         self._batch_size = batch_size
@@ -328,6 +365,13 @@ class RuntimeRunner:
         )
 
     async def start(self) -> None:
+        """
+        Starts the main event loop.
+
+        This method initializes the messaging client and the agent registry 
+        integration, and then enters a continuous loop of reading and processing 
+        messages from the Redis message bus.
+        """
         messaging = await RedisMCPMessaging.create()
         self._messaging = messaging
         try:
@@ -356,6 +400,7 @@ class RuntimeRunner:
         entry_id: str,
         envelope: MessageEnvelope,
     ) -> None:
+        """Handles a single message from the message bus."""
         valid, feedback = validate_human_clone_envelope(envelope)
         if not valid:
             if feedback:
@@ -377,12 +422,22 @@ class RuntimeRunner:
         await messaging.delete(self._identity, entry_id)
 
     async def shutdown(self) -> None:
+        """
+        Shuts down the runtime, including the agent registry integration.
+        """
         if self._registry:
             await self._registry.shutdown()
 
     async def _process_envelope(
         self, envelope: MessageEnvelope
     ) -> Sequence[MessageEnvelope]:
+        """
+        Processes a single `MessageEnvelope` through the LangGraph.
+
+        This is the core logic of the runtime. It prepares the input state for 
+        the graph, invokes the graph, and then processes the result to generate 
+        a set of outgoing message envelopes.
+        """
         payload = deepcopy(envelope.payload)
         raw_thread_id = (
             payload.get("chat_id")
@@ -636,6 +691,10 @@ class RuntimeRunner:
         state: RuntimeState,
         payload: dict,
     ) -> None:
+        """
+        Ensures that a workspace is provisioned for the current thread, creating 
+        one if necessary.
+        """
         existing = state.get("workspace")
         overrides = payload.get("workspace_config")
         image: Optional[str] = None
@@ -676,6 +735,7 @@ class RuntimeRunner:
         state: RuntimeState,
         thread_id: str,
     ) -> Sequence[MessageEnvelope]:
+        """Handles an emergency stop request from a human."""
         state.setdefault("error_history", [])
         state.setdefault("autonomous_mode", True)
         directive = AutonomousRoutingDirective(
@@ -760,6 +820,7 @@ def _extract_messages(
     *,
     include_history: bool,
 ) -> Sequence[BaseMessage]:
+    """Extracts a sequence of `BaseMessage` objects from the payload."""
     if include_history:
         state_payload = payload.get("state")
         if isinstance(state_payload, dict):
@@ -794,6 +855,7 @@ def _extract_messages(
 
 
 def _last_message_content(messages: Sequence[BaseMessage]) -> str:
+    """Extracts the content of the last message in a sequence."""
     if not messages:
         return ""
     content = messages[-1].content
@@ -805,11 +867,32 @@ def _last_message_content(messages: Sequence[BaseMessage]) -> str:
 def create_runtime(
     profile: RuntimeProfile, *, poll_interval: float = 1.0, batch_size: int = 5
 ) -> RuntimeRunner:
+    """
+    Factory function to create a `RuntimeRunner`.
+
+    Args:
+        profile: The `RuntimeProfile` to use.
+        poll_interval: The interval for polling the message bus.
+        batch_size: The number of messages to process in each poll.
+
+    Returns:
+        A new `RuntimeRunner` instance.
+    """
     return RuntimeRunner(profile, poll_interval=poll_interval, batch_size=batch_size)
 
 
 async def run_forever(
     profile: RuntimeProfile, *, poll_interval: float = 1.0, batch_size: int = 5
 ) -> None:
+    """
+    Creates and runs a `RuntimeRunner` indefinitely.
+
+    This is the main entry point for starting a Quadracode runtime service.
+
+    Args:
+        profile: The `RuntimeProfile` to use.
+        poll_interval: The interval for polling the message bus.
+        batch_size: The number of messages to process in each poll.
+    """
     runtime = create_runtime(profile, poll_interval=poll_interval, batch_size=batch_size)
     await runtime.start()

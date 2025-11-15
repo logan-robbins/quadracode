@@ -1,4 +1,14 @@
-"""Context metrics emission helpers."""
+"""
+This module provides the `ContextMetricsEmitter`, a dedicated component for 
+capturing and broadcasting metrics and observability events related to the 
+context engine and autonomous operations.
+
+It offers a unified interface for emitting telemetry, which can be configured to 
+either log to the console or publish to a Redis stream. This dual-mode capability 
+allows for flexible deployment in different environments. The emitter is designed 
+to be resilient, with best-effort Redis connection management to ensure that 
+metrics emission does not interfere with the primary functions of the runtime.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +25,27 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ContextMetricsEmitter:
-    """Publishes context metrics to Redis streams and local buffers."""
+    """
+    Handles the emission of context and autonomous metrics.
+
+    This class is responsible for publishing metrics to a configured backend, 
+    which can be either the local log or a Redis stream. It manages the Redis 
+    connection lifecycle and ensures that metrics are emitted in a structured, 
+    JSON-serializable format.
+
+    Attributes:
+        config: A `ContextEngineConfig` instance containing the metrics 
+                configuration.
+    """
 
     def __init__(self, config: ContextEngineConfig):
+        """
+        Initializes the `ContextMetricsEmitter`.
+
+        Args:
+            config: The configuration for the context engine, which includes 
+                    metrics settings.
+        """
         self.config = config
         self._redis = None
         self._redis_loop_id: int | None = None
@@ -29,6 +57,17 @@ class ContextMetricsEmitter:
         event: str,
         payload: Dict[str, Any],
     ) -> None:
+        """
+        Emits a context metric event.
+
+        This method first records the event in the local metrics log within the 
+        state, and then, if enabled, publishes it to the configured backend.
+
+        Args:
+            state: The current state of the context engine.
+            event: The name of the event.
+            payload: A dictionary containing the event's data.
+        """
         record = {
             "event": event,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -50,6 +89,17 @@ class ContextMetricsEmitter:
         event: str,
         payload: Dict[str, Any],
     ) -> None:
+        """
+        Emits an autonomous operation event.
+
+        This method is specifically for events related to the autonomous loop. 
+        It publishes the event to the configured backend, which can be a 
+        dedicated Redis stream for autonomous events.
+
+        Args:
+            event: The name of the autonomous event.
+            payload: A dictionary containing the event's data.
+        """
         if not self.config.metrics_enabled:
             return
 
@@ -70,6 +120,16 @@ class ContextMetricsEmitter:
         await self._emit_redis(record, stream_key)
 
     async def _emit_redis(self, record: Dict[str, Any], stream_key: str) -> None:
+        """
+        Emits a record to the specified Redis stream.
+
+        This private helper method handles the serialization of the record and 
+        the `XADD` command to publish the event.
+
+        Args:
+            record: The event record to publish.
+            stream_key: The Redis stream to publish to.
+        """
         try:
             client = await self._ensure_redis()
         except Exception as exc:  # pragma: no cover - best effort
@@ -90,6 +150,18 @@ class ContextMetricsEmitter:
             LOGGER.warning("Failed to push context metrics to Redis: %s", exc)
 
     async def _ensure_redis(self):
+        """
+        Manages the Redis client connection, ensuring it is valid and 
+        thread-safe.
+
+        This method implements a lazy, thread-safe connection pattern for the 
+        Redis client. It handles the initial connection, as well as the 
+        re-establishment of the connection if the event loop changes.
+
+        Returns:
+            An active Redis client instance, or `None` if the connection could 
+            not be established.
+        """
         current_loop = asyncio.get_running_loop()
         if self._redis is not None and self._redis_loop_id == id(current_loop):
             return self._redis

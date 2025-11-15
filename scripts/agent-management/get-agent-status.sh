@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# Get status of a specific Quadracode agent
-# Usage: get-agent-status.sh AGENT_ID
-# Environment: AGENT_RUNTIME_PLATFORM (docker|kubernetes), defaults to docker
+#
+# Retrieves the status of a specific Quadracode agent from Docker or Kubernetes.
+#
+# This script inspects the runtime state of an agent given its ID. It operates
+# against either a Docker daemon or a Kubernetes cluster, determined by the
+# `AGENT_RUNTIME_PLATFORM` environment variable.
+#   - `docker`: Uses `docker inspect` to retrieve detailed information about the
+#     agent's container, including its status, running state, and image.
+#   - `kubernetes`: Uses `kubectl get pod -o json` to fetch the full Pod spec
+#     and status, providing details on phase, conditions, and IP.
+#
+# The output is a JSON object containing the status details, suitable for
+# programmatic consumption.
+#
+# Usage:
+#   get-agent-status.sh AGENT_ID
+#
+# Environment Variables:
+#   AGENT_RUNTIME_PLATFORM: The container platform ('docker' or 'kubernetes').
+#                          Defaults to 'docker'.
+#
 
 set -euo pipefail
 
@@ -12,6 +30,14 @@ CONTAINER_NAME="qc-${AGENT_ID}"
 
 # JSON output helper
 json_output() {
+    # Generates a JSON-formatted string with the agent's status.
+    #
+    # Args:
+    #   $1: Success status ("true" or "false").
+    #   $2: A human-readable message.
+    #   $3: (Optional) A JSON string containing the status details. Defaults to {}.
+    #   $4: (Optional) An error message.
+    #
     local success="$1"
     local message="$2"
     local status_json="${3:-{}}"
@@ -42,6 +68,12 @@ EOF
 
 # Docker implementation
 status_docker() {
+    # Retrieves the status of an agent container from Docker.
+    #
+    # Uses `docker inspect` to get the container's state and extracts key
+    # fields like status, running state, and exit code into a JSON object.
+    # Returns 1 if the container is not found or if inspection fails.
+    #
     # Check if container exists
     if ! docker ps -a --filter "name=${CONTAINER_NAME}" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
         json_output "false" "Container not found" "{}" "Container ${CONTAINER_NAME} does not exist"
@@ -74,6 +106,12 @@ status_docker() {
 
 # Kubernetes implementation
 status_kubernetes() {
+    # Retrieves the status of an agent Pod from Kubernetes.
+    #
+    # Uses `kubectl get pod -o json` to fetch the Pod's details and extracts
+    # relevant status fields like phase, conditions, and IP address.
+    # Returns 1 if the Pod is not found or if the kubectl command fails.
+    #
     local namespace="${QUADRACODE_NAMESPACE:-default}"
 
     # Check if pod exists

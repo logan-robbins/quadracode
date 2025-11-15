@@ -1,4 +1,16 @@
-"""Graph node that converts HumanClone responses into PRP triggers."""
+"""
+This module defines the `prp_trigger_check` graph node, which is responsible for 
+intercepting responses from the HumanClone and converting them into PRP 
+(Plan-Refine-Play) triggers.
+
+The HumanClone is a specialized component that provides skeptical feedback to the 
+orchestrator. When it rejects a piece of work, it emits a structured 
+`HumanCloneTrigger`. This node parses that trigger, updates the system state to 
+reflect the rejection, and then synthesizes a `hypothesis_critique` tool message. 
+This process effectively translates the abstract feedback from the HumanClone into 
+a concrete, actionable critique that can be processed by the autonomous loop, 
+driving the next cycle of refinement.
+"""
 
 from __future__ import annotations
 
@@ -98,7 +110,21 @@ def _apply_trigger_to_state(
 
 
 def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
-    """Intercept HumanClone responses and convert them into PRP triggers."""
+    """
+    Intercepts and processes responses from the HumanClone.
+
+    This function acts as a conditional node in the graph. It checks if the last 
+    message in the state is from the HumanClone. If it is, the function parses 
+    the message as a `HumanCloneTrigger`, updates the state to reflect the 
+    trigger's directives, and then creates a `hypothesis_critique` tool message 
+    to be processed by the autonomous loop.
+
+    Args:
+        state: The current state of the graph.
+
+    Returns:
+        The updated state.
+    """
 
     last_sender = state.pop("_last_envelope_sender", None)
     if last_sender != HUMAN_CLONE_RECIPIENT:
@@ -172,6 +198,10 @@ def _resolve_hypothesis_context(
     state: QuadraCodeState,
     trigger: HumanCloneTrigger,
 ) -> tuple[str, str]:
+    """
+    Resolves the cycle ID and hypothesis text from the current state, with 
+    fallbacks.
+    """
     ledger = state.get("refinement_ledger")
     if isinstance(ledger, list) and ledger:
         entry = ledger[-1]
@@ -186,6 +216,10 @@ def _resolve_hypothesis_context(
 
 
 def _infer_category(trigger: HumanCloneTrigger) -> str:
+    """
+    Infers the most likely critique category based on the content of the 
+    trigger.
+    """
     haystack = " ".join(list(trigger.required_artifacts) + [trigger.rationale or ""]).lower()
     if "test" in haystack or "coverage" in haystack:
         return "test_coverage"
@@ -197,6 +231,10 @@ def _infer_category(trigger: HumanCloneTrigger) -> str:
 
 
 def _infer_severity(trigger: HumanCloneTrigger) -> str:
+    """
+    Infers the severity of the critique based on the exhaustion mode and the 
+    number of required artifacts.
+    """
     mapping = {
         ExhaustionMode.HYPOTHESIS_EXHAUSTED: "critical",
         ExhaustionMode.TEST_FAILURE: "high",

@@ -1,5 +1,15 @@
-"""Contracts and schemas shared between Quadracode agents and orchestrator."""
+"""
+This package defines the shared data contracts and schemas used throughout the 
+Quadracode ecosystem.
 
+It serves as the single source of truth for the data structures that are 
+exchanged between the orchestrator, agents, and other services. By centralizing 
+these contracts, it ensures consistency and type safety across the entire 
+system. The models defined here are primarily Pydantic-based, which allows for 
+robust data validation and serialization. This package is a critical dependency 
+for any component that participates in the Quadracode messaging and workflow 
+system.
+"""
 from .autonomous import (
     AutonomousCheckpointRecord,
     AutonomousEscalationRecord,

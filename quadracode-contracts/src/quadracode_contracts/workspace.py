@@ -1,5 +1,14 @@
-"""Workspace-related contract models."""
+"""
+This module defines the Pydantic data models and utility functions that serve as 
+the shared contract for agent workspaces in the Quadracode system.
 
+Workspaces are isolated environments where agents execute tasks. These contracts 
+provide a standardized way to describe the configuration, state, and results of 
+operations within these workspaces. This includes descriptors for provisioned 
+workspaces, structured results for command execution and file operations, and 
+records for workspace snapshots. By centralizing these models, this module 
+ensures consistent and reliable interaction with the workspace management system.
+"""
 from __future__ import annotations
 
 import re
@@ -13,7 +22,19 @@ _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def normalize_workspace_name(identifier: str) -> str:
-    """Generate a Docker-safe resource suffix from a workspace identifier."""
+    """
+    Generates a Docker-safe resource name from a workspace identifier.
+
+    This function sanitizes a given identifier to make it suitable for use as a 
+    Docker container or volume name. It replaces spaces, removes unsafe 
+    characters, and converts the string to lowercase.
+
+    Args:
+        identifier: The raw workspace identifier.
+
+    Returns:
+        A sanitized, Docker-safe name.
+    """
     slug = identifier.strip()
     if not slug:
         raise ValueError("workspace identifier cannot be empty")
@@ -26,7 +47,13 @@ def normalize_workspace_name(identifier: str) -> str:
 
 
 class WorkspaceDescriptor(BaseModel):
-    """Descriptor describing a provisioned workspace container/volume pair."""
+    """
+    Describes a provisioned workspace, including its container and volume.
+
+    This model serves as the canonical representation of a live workspace. It 
+    contains all the necessary information to interact with the workspace, such 
+    as the container name, the backing volume, and the mount path.
+    """
 
     workspace_id: str = Field(..., description="Stable workspace identifier (usually chat_id).")
     volume: str = Field(..., description="Docker named volume backing the workspace.")
@@ -43,13 +70,21 @@ class WorkspaceDescriptor(BaseModel):
     @field_validator("workspace_id", "volume", "container", "image", "created_at")
     @classmethod
     def _require_non_empty(cls, value: str, info: ValidationInfo) -> str:
+        """Ensures that key fields are non-empty strings."""
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{info.field_name} must be a non-empty string")
         return value
 
 
 class WorkspaceCommandResult(BaseModel):
-    """Structured response describing a command executed inside a workspace."""
+    """
+    Provides a structured response for commands executed in a workspace.
+
+    This model captures the complete output of a command, including its exit 
+    code, stdout, stderr, and performance metrics. This structured format is 
+    essential for the orchestrator and agents to reliably interpret the outcome 
+    of their actions.
+    """
 
     workspace: WorkspaceDescriptor
     command: str
@@ -69,7 +104,12 @@ class WorkspaceCommandResult(BaseModel):
 
 
 class WorkspaceCopyResult(BaseModel):
-    """Structured response for copy operations."""
+    """
+    Provides a structured response for file copy operations in a workspace.
+
+    This model confirms the details of a copy operation, including the source, 
+    destination, and the number of bytes transferred.
+    """
 
     workspace: WorkspaceDescriptor
     source: str
@@ -78,7 +118,14 @@ class WorkspaceCopyResult(BaseModel):
 
 
 class WorkspaceSnapshotRecord(BaseModel):
-    """Metadata describing a captured workspace snapshot artifact."""
+    """
+    Represents the metadata for a captured workspace snapshot.
+
+    Snapshots are used to preserve the state of a workspace at a critical 
+    juncture, such as when an agent encounters an error or reaches a significant 
+    milestone. This record contains all the metadata needed to locate and 
+    interpret the snapshot artifact.
+    """
 
     snapshot_id: str = Field(..., description="Unique identifier for the snapshot event.")
     workspace_id: str = Field(..., description="Workspace identifier tied to the snapshot.")
@@ -102,7 +149,18 @@ class WorkspaceSnapshotRecord(BaseModel):
 
 
 def collect_environment_keys(env: Optional[dict[str, str]] = None) -> List[str]:
-    """Utility to extract environment variable keys in deterministic order."""
+    """
+    Extracts and sorts the keys from an environment dictionary.
+
+    This utility is used to get a deterministic list of environment variable 
+    keys, which is useful for logging and diagnostics.
+
+    Args:
+        env: The environment dictionary.
+
+    Returns:
+        A sorted list of environment variable keys.
+    """
     if not env:
         return []
     keys: Iterable[str] = env.keys()

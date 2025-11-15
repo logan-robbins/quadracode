@@ -1,4 +1,26 @@
-"""Time-travel debugging utilities with append-only event logging."""
+"""
+Time-travel debugging utilities for recording and replaying agent state transitions.
+
+This module provides a `TimeTravelRecorder` class that captures a fine-grained,
+append-only log of events occurring during a Quadracode runtime session. The log
+is structured as a JSONL file, where each line represents a discrete event, such
+as a stage transition, a tool call, or a full state snapshot.
+
+Key features include:
+- **Thread-safe logging**: Each execution thread (or agent) can write to its
+  own log file without conflicts.
+- **Structured events**: Events are logged with consistent metadata, including
+  timestamps, cycle IDs, PRP state, and exhaustion modes.
+- **Deterministic replay**: The logs can be used to reconstruct the sequence
+  of events for a specific refinement cycle, aiding in debugging and analysis.
+- **State diffing**: Utilities are provided to compare snapshots from different
+  cycles, highlighting changes in key metrics.
+- **CLI for inspection**: A command-line interface is included for replaying
+  and diffing cycles directly from the log files.
+
+The core singleton `get_time_travel_recorder()` provides global access to the
+recorder instance, making it easy to integrate logging throughout the runtime.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +34,23 @@ from typing import Any, Dict, Iterable, List, MutableMapping, Optional, Sequence
 
 
 def _utc_iso() -> str:
+    """Returns the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _coerce_enum_value(value: Any) -> str | None:
+    """
+    Safely extracts the string value from an enum-like object.
+
+    If the object has a `.value` attribute, it is used. Otherwise, the object
+    is converted to a string. Returns `None` if the input is `None`.
+
+    Args:
+        value: The object to coerce, potentially an Enum member.
+
+    Returns:
+        The string representation of the value, or None.
+    """
     if value is None:
         return None
     if hasattr(value, "value"):
@@ -24,6 +59,19 @@ def _coerce_enum_value(value: Any) -> str | None:
 
 
 def _safe_json_dump(data: Dict[str, Any]) -> str:
+    """
+    Serializes a dictionary to a compact JSON string, handling complex types.
+
+    This function is designed to serialize runtime state objects, which may contain
+    Pydantic models, datetime objects, or other non-standard JSON types. It uses a
+    custom default handler to convert these types into JSON-compatible formats.
+
+    Args:
+        data: The dictionary to serialize.
+
+    Returns:
+        A compact, single-line JSON string.
+    """
     def _default(value: Any):
         if hasattr(value, "model_dump"):
             return value.model_dump(mode="json")  # type: ignore[no-any-return]
@@ -35,6 +83,19 @@ def _safe_json_dump(data: Dict[str, Any]) -> str:
 
 
 def _cycle_id_from_state(state: MutableMapping[str, Any]) -> str:
+    """
+    Extracts the active PRP cycle ID from the runtime state.
+
+    It first attempts to find the ID from the most recent entry in the
+    `refinement_ledger`. If the ledger is unavailable, it calculates a
+    provisional ID based on the `prp_cycle_count`.
+
+    Args:
+        state: The runtime state dictionary.
+
+    Returns:
+        The string identifier for the current or next refinement cycle.
+    """
     ledger = state.get("refinement_ledger")
     if isinstance(ledger, list) and ledger:
         tail = ledger[-1]
@@ -51,7 +112,23 @@ def _cycle_id_from_state(state: MutableMapping[str, Any]) -> str:
 
 
 class TimeTravelRecorder:
-    """Append-only recorder for runtime events, supporting deterministic replay."""
+    """
+    An append-only recorder for runtime events, designed for observability and deterministic replay.
+
+    This class provides a thread-safe mechanism to log structured events to a
+    JSONL file. Each agent or thread can have its own log, identified by a
+    `thread_id`. The recorder automatically enriches log entries with metadata
+    from the current runtime state, such as the PRP cycle ID, state, and exhaustion
+    mode. This detailed log is invaluable for debugging complex agent behaviors.
+
+    The log directory can be configured via the `base_dir` argument or the
+    `QUADRACODE_TIME_TRAVEL_DIR` environment variable.
+
+    Attributes:
+        base_dir: The root directory where log files are stored.
+        retention: The maximum number of log entries to keep in the in-memory
+                   `time_travel_log` list within the state object.
+    """
 
     def __init__(
         self,
@@ -73,6 +150,16 @@ class TimeTravelRecorder:
         payload: Dict[str, Any] | None = None,
         state_update: Dict[str, Any] | None = None,
     ) -> None:
+        """
+        Logs an event corresponding to a specific stage in the LangGraph.
+
+        Args:
+            state: The current runtime state.
+            stage: The name of the stage being executed.
+            payload: An optional dictionary of data related to the stage.
+            state_update: An optional dictionary representing the change in state
+                        produced by this stage.
+        """
         self._persist(
             state,
             event=f"stage.{stage}",
@@ -88,6 +175,14 @@ class TimeTravelRecorder:
         tool_name: str,
         payload: Dict[str, Any] | None = None,
     ) -> None:
+        """
+        Logs an event for a tool call.
+
+        Args:
+            state: The current runtime state.
+            tool_name: The name of the tool that was called.
+            payload: An optional dictionary containing tool inputs or outputs.
+        """
         self._persist(
             state,
             event=f"tool.{tool_name}",
@@ -103,6 +198,19 @@ class TimeTravelRecorder:
         payload: Dict[str, Any],
         state_update: Dict[str, Any] | None = None,
     ) -> None:
+        """
+
+        Logs a generic state transition or significant event.
+
+        This method is used for logging events that are not tied to a specific
+        stage or tool, such as PRP state transitions or invariant violations.
+
+        Args:
+            state: The current runtime state.
+            event: A descriptive name for the event (e.g., "prp_transition").
+            payload: A dictionary containing data about the event.
+            state_update: An optional dictionary of the resulting state changes.
+        """
         self._persist(
             state,
             event=event,
@@ -117,6 +225,17 @@ class TimeTravelRecorder:
         reason: str,
         payload: Dict[str, Any] | None = None,
     ) -> None:
+        """
+        Logs a full snapshot of key metrics or state at a specific moment.
+
+        This is typically used at the end of a PRP cycle to record a summary
+        of the cycle's performance and outcome.
+
+        Args:
+            state: The current runtime state.
+            reason: The reason for taking the snapshot (e.g., "cycle_end").
+            payload: A dictionary containing the snapshot data.
+        """
         self._persist(
             state,
             event="cycle_snapshot",
@@ -136,6 +255,21 @@ class TimeTravelRecorder:
         tool: str | None = None,
         state_update: Dict[str, Any] | None = None,
     ) -> None:
+        """
+        The core persistence logic for writing a log entry.
+
+        This internal method constructs the final log entry dictionary, appends it
+        to the in-memory `time_travel_log` within the state, and writes it as a
+        JSON line to the appropriate thread-specific log file.
+
+        Args:
+            state: The runtime state.
+            event: The event name.
+            payload: The event's data payload.
+            stage: The stage name, if applicable.
+            tool: The tool name, if applicable.
+            state_update: State changes, if applicable.
+        """
         metadata = self._metadata(state)
         entry = {
             **metadata,
@@ -181,6 +315,16 @@ _RECORDER: TimeTravelRecorder | None = None
 
 
 def get_time_travel_recorder() -> TimeTravelRecorder:
+    """
+    Retrieves the global singleton instance of the `TimeTravelRecorder`.
+
+    This function ensures that only one recorder instance is created and
+    accessible throughout the runtime. It is typically used to initialize
+    logging at the start of a runtime session.
+
+    Returns:
+        The `TimeTravelRecorder` instance.
+    """
     global _RECORDER
     if _RECORDER is None:
         _RECORDER = TimeTravelRecorder()
@@ -188,6 +332,15 @@ def get_time_travel_recorder() -> TimeTravelRecorder:
 
 
 def load_log_entries(log_path: Path | str) -> List[Dict[str, Any]]:
+    """
+    Loads all entries from a JSONL time-travel log file.
+
+    Args:
+        log_path: The path to the `.jsonl` log file.
+
+    Returns:
+        A list of dictionaries, where each dictionary is a log entry.
+    """
     path = Path(log_path).expanduser()
     entries: List[Dict[str, Any]] = []
     if not path.exists():
@@ -205,6 +358,16 @@ def load_log_entries(log_path: Path | str) -> List[Dict[str, Any]]:
 
 
 def replay_cycle(log_path: Path | str, cycle_id: str) -> List[Dict[str, Any]]:
+    """
+    Filters a log file to retrieve all events for a specific PRP cycle.
+
+    Args:
+        log_path: The path to the `.jsonl` log file.
+        cycle_id: The identifier of the cycle to replay.
+
+    Returns:
+        A list of log entries corresponding to the specified cycle.
+    """
     entries = load_log_entries(log_path)
     return [entry for entry in entries if entry.get("cycle_id") == cycle_id]
 
@@ -214,6 +377,21 @@ def diff_cycles(
     cycle_a: str,
     cycle_b: str,
 ) -> Dict[str, Any]:
+    """
+    Compares cycle snapshots to identify key differences in metrics.
+
+    This function loads all `cycle_snapshot` events from a log file and computes
+    the delta between two specified cycles for metrics like token usage, tool
+    calls, and stage counts.
+
+    Args:
+        log_path: The path to the `.jsonl` log file.
+        cycle_a: The identifier for the baseline cycle.
+        cycle_b: The identifier for the comparison cycle.
+
+    Returns:
+        A dictionary summarizing the delta between the two cycles.
+    """
     entries = load_log_entries(log_path)
     snapshots: Dict[str, Dict[str, Any]] = {}
     for entry in entries:
@@ -254,6 +432,7 @@ def diff_cycles(
 
 
 def _format_event(entry: Dict[str, Any]) -> str:
+    """Formats a single log entry into a human-readable string for CLI output."""
     payload = entry.get("payload") or {}
     event = entry.get("event", "unknown")
     timestamp = entry.get("timestamp", "")
@@ -262,6 +441,7 @@ def _format_event(entry: Dict[str, Any]) -> str:
 
 
 def _cli_replay(args: argparse.Namespace) -> int:
+    """Handler for the 'replay' CLI command."""
     events = replay_cycle(args.log, args.cycle)
     if not events:
         print(f"No events recorded for {args.cycle}")  # noqa: T201
@@ -272,6 +452,7 @@ def _cli_replay(args: argparse.Namespace) -> int:
 
 
 def _cli_diff(args: argparse.Namespace) -> int:
+    """Handler for the 'diff' CLI command."""
     result = diff_cycles(args.log, args.cycle_a, args.cycle_b)
     if not result.get("delta"):
         print(json.dumps(result, indent=2))  # noqa: T201
@@ -281,6 +462,18 @@ def _cli_diff(args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    """
+    The main entry point for the time-travel debugging command-line interface.
+
+    Parses command-line arguments and dispatches to the appropriate handler
+    function (`replay` or `diff`).
+
+    Args:
+        argv: A sequence of command-line arguments (e.g., from `sys.argv`).
+
+    Returns:
+        An exit code (0 for success, non-zero for failure).
+    """
     parser = argparse.ArgumentParser(description="Quadracode time-travel debugging CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

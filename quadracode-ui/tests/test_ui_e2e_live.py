@@ -1,3 +1,12 @@
+"""
+End-to-end tests for the Quadracode UI against a live, full-stack deployment.
+
+This module contains tests that run the Streamlit UI and interact with a complete
+Quadracode environment, including Redis, the agent registry, orchestrator, and
+at least one agent. These tests are intended to be run after `docker compose up`
+has successfully started all required services. They verify the full round-trip
+of a message from the UI to the backend and back.
+"""
 from __future__ import annotations
 
 import json
@@ -12,6 +21,18 @@ from streamlit.testing.v1 import AppTest
 
 
 def wait_for_redis(timeout: int = 60) -> None:
+    """
+    Waits for the Redis service to become available.
+
+    Continuously attempts to ping the Redis server at the default local address
+    until it succeeds or the timeout is reached.
+
+    Args:
+        timeout: The maximum number of seconds to wait.
+
+    Raises:
+        TimeoutError: If Redis is not available within the timeout period.
+    """
     deadline = time.time() + timeout
     import redis
 
@@ -27,6 +48,18 @@ def wait_for_redis(timeout: int = 60) -> None:
 
 
 def wait_for_registry(timeout: int = 60) -> None:
+    """
+    Waits for the agent registry service to become available.
+
+    Polls the `/health` endpoint of the agent registry until it receives a 200 OK
+    response or the timeout is reached.
+
+    Args:
+        timeout: The maximum number of seconds to wait.
+
+    Raises:
+        TimeoutError: If the registry is not healthy within the timeout period.
+    """
     url = "http://127.0.0.1:8090/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -42,11 +75,16 @@ def wait_for_registry(timeout: int = 60) -> None:
 
 @pytest.mark.e2e
 def test_ui_round_trip_with_full_stack(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Assumes docker compose has already started Redis, registry, orchestrator, and agent.
+    """
+    Verifies a full message round-trip through a live Quadracode stack.
 
-    This test does not start/stop containers. It waits for local services, then
-    runs the UI in-process and verifies end-to-end behavior with a real LLM and
-    runtimes behind the scenes.
+    This end-to-end test assumes that all Quadracode services (Redis, registry,
+    orchestrator, agent) have been started via `docker compose`. It runs the
+    Streamlit UI in-process, waits for the necessary services to be healthy,
+    and then simulates a user sending a message. It polls the UI until a
+    response from the assistant (processed by the full backend) is rendered,
+    verifying the entire communication loop. It also checks that the "Streams"
+    tab renders without errors.
     """
     # Precondition: services are already running locally
     try:

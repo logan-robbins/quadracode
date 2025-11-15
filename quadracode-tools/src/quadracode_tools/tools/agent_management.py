@@ -1,3 +1,14 @@
+"""Provides a LangChain tool for dynamic, runtime management of agent lifecycles.
+
+This module allows a privileged agent (typically an orchestrator) to manage the
+pool of available agents by spawning, deleting, and inspecting them. It abstracts
+the underlying container runtime (e.g., Docker, Kubernetes) by delegating actions
+to a set of shell scripts. This tool is critical for dynamic resource allocation,
+allowing the system to scale its agent workforce in response to changing demand
+or to deploy specialized agents for specific tasks. It also integrates with the
+Agent Registry to manage `hotpath` status, ensuring that critical agents are not
+terminated prematurely.
+"""
 from __future__ import annotations
 
 import json
@@ -15,7 +26,14 @@ from .agent_registry import _registry_base_url, DEFAULT_TIMEOUT
 
 
 class AgentManagementRequest(BaseModel):
-    """Input contract for dynamic agent lifecycle management."""
+    """Input contract for dynamic agent lifecycle management operations.
+
+    This Pydantic schema validates requests for the `agent_management_tool`. It defines
+    the set of legal operations and ensures that required parameters, like `agent_id`
+    for deletion, are present. It also handles workspace mounting options, allowing
+    a spawner to attach a persistent volume to a new agent, which is essential for
+    tasks like debugging or stateful analysis.
+    """
 
     operation: Literal[
         "spawn_agent",
@@ -73,11 +91,14 @@ class AgentManagementRequest(BaseModel):
 
 
 def _get_scripts_dir() -> Path:
-    """
-    Find the scripts directory.
+    """Locates the directory containing agent management shell scripts.
 
-    Looks for QUADRACODE_SCRIPTS_DIR environment variable first,
-    otherwise tries to find scripts relative to the tool location.
+    This function provides a reliable way to find the necessary helper scripts
+    (e.g., `spawn-agent.sh`) regardless of the execution context. It prioritizes
+    an environment variable (`QUADRACODE_SCRIPTS_DIR`), then attempts to find the
+    scripts relative to the tool's file location (common in development), and
+    finally falls back to a hardcoded path (`/app/scripts`) used in the Docker
+    production environment.
     """
     env_scripts_dir = os.environ.get("QUADRACODE_SCRIPTS_DIR")
     if env_scripts_dir:
@@ -98,15 +119,14 @@ def _get_scripts_dir() -> Path:
 
 
 def _run_script(script_name: str, *args: str, env_overrides: Optional[Dict[str, str]] = None) -> dict:
-    """
-    Execute an agent management script and return parsed JSON output.
+    """Executes a specified agent management script in a subprocess and captures its output.
 
-    Args:
-        script_name: Name of the script (e.g., "spawn-agent.sh")
-        *args: Arguments to pass to the script
-
-    Returns:
-        Parsed JSON response from the script
+    This function is a generic wrapper for running the shell scripts that implement
+    the agent management logic. It constructs the full script path, executes it with
+    the provided arguments and environment overrides, and handles timeouts and other
+    execution errors. It expects the script to output a JSON object to stdout and
+    parses it, falling back to a structured error dictionary if the output is not
+    valid JSON. This ensures that the tool always returns a machine-readable result.
     """
     scripts_dir = _get_scripts_dir()
     script_path = scripts_dir / script_name
@@ -170,43 +190,25 @@ def agent_management_tool(
     image: str | None = None,
     network: str | None = None,
 ) -> str:
-    """Manage the lifecycle of Quadracode agents dynamically.
+    """Manages the lifecycle of Quadracode agents by spawning, deleting, or inspecting them.
 
-    This tool allows the orchestrator to spawn new agents when additional capacity
-    or specialized capabilities are needed, and to delete agents when they are no
-    longer required.
+    This tool serves as the primary interface for an orchestrator agent to control the
+    agent workforce. It delegates its operations to underlying shell scripts, which
+    abstract the specifics of the container runtime (e.g., Docker).
 
     Operations:
-    - `spawn_agent`: Launch a new agent container/pod
-      - Optional `agent_id` (auto-generated if not provided)
-      - Optional `image` (defaults to 'quadracode-agent')
-      - Optional `network` (defaults to 'quadracode_default' for Docker)
-    - `delete_agent`: Stop and remove an agent container/pod
-      - Requires `agent_id`
-    - `list_containers`: List all running agent containers/pods
-    - `get_container_status`: Get detailed status of a specific agent
-      - Requires `agent_id`
-    - `mark_hotpath` / `clear_hotpath`: Toggle registry hotpath residency (requires `agent_id`)
-    - `list_hotpath`: Inspect all agents marked as hotpath in the registry
+    - `spawn_agent`: Launches a new agent container. Can be customized with a specific
+      image, network, and workspace volume.
+    - `delete_agent`: Stops and removes an existing agent container.
+    - `list_containers`: Returns a list of all active agent containers.
+    - `get_container_status`: Fetches detailed information about a specific agent.
+    - `mark_hotpath`/`clear_hotpath`: Sets or unsets an agent's `hotpath` flag in the
+      registry, which can protect it from automated deletion.
+    - `list_hotpath`: Retrieves all agents currently marked as `hotpath`.
 
-    Platform Support:
-    - Docker: Default, uses Docker CLI and docker-compose networks
-    - Kubernetes: Set AGENT_RUNTIME_PLATFORM=kubernetes
-      - Requires kubectl access and quadracode-secrets configured
-      - Uses PVCs: quadracode-shared-data, quadracode-mcp-cache
-
-    Examples:
-    - {"operation": "spawn_agent"}
-    - {"operation": "spawn_agent", "agent_id": "specialized-agent"}
-    - {"operation": "delete_agent", "agent_id": "agent-abc123"}
-    - {"operation": "list_containers"}
-    - {"operation": "get_container_status", "agent_id": "agent-abc123"}
-
-    The spawned agents will automatically:
-    1. Connect to Redis at the configured REDIS_HOST:REDIS_PORT
-    2. Register with the agent registry
-    3. Begin polling their mailbox for work
-    4. Report health via heartbeats
+    The tool is designed to be platform-agnostic, relying on the environment where
+    it's executed to have the appropriate scripts and CLI tools (like `docker` or
+    `kubectl`) available.
     """
 
     params = AgentManagementRequest(
@@ -313,6 +315,7 @@ REGISTRY_TIMEOUT = float(os.environ.get("AGENT_MANAGEMENT_REGISTRY_TIMEOUT", "5"
 
 
 def _registry_request(method: str, path: str, payload: Dict[str, Any] | None = None) -> tuple[bool, Any]:
+    """A helper function for making direct HTTP requests to the agent registry."""
     base_url = _registry_base_url()
     url = f"{base_url}{path}"
     try:
@@ -333,6 +336,12 @@ def _registry_request(method: str, path: str, payload: Dict[str, Any] | None = N
 
 
 def _is_hotpath_agent(agent_id: str) -> bool:
+    """Checks if a given agent is currently marked as a 'hotpath' agent in the registry.
+
+    Hotpath agents are typically protected from automated scale-down or deletion.
+    This function queries the registry's `/agents/{agent_id}` endpoint to determine
+    the agent's status.
+    """
     ok, payload = _registry_request("GET", f"/agents/{agent_id}")
     if not ok or not isinstance(payload, dict):
         return False
@@ -340,6 +349,7 @@ def _is_hotpath_agent(agent_id: str) -> bool:
 
 
 def _update_hotpath_flag(agent_id: Optional[str], hotpath: bool) -> Dict[str, Any]:
+    """Sets or clears the 'hotpath' flag for an agent via the registry API."""
     if not agent_id:
         return {"success": False, "error": "agent_id_required"}
     ok, payload = _registry_request(
@@ -358,6 +368,7 @@ def _update_hotpath_flag(agent_id: Optional[str], hotpath: bool) -> Dict[str, An
 
 
 def _list_hotpath_agents() -> Dict[str, Any]:
+    """Retrieves a list of all agents currently marked as 'hotpath' from the registry."""
     ok, payload = _registry_request("GET", "/agents/hotpath")
     if not ok or not isinstance(payload, dict):
         return {"success": False, "error": payload}

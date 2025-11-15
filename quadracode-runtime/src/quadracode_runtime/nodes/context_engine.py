@@ -1,4 +1,16 @@
-"""Core context engineering node implementation."""
+"""
+This module implements the `ContextEngine`, the high-level coordinator for all 
+context engineering flows in the Quadracode runtime.
+
+The `ContextEngine` is a central component of the runtime, responsible for 
+orchestrating the entire lifecycle of context management. It integrates various 
+sub-components, such as the `ContextCurator`, `ContextScorer`, and 
+`ProgressiveContextLoader`, to maintain a high-quality, relevant, and 
+size-constrained context for the language models. It operates through a series of 
+distinct processing stages (`pre_process`, `post_process`, `govern_context`), 
+each of which is designed to be a stateless transformation of the main 
+`QuadraCodeState`.
+"""
 
 from __future__ import annotations
 
@@ -66,9 +78,29 @@ def _utc_now() -> datetime:
 
 
 class ContextEngine:
-    """High-level coordinator for context engineering flows."""
+    """
+    Orchestrates the context engineering lifecycle.
+
+    This class acts as the main entry point and coordinator for all context-related 
+    operations. It manages the interactions between the various sub-components 
+    of the context engine and ensures that the context is optimized and governed 
+    at each stage of the processing loop.
+
+    Attributes:
+        config: The configuration for the context engine.
+        curator: An instance of the `ContextCurator`.
+        scorer: An instance of the `ContextScorer`.
+        loader: An instance of the `ProgressiveContextLoader`.
+        ... and other sub-components.
+    """
 
     def __init__(self, config: ContextEngineConfig):
+        """
+        Initializes the `ContextEngine`.
+
+        Args:
+            config: The configuration for the context engine.
+        """
         self.config = config
         self.curator = ContextCurator(config)
         self.scorer = ContextScorer(config)
@@ -93,23 +125,41 @@ class ContextEngine:
         self.deliberative_planner = DeliberativePlanner()
 
     def pre_process_sync(self, state: QuadraCodeState) -> QuadraCodeState:
+        """Synchronous wrapper for the `pre_process` method."""
         return asyncio.run(self.pre_process(state))
 
     def post_process_sync(self, state: QuadraCodeState) -> QuadraCodeState:
+        """Synchronous wrapper for the `post_process` method."""
         return asyncio.run(self.post_process(state))
 
     def govern_context_sync(self, state: QuadraCodeState) -> QuadraCodeState:
+        """Synchronous wrapper for the `govern_context` method."""
         return asyncio.run(self.govern_context(state))
 
     def handle_tool_response_sync(
         self, state: QuadraCodeState
     ) -> QuadraCodeState:
+        """Synchronous wrapper for the `handle_tool_response` method."""
         tool_messages = self._extract_tool_messages(state)
         if not tool_messages:
             return asyncio.run(self.handle_tool_response(state, None))
         return asyncio.run(self._handle_tool_messages(state, tool_messages))
 
     async def pre_process(self, state: QuadraCodeState) -> QuadraCodeState:
+        """
+        Executes the pre-processing stage of the context engineering pipeline.
+
+        This stage is run before the main driver makes a decision. It is 
+        responsible for evaluating the quality of the current context, running 
+        curation and optimization routines if necessary, and loading any new 
+        context that is required.
+
+        Args:
+            state: The current state of the system.
+
+        Returns:
+            The updated state after pre-processing.
+        """
         state = self._ensure_state_defaults(state)
         await self._enforce_hotpath_residency(state)
         quality_score = await self.scorer.evaluate(state)
@@ -163,6 +213,19 @@ class ContextEngine:
         return state
 
     async def post_process(self, state: QuadraCodeState) -> QuadraCodeState:
+        """
+        Executes the post-processing stage of the context engineering pipeline.
+
+        This stage is run after the main driver has made a decision. It is 
+        responsible for reflecting on the decision, evolving the context 
+        playbook, and performing any necessary cleanup of the context.
+
+        Args:
+            state: The current state of the system.
+
+        Returns:
+            The updated state after post-processing.
+        """
         state = self._ensure_state_defaults(state)
         reflection_payload = await self._reflect_on_decision(state)
         state["reflection_log"].append(
@@ -222,6 +285,20 @@ class ContextEngine:
         return state
 
     async def govern_context(self, state: QuadraCodeState) -> QuadraCodeState:
+        """
+        Executes the context governance stage of the pipeline.
+
+        This stage is responsible for generating a high-level plan for the 
+        context, which includes actions for each context segment (e.g., retain, 
+        compress, discard). It uses either a heuristic-based or an LLM-based 
+        governor to create this plan.
+
+        Args:
+            state: The current state of the system.
+
+        Returns:
+            The updated state after context governance.
+        """
         state = self._ensure_state_defaults(state)
         plan = await self._generate_governor_plan(state)
         state = await self._apply_governor_plan(state, plan)
@@ -262,6 +339,21 @@ class ContextEngine:
     async def handle_tool_response(
         self, state: QuadraCodeState, tool_response: Any | None
     ) -> QuadraCodeState:
+        """
+        Processes a tool response and updates the context.
+
+        This method is called when a tool has been executed. It scores the 
+        relevance of the tool's output, decides on an appropriate operation 
+        (e.g., retain, summarize, discard), and applies that operation to 
+        incorporate the tool's output into the context.
+
+        Args:
+            state: The current state of the system.
+            tool_response: The output from the tool.
+
+        Returns:
+            The updated state.
+        """
         state = self._ensure_state_defaults(state)
         if tool_response is not None:
             state, _ = process_autonomous_tool_response(state, tool_response)
@@ -329,6 +421,10 @@ class ContextEngine:
     async def _decide_operation(
         self, relevance: float, state: QuadraCodeState
     ) -> ContextOperation:
+        """
+        Decides which context operation to apply to a tool response based on its 
+        relevance score.
+        """
         if relevance < 0.2:
             return ContextOperation.DISCARD
         if relevance < 0.5:
@@ -341,6 +437,10 @@ class ContextEngine:
         tool_response: Any,
         operation: ContextOperation,
     ) -> QuadraCodeState:
+        """
+        Applies a context operation to a tool response, creating a new context 
+        segment.
+        """
         segment = self._build_segment_from_tool(tool_response, state)
 
         if operation is ContextOperation.DISCARD:
@@ -367,6 +467,7 @@ class ContextEngine:
     def _build_segment_from_tool(
         self, tool_response: Any, state: QuadraCodeState
     ) -> ContextSegment:
+        """Builds a `ContextSegment` from a tool response."""
         segment_id = f"tool-{len(state['context_segments']) + 1}"
         restorable_reference: str | None = None
         segment_type = "tool_output"
@@ -398,6 +499,7 @@ class ContextEngine:
     async def _handle_tool_messages(
         self, state: QuadraCodeState, tool_messages: List[ToolMessage]
     ) -> QuadraCodeState:
+        """Iteratively processes a list of tool messages."""
         current = state
         for message in tool_messages:
             current = await self.handle_tool_response(current, message)

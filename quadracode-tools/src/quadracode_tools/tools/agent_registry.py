@@ -1,3 +1,11 @@
+"""Provides a LangChain tool for interacting with the Quadracode Agent Registry.
+
+This module defines a structured tool that exposes the Agent Registry's REST API
+to a LangGraph agent. It handles request validation, endpoint routing, and response
+formatting for operations like agent registration, discovery, health monitoring,
+and hotpath management. The tool is designed for autonomous agents to manage their
+lifecycle and discover peers within a distributed Quadracode ecosystem.
+"""
 from __future__ import annotations
 
 import json
@@ -13,7 +21,15 @@ DEFAULT_TIMEOUT = 10.0
 
 
 class AgentRegistryRequest(BaseModel):
-    """Input contract for interacting with the agent registry service."""
+    """Input contract for validating and structuring requests to the agent registry tool.
+
+    This Pydantic model ensures that all interactions with the agent registry service
+    are well-formed. It defines the available operations, their required parameters,
+    and conditional validation logic. For example, it enforces that an `agent_id` is
+    provided for any operation targeting a specific agent instance. This strict schema
+    prevents malformed requests from reaching the registry service and provides clear
+    error messages for invalid inputs.
+    """
 
     operation: Literal[
         "list_agents",
@@ -89,11 +105,19 @@ class AgentRegistryRequest(BaseModel):
 
 
 def _registry_base_url() -> str:
+    """Retrieves the base URL for the agent registry from environment variables.
+
+    Defaults to 'http://quadracode-agent-registry:8090' if AGENT_REGISTRY_URL is not set.
+    """
     base = os.environ.get("AGENT_REGISTRY_URL", "http://quadracode-agent-registry:8090")
     return base.rstrip("/")
 
 
 def _format_json(payload: object) -> str:
+    """Serializes a Python object to a formatted JSON string.
+
+    Handles datetime objects and ensures consistent formatting for tool outputs.
+    """
     return json.dumps(payload, indent=2, sort_keys=True, default=str)
 
 
@@ -108,21 +132,24 @@ def agent_registry_tool(
     status: str | None = None,
     reported_at: datetime | None = None,
 ) -> str:
-    """Call the Quadracode Agent Registry REST API.
+    """Dispatches a REST API call to the Quadracode Agent Registry service.
 
-    Set `operation` to one of:
-    - `list_agents` (optionally `healthy_only` and `limit`)
-    - `get_agent` (requires `agent_id`)
-    - `register_agent` (requires `agent_id`, `host`, `port`)
-    - `heartbeat` (requires `agent_id`; optional `status`, `reported_at`)
-    - `unregister_agent` (requires `agent_id`)
-    - `stats`
-    - `health`
-    - `list_hotpath`
-    - `update_hotpath` (requires `agent_id` + `hotpath`)
+    This tool is the primary interface for agents to manage their lifecycle and
+    discover peers within the Quadracode ecosystem. It uses an internal HTTP client
+    to communicate with the registry, and relies on the `AgentRegistryRequest`
+    Pydantic model to validate inputs for a specific `operation`.
 
-    The `AgentRegistryRequest` schema handles validation so callers only need
-    to supply the relevant fields for the chosen operation.
+    Supported operations:
+    - `list_agents`: Fetches registered agents. Can be filtered by `healthy_only`
+      or `hotpath_only`.
+    - `get_agent`: Retrieves the detailed registration record for a specific agent.
+    - `register_agent`: Adds a new agent to the registry.
+    - `heartbeat`: Reports an agent's status (e.g., 'healthy') to the registry.
+    - `unregister_agent`: Removes an agent from the registry.
+    - `stats`: Returns aggregate statistics about the registry's state.
+    - `health`: Checks the operational health of the agent registry service itself.
+    - `list_hotpath`: Retrieves agents currently designated for high-priority tasks.
+    - `update_hotpath`: Modifies an agent's `hotpath` status.
 
     Examples:
     - {"operation": "list_agents", "healthy_only": true}

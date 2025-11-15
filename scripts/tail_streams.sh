@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#
+# Tails and formats all Quadracode mailbox streams from Redis in real-time.
+#
+# This script discovers all Redis streams matching the `qc:mailbox/*` pattern,
+# then uses `redis-cli XREAD BLOCK 0` to listen for new messages indefinitely.
+# The output from `redis-cli` is piped through `jq` to produce a color-coded,
+# human-readable log format, showing the timestamp, stream name, message ID,
+# sender, recipient, and message content for each entry.
+#
+# This is primarily a debugging and monitoring tool for observing the flow of
+# communication within the Quadracode system.
+#
+# Usage:
+#   scripts/tail_streams.sh
+#
 
-# Stream all Quadracode mailboxes (qc:mailbox/*) live, nicely formatted.
-# Usage: bash scripts/tail_streams.sh
+set -euo pipefail
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker not found; please install Docker" >&2
