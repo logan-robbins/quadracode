@@ -1,8 +1,9 @@
 ---
-description: 
-  Core repository rules for multi-agent development on macOS Apple Silicon with uv + .venv,
-  fail-fast behavior, and strict reuse of existing code.
-globs: "**/*"
+description: |
+  Core repository rules for multi-agent development on macOS Apple Silicon (M4).
+  Enforces use of Homebrew for system packages, uv-managed .venv for Python, fail-fast error handling,
+  and strict reuse of existing code abstractions.
+globs: ["**/*"]
 alwaysApply: true
 ---
 
