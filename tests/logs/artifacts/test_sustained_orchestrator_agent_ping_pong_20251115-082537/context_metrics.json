@@ -1,0 +1,1481 @@
+{
+  "total_events": 84,
+  "events_by_type": {
+    "pre_process": 1,
+    "governor_plan": 1,
+    "govern_context": 1,
+    "prp_transition": 1,
+    "post_process": 40,
+    "prp_invalid_transition": 40
+  },
+  "metrics": {
+    "pre_process": [
+      {
+        "stream_id": "1763195138803-0",
+        "timestamp": "2025-11-15T08:25:38.802298+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "quality_components": {
+            "relevance": 1.0,
+            "coherence": 1.0,
+            "completeness": 0.0,
+            "freshness": 1.0,
+            "diversity": 1.0,
+            "efficiency": 0.0
+          },
+          "context_window_used": 0,
+          "context_window_max": 128000,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      }
+    ],
+    "governor_plan": [
+      {
+        "stream_id": "1763195138805-0",
+        "timestamp": "2025-11-15T08:25:38.804654+00:00",
+        "payload": {
+          "action_counts": {},
+          "ordered_segments": [],
+          "focus": null,
+          "context_window_used": 0
+        }
+      }
+    ],
+    "govern_context": [
+      {
+        "stream_id": "1763195138805-1",
+        "timestamp": "2025-11-15T08:25:38.805537+00:00",
+        "payload": {
+          "plan_items": 0,
+          "deliberative_steps": 1,
+          "planning_success_probability": 0.5,
+          "planning_uncertainty": 0.23,
+          "memory_guidance_present": false,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0,
+          "context_window_used": 0
+        }
+      }
+    ],
+    "prp_transition": [
+      {
+        "stream_id": "1763195138805-2",
+        "timestamp": "2025-11-15T08:25:38.805799+00:00",
+        "payload": {
+          "applied": true,
+          "from_state": "hypothesize",
+          "to_state": "execute",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "description": "Move from hypothesis generation into execution planning.",
+          "requires_human_clone": false
+        }
+      }
+    ],
+    "post_process": [
+      {
+        "stream_id": "1763195142860-0",
+        "timestamp": "2025-11-15T08:25:42.858890+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195145220-0",
+        "timestamp": "2025-11-15T08:25:45.216509+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195147353-0",
+        "timestamp": "2025-11-15T08:25:47.351628+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195149804-0",
+        "timestamp": "2025-11-15T08:25:49.802722+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195152057-0",
+        "timestamp": "2025-11-15T08:25:52.054939+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195154535-0",
+        "timestamp": "2025-11-15T08:25:54.533338+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195156563-0",
+        "timestamp": "2025-11-15T08:25:56.561391+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195158918-0",
+        "timestamp": "2025-11-15T08:25:58.916180+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195160941-0",
+        "timestamp": "2025-11-15T08:26:00.938149+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195162893-0",
+        "timestamp": "2025-11-15T08:26:02.891807+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195165553-0",
+        "timestamp": "2025-11-15T08:26:05.550435+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195168239-0",
+        "timestamp": "2025-11-15T08:26:08.237780+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195170405-0",
+        "timestamp": "2025-11-15T08:26:10.403947+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195172414-0",
+        "timestamp": "2025-11-15T08:26:12.410828+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195174652-0",
+        "timestamp": "2025-11-15T08:26:14.650427+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195176731-0",
+        "timestamp": "2025-11-15T08:26:16.729706+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195178985-0",
+        "timestamp": "2025-11-15T08:26:18.983719+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195181021-0",
+        "timestamp": "2025-11-15T08:26:21.020026+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195183236-0",
+        "timestamp": "2025-11-15T08:26:23.235417+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195185399-0",
+        "timestamp": "2025-11-15T08:26:25.398173+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195187386-0",
+        "timestamp": "2025-11-15T08:26:27.385171+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195189267-0",
+        "timestamp": "2025-11-15T08:26:29.265127+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195191482-0",
+        "timestamp": "2025-11-15T08:26:31.478540+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195193722-0",
+        "timestamp": "2025-11-15T08:26:33.720855+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195195754-0",
+        "timestamp": "2025-11-15T08:26:35.752050+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195197782-0",
+        "timestamp": "2025-11-15T08:26:37.780592+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195199591-0",
+        "timestamp": "2025-11-15T08:26:39.589506+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195201746-0",
+        "timestamp": "2025-11-15T08:26:41.744173+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195203904-0",
+        "timestamp": "2025-11-15T08:26:43.902467+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195205910-0",
+        "timestamp": "2025-11-15T08:26:45.907857+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195207942-0",
+        "timestamp": "2025-11-15T08:26:47.940770+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195210130-0",
+        "timestamp": "2025-11-15T08:26:50.128085+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195212318-0",
+        "timestamp": "2025-11-15T08:26:52.316612+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195214500-0",
+        "timestamp": "2025-11-15T08:26:54.498702+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195217471-0",
+        "timestamp": "2025-11-15T08:26:57.469865+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195219646-0",
+        "timestamp": "2025-11-15T08:26:59.644260+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195222165-0",
+        "timestamp": "2025-11-15T08:27:02.161527+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195224451-0",
+        "timestamp": "2025-11-15T08:27:04.449378+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195226550-0",
+        "timestamp": "2025-11-15T08:27:06.548035+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      },
+      {
+        "stream_id": "1763195228650-0",
+        "timestamp": "2025-11-15T08:27:08.648064+00:00",
+        "payload": {
+          "quality_score": 0.75,
+          "focus_metric": "completeness",
+          "issues": [
+            "completeness below threshold (0.00)",
+            "efficiency below threshold (0.00)"
+          ],
+          "recommendations": [
+            "load missing context types",
+            "refresh context hierarchy",
+            "load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs",
+            "compress verbose segments",
+            "externalize archival content"
+          ],
+          "context_window_used": 0,
+          "exhaustion_mode": "none",
+          "exhaustion_probability": 0.0
+        }
+      }
+    ],
+    "prp_invalid_transition": [
+      {
+        "stream_id": "1763195142861-0",
+        "timestamp": "2025-11-15T08:25:42.861205+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195145221-0",
+        "timestamp": "2025-11-15T08:25:45.221024+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195147353-1",
+        "timestamp": "2025-11-15T08:25:47.353271+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195149804-1",
+        "timestamp": "2025-11-15T08:25:49.804816+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195152057-1",
+        "timestamp": "2025-11-15T08:25:52.057635+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195154535-1",
+        "timestamp": "2025-11-15T08:25:54.535494+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195156564-0",
+        "timestamp": "2025-11-15T08:25:56.564219+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195158919-0",
+        "timestamp": "2025-11-15T08:25:58.919387+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195160941-1",
+        "timestamp": "2025-11-15T08:26:00.941700+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195162893-1",
+        "timestamp": "2025-11-15T08:26:02.893538+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195165554-0",
+        "timestamp": "2025-11-15T08:26:05.553975+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195168239-1",
+        "timestamp": "2025-11-15T08:26:08.239344+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195170405-1",
+        "timestamp": "2025-11-15T08:26:10.405497+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195172414-1",
+        "timestamp": "2025-11-15T08:26:12.414492+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195174652-1",
+        "timestamp": "2025-11-15T08:26:14.652687+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195176731-1",
+        "timestamp": "2025-11-15T08:26:16.731482+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195178985-1",
+        "timestamp": "2025-11-15T08:26:18.985571+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195181021-1",
+        "timestamp": "2025-11-15T08:26:21.021748+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195183237-0",
+        "timestamp": "2025-11-15T08:26:23.237022+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195185400-0",
+        "timestamp": "2025-11-15T08:26:25.399995+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195187386-1",
+        "timestamp": "2025-11-15T08:26:27.386824+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195189267-1",
+        "timestamp": "2025-11-15T08:26:29.267371+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195191482-1",
+        "timestamp": "2025-11-15T08:26:31.482539+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195193723-0",
+        "timestamp": "2025-11-15T08:26:33.722940+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195195754-1",
+        "timestamp": "2025-11-15T08:26:35.754429+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195197782-1",
+        "timestamp": "2025-11-15T08:26:37.782240+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195199592-0",
+        "timestamp": "2025-11-15T08:26:39.592071+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195201747-0",
+        "timestamp": "2025-11-15T08:26:41.747247+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195203905-0",
+        "timestamp": "2025-11-15T08:26:43.905189+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195205910-1",
+        "timestamp": "2025-11-15T08:26:45.910788+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195207943-0",
+        "timestamp": "2025-11-15T08:26:47.943196+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195210130-1",
+        "timestamp": "2025-11-15T08:26:50.130325+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195212319-0",
+        "timestamp": "2025-11-15T08:26:52.319068+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195214500-1",
+        "timestamp": "2025-11-15T08:26:54.500632+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195217473-0",
+        "timestamp": "2025-11-15T08:26:57.473578+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195219646-1",
+        "timestamp": "2025-11-15T08:26:59.646417+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195222166-0",
+        "timestamp": "2025-11-15T08:27:02.166381+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195224451-1",
+        "timestamp": "2025-11-15T08:27:04.451646+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195226550-1",
+        "timestamp": "2025-11-15T08:27:06.550763+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      },
+      {
+        "stream_id": "1763195228650-1",
+        "timestamp": "2025-11-15T08:27:08.650736+00:00",
+        "payload": {
+          "from_state": "execute",
+          "to_state": "propose",
+          "exhaustion_mode": "none",
+          "human_clone_triggered": false,
+          "reason": "transition_not_defined",
+          "description": "",
+          "applied": false
+        }
+      }
+    ]
+  }
+}

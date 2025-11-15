@@ -12,6 +12,7 @@ adapt to different environments and requirements without code changes.
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any, Callable, Dict, List
 
 from langchain_core.tools import BaseTool
@@ -65,8 +66,26 @@ def _perplexity_server() -> Dict[str, Any]:
 def _redis_server() -> Dict[str, Any]:
     """Builds the configuration for the Redis MCP server."""
     url = _require_env("MCP_REDIS_SERVER_URL")
-    transport = _require_env("MCP_REDIS_TRANSPORT")
+    transport = _normalize_redis_transport(_require_env("MCP_REDIS_TRANSPORT"))
     return {"url": url, "transport": transport}
+
+
+def _normalize_redis_transport(value: str) -> str:
+    """
+    Normalizes historical transport values to the canonical form expected by
+    the MCP client.
+    """
+    cleaned = value.strip()
+    if cleaned == "streamable_http":
+        warnings.warn(
+            "MCP_REDIS_TRANSPORT=streamable_http is deprecated; "
+            "use streamable-http instead. Automatically normalizing "
+            "to streamable-http.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return "streamable-http"
+    return cleaned
 
 
 _SERVER_BUILDERS: Dict[str, Callable[[], Dict[str, Any]]] = {

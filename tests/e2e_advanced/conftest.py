@@ -47,6 +47,10 @@ def docker_stack(check_prerequisites):
     """Bring up full Docker Compose stack for a test.
 
     Yields after all services are healthy, then tears down stack.
+    
+    If E2E_REUSE_STACK=1 is set, this will reuse existing containers
+    instead of rebuilding, which is useful for running tests sequentially
+    against a pre-started stack.
 
     Services started:
     - redis
@@ -55,41 +59,64 @@ def docker_stack(check_prerequisites):
     - orchestrator-runtime
     - agent-runtime
     """
-    # Teardown any previous stack
-    run_compose(["down", "-v"], check=False)
+    reuse_stack = os.environ.get("E2E_REUSE_STACK", "").strip().lower() in {"1", "true", "yes"}
+    should_teardown = True
+    
+    if reuse_stack:
+        # Check if containers are already healthy
+        try:
+            wait_for_container("redis", timeout=5)
+            wait_for_container("redis-mcp", timeout=5)
+            wait_for_container("agent-registry", timeout=5)
+            wait_for_container("orchestrator-runtime", timeout=5)
+            wait_for_container("agent-runtime", timeout=5)
+            wait_for_redis(timeout=5)
+            wait_for_registry_agent("agent-runtime", timeout=10)
+            
+            # Containers are healthy, reuse them
+            should_teardown = False
+            redis_cli("FLUSHALL")  # Just flush Redis data
+        except Exception:
+            # Containers not healthy, need to rebuild
+            reuse_stack = False
+    
+    if not reuse_stack:
+        # Teardown any previous stack
+        run_compose(["down", "-v"], check=False)
 
-    # Start services
-    run_compose(
-        [
-            "up",
-            "--build",
-            "-d",
-            "redis",
-            "redis-mcp",
-            "agent-registry",
-            "orchestrator-runtime",
-            "agent-runtime",
-        ]
-    )
+        # Start services
+        run_compose(
+            [
+                "up",
+                "--build",
+                "-d",
+                "redis",
+                "redis-mcp",
+                "agent-registry",
+                "orchestrator-runtime",
+                "agent-runtime",
+            ]
+        )
 
-    # Wait for all services to be healthy
-    wait_for_container("redis")
-    wait_for_container("redis-mcp")
-    wait_for_container("agent-registry")
-    wait_for_container("orchestrator-runtime")
-    wait_for_container("agent-runtime")
-    wait_for_redis()
+        # Wait for all services to be healthy
+        wait_for_container("redis")
+        wait_for_container("redis-mcp")
+        wait_for_container("agent-registry")
+        wait_for_container("orchestrator-runtime")
+        wait_for_container("agent-runtime")
+        wait_for_redis()
 
-    # Wait for agent to register
-    wait_for_registry_agent("agent-runtime", timeout=120)
+        # Wait for agent to register
+        wait_for_registry_agent("agent-runtime", timeout=120)
 
-    # Flush Redis to start clean
-    redis_cli("FLUSHALL")
+        # Flush Redis to start clean
+        redis_cli("FLUSHALL")
 
     yield
 
-    # Teardown
-    run_compose(["down", "-v"], check=False)
+    # Only teardown if we created the stack
+    if should_teardown and not reuse_stack:
+        run_compose(["down", "-v"], check=False)
 
 
 @pytest.fixture(scope="function")
@@ -97,42 +124,70 @@ def docker_stack_with_humanclone(check_prerequisites):
     """Bring up Docker stack including HumanClone runtime.
 
     This fixture is for tests that need PRP rejection cycles.
+    
+    If E2E_REUSE_STACK=1 is set, this will reuse existing containers
+    (including human-clone) instead of rebuilding.
     """
-    run_compose(["down", "-v"], check=False)
+    reuse_stack = os.environ.get("E2E_REUSE_STACK", "").strip().lower() in {"1", "true", "yes"}
+    should_teardown = True
+    
+    if reuse_stack:
+        # Check if containers (including human-clone) are already healthy
+        try:
+            wait_for_container("redis", timeout=5)
+            wait_for_container("redis-mcp", timeout=5)
+            wait_for_container("agent-registry", timeout=5)
+            wait_for_container("orchestrator-runtime", timeout=5)
+            wait_for_container("agent-runtime", timeout=5)
+            wait_for_container("human-clone-runtime", timeout=5)
+            wait_for_redis(timeout=5)
+            wait_for_registry_agent("agent-runtime", timeout=10)
+            
+            # Containers are healthy, reuse them
+            should_teardown = False
+            redis_cli("FLUSHALL")  # Just flush Redis data
+        except Exception:
+            # Containers not healthy, need to rebuild
+            reuse_stack = False
+    
+    if not reuse_stack:
+        run_compose(["down", "-v"], check=False)
 
-    # Set supervisor to human_clone
-    env_override = {"QUADRACODE_SUPERVISOR_RECIPIENT": "human_clone"}
+        # Set supervisor to human_clone
+        env_override = {"QUADRACODE_SUPERVISOR_RECIPIENT": "human_clone"}
 
-    run_compose(
-        [
-            "up",
-            "--build",
-            "-d",
-            "redis",
-            "redis-mcp",
-            "agent-registry",
-            "orchestrator-runtime",
-            "agent-runtime",
-            "human-clone-runtime",
-        ],
-        env=env_override,
-    )
+        run_compose(
+            [
+                "up",
+                "--build",
+                "-d",
+                "redis",
+                "redis-mcp",
+                "agent-registry",
+                "orchestrator-runtime",
+                "agent-runtime",
+                "human-clone-runtime",
+            ],
+            env=env_override,
+        )
 
-    # Wait for services
-    wait_for_container("redis")
-    wait_for_container("redis-mcp")
-    wait_for_container("agent-registry")
-    wait_for_container("orchestrator-runtime")
-    wait_for_container("agent-runtime")
-    wait_for_container("human-clone-runtime")
-    wait_for_redis()
+        # Wait for services
+        wait_for_container("redis")
+        wait_for_container("redis-mcp")
+        wait_for_container("agent-registry")
+        wait_for_container("orchestrator-runtime")
+        wait_for_container("agent-runtime")
+        wait_for_container("human-clone-runtime")
+        wait_for_redis()
 
-    wait_for_registry_agent("agent-runtime", timeout=120)
-    redis_cli("FLUSHALL")
+        wait_for_registry_agent("agent-runtime", timeout=120)
+        redis_cli("FLUSHALL")
 
     yield
 
-    run_compose(["down", "-v"], check=False)
+    # Only teardown if we created the stack
+    if should_teardown and not reuse_stack:
+        run_compose(["down", "-v"], check=False)
 
 
 @pytest.fixture(scope="function")

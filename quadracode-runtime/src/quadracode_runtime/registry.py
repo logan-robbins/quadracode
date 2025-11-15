@@ -16,12 +16,14 @@ import logging
 import os
 from contextlib import suppress
 from datetime import datetime, timezone
+import time
 from typing import Optional
 
 import httpx
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 10.0
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -77,6 +79,7 @@ class AgentRegistryIntegration:
         interval: int,
         base_url: str,
         timeout: float,
+        startup_timeout: float,
     ) -> None:
         """
         Initializes the `AgentRegistryIntegration`.
@@ -88,16 +91,18 @@ class AgentRegistryIntegration:
             interval: The interval in seconds for sending heartbeats.
             base_url: The base URL of the agent registry service.
             timeout: The timeout in seconds for requests to the registry.
+            startup_timeout: Seconds to wait for the initial registration before failing.
         """
         self._agent_id = agent_id
         self._host = host
         self._port = port
-        self._interval = max(5, interval)
+        self._interval = max(0.1, interval)
         self._registered = False
         self._task: Optional[asyncio.Task[None]] = None
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout if timeout > 0 else DEFAULT_TIMEOUT_SECONDS
         self._client: Optional[httpx.AsyncClient] = None
+        self._startup_timeout = startup_timeout if startup_timeout > 0 else 0.0
 
     @classmethod
     def from_environment(cls, profile_name: str, agent_id: str) -> Optional["AgentRegistryIntegration"]:
@@ -133,6 +138,9 @@ class AgentRegistryIntegration:
         port = _env_int("QUADRACODE_AGENT_PORT", 8123)
         interval = _env_int("QUADRACODE_AGENT_HEARTBEAT_INTERVAL", 15)
         timeout = _env_float("QUADRACODE_AGENT_REGISTRY_TIMEOUT", DEFAULT_TIMEOUT_SECONDS)
+        startup_timeout = _env_float(
+            "QUADRACODE_AGENT_REGISTRATION_TIMEOUT", DEFAULT_STARTUP_TIMEOUT_SECONDS
+        )
         base_url = os.environ.get("AGENT_REGISTRY_URL", "http://quadracode-agent-registry:8090")
         return cls(
             agent_id,
@@ -141,6 +149,7 @@ class AgentRegistryIntegration:
             interval=interval,
             base_url=base_url,
             timeout=timeout,
+            startup_timeout=startup_timeout,
         )
 
     async def start(self) -> None:
@@ -152,12 +161,15 @@ class AgentRegistryIntegration:
         """
         if self._task:
             return
-        print("[AgentRegistryIntegration] start() invoked")
+        LOGGER.info(
+            "Agent registry integration starting (agent_id=%s, base_url=%s, timeout=%.1fs)",
+            self._agent_id,
+            self._base_url,
+            self._startup_timeout,
+        )
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=self._timeout)
-        success = await self._register()
-        if not success:
-            LOGGER.warning("Initial agent registry registration failed; will retry in heartbeat loop")
+        await self._ensure_initial_registration()
         self._task = asyncio.create_task(self._heartbeat_loop())
 
     async def shutdown(self) -> None:
@@ -190,10 +202,37 @@ class AgentRegistryIntegration:
         except Exception as exc:  # pragma: no cover - defensive logging
             LOGGER.warning("Agent registry heartbeat loop stopped due to error: %s", exc)
 
+    async def _ensure_initial_registration(self) -> None:
+        success = await self._register()
+        if success or self._startup_timeout <= 0:
+            return
+
+        deadline = time.monotonic() + self._startup_timeout
+        attempt = 1
+        while time.monotonic() < deadline:
+            attempt += 1
+            await asyncio.sleep(min(self._interval, 5))
+            success = await self._register()
+            if success:
+                LOGGER.info(
+                    "Agent registry registration succeeded on retry %d for %s",
+                    attempt,
+                    self._agent_id,
+                )
+                return
+
+        raise RuntimeError(
+            f"Agent registry registration failed after {attempt} attempts "
+            f"({self._startup_timeout:.1f}s timeout)"
+        )
+
     async def _register(self) -> bool:
-        print(
-            f"[AgentRegistryIntegration] registering agent_id={self._agent_id} "
-            f"host={self._host} port={self._port} base_url={self._base_url}"
+        LOGGER.info(
+            "Registering agent_id=%s host=%s port=%s base_url=%s",
+            self._agent_id,
+            self._host,
+            self._port,
+            self._base_url,
         )
         success = await self._request(
             "POST",
@@ -223,7 +262,7 @@ class AgentRegistryIntegration:
         return False
 
     async def _heartbeat(self) -> bool:
-        print(f"[AgentRegistryIntegration] heartbeat agent_id={self._agent_id}")
+        LOGGER.debug("Agent registry heartbeat agent_id=%s", self._agent_id)
         success = await self._request(
             "POST",
             f"/agents/{self._agent_id}/heartbeat",
@@ -254,6 +293,5 @@ class AgentRegistryIntegration:
             response.raise_for_status()
             return True
         except httpx.HTTPError as exc:
-            print(f"[AgentRegistryIntegration] request error {method} {url}: {exc}")
             LOGGER.warning("Agent registry %s %s failed: %s", method.upper(), url, exc)
             return False

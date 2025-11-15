@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]  # Go up 1 parent from tests/ to project root
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 COMPOSE_CMD = ["docker", "compose", "-f", str(COMPOSE_FILE)]
 AGENT_ID = "agent-runtime"

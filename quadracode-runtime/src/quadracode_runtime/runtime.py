@@ -38,11 +38,14 @@ from quadracode_contracts import (
 from quadracode_tools.tools.workspace import ensure_workspace
 
 from .graph import CHECKPOINTER, GRAPH_RECURSION_LIMIT, build_graph
+from .logging_utils import configure_logging
 from .messaging import RedisMCPMessaging
 from .profiles import RuntimeProfile, is_autonomous_mode_enabled
 from .state import ExhaustionMode, RuntimeState
 from .registry import AgentRegistryIntegration
 from .validation import validate_human_clone_envelope
+
+configure_logging()
 
 IDENTITY_ENV_VAR = "QUADRACODE_ID"
 AUTONOMOUS_DEFAULT_MAX_ITERATIONS = 1000
@@ -62,6 +65,33 @@ _WORKSPACE_ENV_KEYS = (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _read_timeout_env(var_name: str, default: float) -> float:
+    raw = os.environ.get(var_name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        LOGGER.warning(
+            "Invalid float for %s=%s; using default %.2fs", var_name, raw, default
+        )
+        return default
+    return default if value <= 0 else value
+
+
+async def _await_with_timeout(
+    awaitable: Awaitable[Any], description: str, timeout: float
+) -> Any:
+    if timeout <= 0:
+        return await awaitable
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError as exc:  # pragma: no cover - defensive
+        raise RuntimeError(
+            f"{description} exceeded startup timeout ({timeout:.1f}s)"
+        ) from exc
 
 
 def _now_iso() -> str:
@@ -345,6 +375,9 @@ class RuntimeRunner:
         self._identity = os.environ.get(IDENTITY_ENV_VAR, profile.default_identity)
         self._graph = build_graph(profile.system_prompt)
         self._messaging: RedisMCPMessaging | None = None
+        self._messaging_start_timeout = _read_timeout_env(
+            "QUADRACODE_MESSAGING_START_TIMEOUT", 60.0
+        )
         self._registry = AgentRegistryIntegration.from_environment(
             profile.name, self._identity
         )
@@ -359,9 +392,12 @@ class RuntimeRunner:
                     "Agent registry auto-registration disabled for identity=%s",
                     self._identity,
                 )
-        print(
-            f"[RuntimeRunner] profile={profile.name} identity={self._identity} "
-            f"registry={'enabled' if self._registry else 'disabled'}"
+        LOGGER.info(
+            "Runtime initialized profile=%s identity=%s registry=%s timeout=%.1fs",
+            profile.name,
+            self._identity,
+            "enabled" if self._registry else "disabled",
+            self._messaging_start_timeout,
         )
 
     async def start(self) -> None:
@@ -372,15 +408,16 @@ class RuntimeRunner:
         integration, and then enters a continuous loop of reading and processing 
         messages from the Redis message bus.
         """
-        messaging = await RedisMCPMessaging.create()
+        messaging = await _await_with_timeout(
+            RedisMCPMessaging.create(),
+            "Redis messaging initialization",
+            self._messaging_start_timeout,
+        )
+        LOGGER.info("Redis messaging client ready (identity=%s)", self._identity)
         self._messaging = messaging
         try:
-            try:
-                if self._registry:
-                    await self._registry.start()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Failed to initialize agent registry integration: {exc}")
-                self._registry = None
+            if self._registry:
+                await self._registry.start()
             while True:
                 entries = await messaging.read(
                     self._identity, batch_size=self._batch_size
@@ -411,7 +448,13 @@ class RuntimeRunner:
         try:
             outgoing = await self._process_envelope(envelope)
         except Exception as exc:  # noqa: BLE001
-            print(f"Runtime error for message {entry_id}: {exc}")
+            LOGGER.error(
+                "Runtime error for message %s (identity=%s): %s",
+                entry_id,
+                self._identity,
+                exc,
+                exc_info=exc,
+            )
             await messaging.delete(self._identity, entry_id)
             return
 

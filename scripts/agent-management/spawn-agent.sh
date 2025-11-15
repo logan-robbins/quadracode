@@ -103,7 +103,7 @@ spawn_docker() {
         "--env" "REDIS_PORT=${REDIS_PORT:-6379}"
         "--env" "AGENT_REGISTRY_URL=${AGENT_REGISTRY_URL:-http://agent-registry:8090}"
         "--env" "MCP_REDIS_SERVER_URL=${MCP_REDIS_SERVER_URL:-http://redis-mcp:8000/mcp}"
-        "--env" "MCP_REDIS_TRANSPORT=${MCP_REDIS_TRANSPORT:-streamable_http}"
+        "--env" "MCP_REDIS_TRANSPORT=${MCP_REDIS_TRANSPORT:-streamable-http}"
         "--env" "MCP_REMOTE_CACHE_DIR=${MCP_REMOTE_CACHE_DIR:-/var/lib/mcp-remote}"
         "--env" "QUADRACODE_AGENT_AUTOREGISTER=${QUADRACODE_AGENT_AUTOREGISTER:-1}"
         "--env" "QUADRACODE_AGENT_HEARTBEAT_INTERVAL=${QUADRACODE_AGENT_HEARTBEAT_INTERVAL:-15}"
@@ -199,7 +199,7 @@ spec:
     - name: MCP_REDIS_SERVER_URL
       value: "${MCP_REDIS_SERVER_URL:-http://redis-mcp:8000/mcp}"
     - name: MCP_REDIS_TRANSPORT
-      value: "${MCP_REDIS_TRANSPORT:-streamable_http}"
+      value: "${MCP_REDIS_TRANSPORT:-streamable-http}"
     - name: SHARED_PATH
       value: "${SHARED_PATH:-/shared}"
     - name: MCP_REMOTE_CACHE_DIR

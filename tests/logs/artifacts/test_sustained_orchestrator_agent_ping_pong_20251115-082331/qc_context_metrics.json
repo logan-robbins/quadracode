@@ -1,0 +1,55 @@
+{
+  "stream": "qc:context:metrics",
+  "timestamp": "2025-11-15T08:25:03Z",
+  "entry_count": 6,
+  "entries": [
+    {
+      "id": "1763195099690-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-15T08:24:59.688234+00:00",
+        "payload": "{\"quality_score\": 0.75, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 0, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763195099691-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-15T08:24:59.690941+00:00",
+        "payload": "{\"from_state\": \"execute\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763195101733-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-15T08:25:01.731151+00:00",
+        "payload": "{\"quality_score\": 0.75, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 0, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763195101733-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-15T08:25:01.733729+00:00",
+        "payload": "{\"from_state\": \"execute\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763195103656-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-15T08:25:03.653120+00:00",
+        "payload": "{\"quality_score\": 0.75, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 0, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763195103656-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-15T08:25:03.656871+00:00",
+        "payload": "{\"from_state\": \"execute\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    }
+  ]
+}

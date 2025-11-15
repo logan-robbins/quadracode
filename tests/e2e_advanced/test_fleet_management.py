@@ -24,27 +24,27 @@ import pytest
 import redis
 import requests
 
-from tests.e2e_advanced.utils.logging_framework import (
+from .utils.logging_framework import (
     create_test_log_directory,
     log_stream_snapshot,
     log_turn,
 )
-from tests.e2e_advanced.utils.redis_helpers import (
+from .utils.redis_helpers import (
     dump_all_streams,
     get_last_stream_id,
     read_stream,
     send_message_to_orchestrator,
     wait_for_message_on_stream,
 )
-from tests.e2e_advanced.utils.artifacts import capture_docker_logs
-from tests.e2e_advanced.utils.agent_helpers import (
+from .utils.artifacts import capture_docker_logs
+from .utils.agent_helpers import (
     spawn_agent,
     delete_agent,
     wait_for_agent_healthy,
     set_agent_hotpath,
 )
-from tests.e2e_advanced.utils.timeouts import wait_for_condition
-from tests.e2e_advanced.utils.metrics_collector import MetricsCollector
+from .utils.timeouts import wait_for_condition
+from .utils.metrics_collector import MetricsCollector
 
 logger = logging.getLogger(__name__)
 

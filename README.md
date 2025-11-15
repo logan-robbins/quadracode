@@ -489,6 +489,11 @@ Environment variables control runtime behavior:
 - `REDIS_HOST`, `REDIS_PORT` — Redis connection
 - `SHARED_PATH` — shared volume for MCP transport
 
+### Diagnostics & Logging
+- `QUADRACODE_LOG_LEVEL` — root log level for all runtimes (default `INFO`)
+- `QUADRACODE_MESSAGING_START_TIMEOUT` — seconds to wait for MCP/Redis messaging to initialize before failing (default `60`)
+- `QUADRACODE_AGENT_REGISTRATION_TIMEOUT` — seconds to wait for the agent to register with the registry before aborting startup (default `60`)
+
 ### Agent Management
 - `AGENT_RUNTIME_PLATFORM` — deployment platform: `docker` (default) or `kubernetes`
 - `QUADRACODE_SCRIPTS_DIR` — path to agent management scripts (auto-detected if not set)
