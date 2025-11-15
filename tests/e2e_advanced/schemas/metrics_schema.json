@@ -1,0 +1,423 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Quadracode E2E Test Metrics",
+  "description": "Schema for advanced E2E test metrics including false-stops, HumanClone effectiveness, PRP cycles, and resource utilization",
+  "type": "object",
+  "required": [
+    "test_name",
+    "run_id",
+    "start_time",
+    "end_time",
+    "duration_ms",
+    "success",
+    "false_stops",
+    "humanclone",
+    "prp",
+    "resources",
+    "completion"
+  ],
+  "properties": {
+    "test_name": {
+      "type": "string",
+      "description": "Name of the test"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this test run"
+    },
+    "start_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Test start timestamp (ISO 8601)"
+    },
+    "end_time": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Test end timestamp (ISO 8601)"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total test duration in milliseconds"
+    },
+    "success": {
+      "type": "boolean",
+      "description": "Overall test success"
+    },
+    "false_stops": {
+      "type": "object",
+      "required": ["total", "rate", "detected_by_humanclone", "detection_rate", "uncaught_false_stops", "by_stage", "instances"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of false-stops"
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "False-stop rate (false_stops / total_proposals)"
+        },
+        "detected_by_humanclone": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number caught by HumanClone"
+        },
+        "detection_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Detection rate (detected / total_false_stops)"
+        },
+        "uncaught_false_stops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "False-stops that led to test failure"
+        },
+        "by_stage": {
+          "type": "object",
+          "description": "Breakdown by stage",
+          "patternProperties": {
+            ".*": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "instances": {
+          "type": "array",
+          "description": "Individual false-stop events",
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "proposal_stream_id", "stage", "detected_by"],
+            "properties": {
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "proposal_stream_id": {
+                "type": ["string", "null"]
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "incomplete_implementation",
+                  "missing_tests",
+                  "failing_tests",
+                  "missing_artifacts",
+                  "premature_milestone",
+                  "untested",
+                  "other"
+                ]
+              },
+              "detected_by": {
+                "type": "string"
+              },
+              "recovery_time_ms": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "llm_judge_classification": {
+                "type": ["object", "null"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "humanclone": {
+      "type": "object",
+      "required": [
+        "total_invocations",
+        "rejections",
+        "acceptances",
+        "rejection_rate",
+        "correct_rejections",
+        "incorrect_rejections",
+        "precision",
+        "recall",
+        "f1_score",
+        "avg_latency_ms",
+        "trigger_exhaustion_modes",
+        "trigger_details"
+      ],
+      "properties": {
+        "total_invocations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "acceptances": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejection_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "correct_rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "incorrect_rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "precision": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "recall": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "f1_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "avg_latency_ms": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "latency_p50_ms": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "latency_p95_ms": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "trigger_exhaustion_modes": {
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "trigger_details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["invocation_id", "timestamp", "outcome"],
+            "properties": {
+              "invocation_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["rejection", "acceptance"]
+              },
+              "exhaustion_mode": {
+                "type": ["string", "null"]
+              },
+              "rationale": {
+                "type": ["string", "null"]
+              },
+              "required_artifacts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "latency_ms": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "prp": {
+      "type": "object",
+      "required": [
+        "total_cycles",
+        "state_distribution",
+        "transition_counts",
+        "invalid_transitions",
+        "exhaustion_triggers",
+        "novelty_scores",
+        "cycles"
+      ],
+      "properties": {
+        "total_cycles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cycles_to_success": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "cycles_to_failure": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "state_distribution": {
+          "type": "object",
+          "description": "Time spent in each state as percentage"
+        },
+        "transition_counts": {
+          "type": "object",
+          "description": "Count of each state transition",
+          "patternProperties": {
+            ".*": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "invalid_transitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exhaustion_triggers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "novelty_scores": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        },
+        "improvement_detected_per_cycle": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "stall_cycles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cycles": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "required": [
+        "total_tokens",
+        "messages_sent",
+        "tool_calls_total",
+        "tool_calls_by_type"
+      ],
+      "properties": {
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_cost_usd": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "messages_sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages_by_recipient": {
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "tool_calls_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls_success": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls_failure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_call_success_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "tool_call_avg_latency_ms": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "tool_calls_by_type": {
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "context_overflow_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_curation_events": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "required": [
+        "test_success",
+        "task_verification_passed",
+        "escalation_triggered"
+      ],
+      "properties": {
+        "test_success": {
+          "type": "boolean"
+        },
+        "task_verification_passed": {
+          "type": "boolean"
+        },
+        "final_state": {
+          "type": ["string", "null"]
+        },
+        "escalation_triggered": {
+          "type": "boolean"
+        },
+        "escalation_reason": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}
+

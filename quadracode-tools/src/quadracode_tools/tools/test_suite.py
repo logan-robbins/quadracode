@@ -81,7 +81,7 @@ def discover_test_commands(root: Path, *, include_e2e: bool = True) -> List[Disc
     - `pyproject.toml` (for `uv run pytest`) at the root and in subdirectories.
     - `package.json` (for `npm run test`).
     - `Makefile` (for `make test`).
-    - A `tests/e2e` directory for end-to-end tests.
+    - A `tests/` directory for end-to-end tests.
 
     Returns a list of `DiscoveredTestCommand` objects, avoiding duplicates.
     """
@@ -139,7 +139,7 @@ def discover_test_commands(root: Path, *, include_e2e: bool = True) -> List[Disc
 
     e2e_dir = root / "tests" / "e2e"
     if include_e2e and e2e_dir.exists():
-        _register(("uv", "run", "pytest", "tests/e2e", "-m", "e2e"), root, "pytest:e2e")
+        _register(("uv", "run", "pytest", "tests/", "-m", "e2e"), root, "pytest:e2e")
 
     return commands
 

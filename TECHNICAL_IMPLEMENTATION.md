@@ -102,3 +102,68 @@ The PRP is a meta-cognitive loop that enables the system to recover from failure
 - **Role**: The operational backend for the `agent_management_tool`. These are shell scripts that contain the raw `docker` or `kubectl` commands.
 - **Platform Abstraction**: Each script uses a `case` statement on the `AGENT_RUNTIME_PLATFORM` environment variable to decide whether to execute Docker or Kubernetes commands, allowing the same tool call to work in different environments.
 - **JSON I/O**: The scripts are designed to accept command-line arguments and produce structured JSON on `stdout`, making them reliable for programmatic use by the Python tool wrappers.
+
+## 5. Testing Framework
+
+Quadracode includes two tiers of end-to-end testing to validate the complete system.
+
+### 5.1. Quick E2E Tests (`tests/`)
+
+- **Duration**: 5-10 minutes
+- **Purpose**: Validate core integration points and basic message flows
+- **Execution**: `uv run pytest tests/ -m e2e -v`
+- **Coverage**: Basic orchestrator-agent communication, Redis streams, agent registry, tool execution
+- **Test Files**: `test_end_to_end.py`, `test_runtime_memory_persistence.py`, `test_workspace_mount.py`
+
+### 5.2. Advanced E2E Tests (`tests/e2e_advanced/`)
+
+A comprehensive, long-running test suite designed to validate the complete Quadracode system under realistic workloads with real LLM calls.
+
+**Test Modules:**
+
+1. **Foundation Tests** (`test_foundation_long_run.py`): Sustained message flows and multi-agent routing over 30+ conversation turns
+2. **Context Engine Stress** (`test_context_engine_stress.py`): Progressive loading, curation, and externalization under high load with large files
+3. **PRP and Autonomous Mode** (`test_prp_autonomous.py`): HumanClone rejection cycles, PRP state machine transitions, and autonomous checkpoints
+4. **Fleet Management** (`test_fleet_management.py`): Dynamic agent spawning/deletion and hotpath protection mechanisms
+5. **Workspace Integrity** (`test_workspace_integrity.py`): Multi-workspace isolation and integrity snapshot/restore functionality
+6. **Observability** (`test_observability.py`): Time-travel logging capture and comprehensive metrics stream coverage
+
+**Infrastructure Components:**
+
+- **Metrics Collection** (`utils/metrics_collector.py`): Captures false-stops, HumanClone effectiveness, PRP cycles, and resource utilization
+- **LLM-as-a-Judge** (`utils/llm_judge.py`): Semantic classification of orchestrator proposals and HumanClone decisions
+- **Test Utilities**: Logging framework, Redis helpers, artifact capture, agent management helpers, timeout wrappers
+- **Reporting Scripts**: Aggregate metrics, generate markdown reports, create visualizations (false-stop rates, HumanClone ROC curves, PRP distributions)
+
+**Key Metrics Tracked:**
+
+- **False-Stop Detection**: Count, rate, detection effectiveness, recovery times
+- **HumanClone Effectiveness**: Precision, recall, F1 score, latency, exhaustion mode distribution
+- **PRP Efficiency**: Cycle counts, state distribution, transition patterns, novelty scores
+- **Resource Utilization**: Token usage, costs, tool calls, context overflow events
+
+**Execution:**
+
+```bash
+# Run all advanced tests (60-90 minutes)
+uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+
+# Run specific module
+uv run pytest tests/e2e_advanced/test_prp_autonomous.py -v
+
+# Generate reports after test runs
+uv run python tests/e2e_advanced/scripts/aggregate_metrics.py \
+  --input "tests/e2e_advanced/metrics/*.json" \
+  --output tests/e2e_advanced/reports/aggregate_report.json
+```
+
+**Design Principles:**
+
+- All tests use real LLM calls (no mocks or stubs)
+- Full Docker stack required (services must be running)
+- Long-running scenarios (5-20 minutes per test)
+- Verbose audit trails with timestamped logs
+- Detailed assertion messages for AI coding agents
+- Comprehensive metrics exported to JSON
+
+The advanced E2E suite validates the system's ability to handle false-stops, recover from failures through PRP, manage context under load, execute autonomous tasks with checkpoints, dynamically scale the agent fleet, maintain workspace isolation, and provide complete observability through time-travel logs and metrics streams.

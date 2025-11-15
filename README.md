@@ -82,7 +82,8 @@ This monorepo contains several Python 3.12 packages and supporting assets:
 - `quadracode-contracts/` — Shared Pydantic models and message envelope contracts used across services.
 - `quadracode-ui/` — Streamlit UI for multi-chat control plane and live stream inspection.
 - `scripts/` — Agent management helpers for Docker/Kubernetes and stream tailing utilities.
-- `tests/e2e/` — End-to-end tests that launch the real stack via Docker Compose and validate cross-service flows and context metrics.
+- `tests/` — Quick end-to-end tests (test_end_to_end.py, test_runtime_memory_persistence.py, test_workspace_mount.py)
+- `tests/e2e_advanced/` — Comprehensive long-running E2E test suite with metrics collection and reporting
 
 ## Always-On Philosophy
 
@@ -370,15 +371,69 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 
 ### Testing
 
+Quadracode has two levels of end-to-end testing:
+
+#### Quick E2E Tests (5-10 minutes)
+
+Basic integration tests that validate core functionality:
+
 ```bash
 # Full end-to-end (spins Docker, requires real API keys)
-uv run pytest tests/e2e -m e2e -q
+uv run pytest tests/ -m e2e -v
 
 # UI integration (uses a stubbed Redis client inside the test harness)
 uv run pytest quadracode-ui/tests -q
 ```
 
-> See TESTS.md for testing rules. All tests in `tests/e2e` are full-stack and require valid keys.
+#### Advanced E2E Tests (60-90 minutes)
+
+Comprehensive, long-running tests that validate the complete system including false-stop detection, PRP cycles, context engineering, autonomous mode, fleet management, workspace integrity, and observability:
+
+```bash
+# Run all advanced E2E tests
+uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+
+# Run specific test module
+uv run pytest tests/e2e_advanced/test_prp_autonomous.py -v
+
+# Run with increased timeouts for CI or slow environments
+E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced -v
+```
+
+**Prerequisites for Advanced Tests:**
+- `ANTHROPIC_API_KEY` must be set in `.env` and `.env.docker`
+- Docker stack must be running: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime`
+- For PRP tests: `docker compose up -d human-clone-runtime` and set `SUPERVISOR_RECIPIENT=human_clone`
+- For observability tests: Set `QUADRACODE_TIME_TRAVEL_ENABLED=true`
+
+**Test Modules:**
+- `test_foundation_long_run.py` - Sustained message flows (5-10 min)
+- `test_context_engine_stress.py` - Context engineering under load (10-15 min)
+- `test_prp_autonomous.py` - HumanClone rejection cycles and autonomous execution (15-20 min)
+- `test_fleet_management.py` - Dynamic agent lifecycle (5-10 min)
+- `test_workspace_integrity.py` - Multi-workspace isolation (10-15 min)
+- `test_observability.py` - Time-travel logs and metrics (10-15 min)
+
+After running tests, generate metrics reports:
+
+```bash
+# Aggregate metrics from test runs
+uv run python tests/e2e_advanced/scripts/aggregate_metrics.py \
+  --input "tests/e2e_advanced/metrics/*.json" \
+  --output tests/e2e_advanced/reports/aggregate_report.json
+
+# Generate markdown summary
+uv run python tests/e2e_advanced/scripts/generate_metrics_report.py \
+  --aggregate tests/e2e_advanced/reports/aggregate_report.json \
+  --output tests/e2e_advanced/reports/summary_report.md
+
+# Create visualizations
+uv run python tests/e2e_advanced/scripts/plot_metrics.py \
+  --aggregate tests/e2e_advanced/reports/aggregate_report.json \
+  --output tests/e2e_advanced/plots/
+```
+
+> See `TESTS.md` and `tests/e2e_advanced/README.md` for complete testing documentation. All tests are full-stack and require valid API keys.
 
 ### End‑to‑End Requirements
 
@@ -401,7 +456,7 @@ Run the suite after bringing up the stack:
 
 ```bash
 docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
-uv run pytest tests/e2e -m e2e -q
+uv run pytest tests/ -m e2e -q
 ```
 
 Environment for compose is sourced from `.env` and `.env.docker` by default. Ensure those files contain valid keys for your environment.
@@ -505,7 +560,8 @@ Automated coding assistants working on this codebase should:
    - Registry API: `quadracode-agent-registry/src` (FastAPI on port 8090)
    - Contracts: `quadracode-contracts/src`
    - Tools: `quadracode-tools/src` (includes agent_management tool)
-4. **Run tests with uv**: `uv run pytest` (package-specific or from repo root)
+   - Tests: `tests/` (quick E2E), `tests/e2e_advanced/` (comprehensive suite)
+4. **Run tests with uv**: `uv run pytest tests/ -m e2e` (quick) or `uv run pytest tests/e2e_advanced -m e2e_advanced` (comprehensive)
 5. **Observe Redis traffic**: `scripts/tail_streams.sh` or `redis-cli monitor`
 6. **Agent management**: Scripts in `scripts/agent-management/` support both Docker and Kubernetes
 
@@ -559,7 +615,8 @@ export QUADRACODE_REDUCER_MODEL=heuristic
 
 - Sync dependencies: `uv sync`
 - Run units/fast tests in a package: `uv run pytest`
-- Run end-to-end tests: `uv run pytest tests/e2e -m e2e`
+- Run quick end-to-end tests: `uv run pytest tests/ -m e2e`
+- Run comprehensive E2E tests: `uv run pytest tests/e2e_advanced -m e2e_advanced`
 - Launch local LangGraph dev server: `uv run langgraph dev agent --config quadracode-agent/langgraph-local.json` (swap `agent` with `orchestrator` as needed)
 
 ## Docker Stack

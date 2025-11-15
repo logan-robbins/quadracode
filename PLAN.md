@@ -7,6 +7,7 @@ This plan defines a comprehensive, long-running end-to-end testing framework for
 ## Core Principles
 
 1. **Real LLMs Only**: No stubs, mocks, or simulated responses. Every test invokes Anthropic Claude via the production LangGraph runtime.
+*** The .env and .env.docker file in the root have the LLM API KEYS
 2. **Full Docker Stack**: All services (redis, redis-mcp, agent-registry, orchestrator-runtime, agent-runtime, human-clone-runtime) must run in docker-compose as defined in `docker-compose.yml`.
 3. **Long-Running Scenarios**: Minimum 5 minutes of sustained interaction with multiple conversation turns.
 4. **Verbose Audit Trails**: Every message, tool call, state transition, and PRP cycle must be logged to disk with timestamps and correlation IDs.
@@ -18,10 +19,10 @@ This plan defines a comprehensive, long-running end-to-end testing framework for
 
 ### Test Execution Environment
 
-- **Base Directory**: `/Users/loganrobbins/research/quadracode/tests/e2e_advanced/`
-- **Log Directory**: `/Users/loganrobbins/research/quadracode/tests/e2e_advanced/logs/` (created per test run with ISO timestamp subdirectories)
-- **Artifact Directory**: `/Users/loganrobbins/research/quadracode/tests/e2e_advanced/artifacts/` (Redis snapshots, message traces, PRP ledgers)
-- **Fixtures**: Reuse and extend `tests/conftest.py` and `tests/e2e/test_end_to_end.py` utilities
+- **Base Directory**: `/Users/loganrobbins/research/quadracode/tests/`
+- **Log Directory**: `/Users/loganrobbins/research/quadracode/tests/logs/` (created per test run with ISO timestamp subdirectories)
+- **Artifact Directory**: `/Users/loganrobbins/research/quadracode/tests/artifacts/` (Redis snapshots, message traces, PRP ledgers)
+- **Fixtures**: Reuse and extend `tests/conftest.py` and `tests/test_end_to_end.py` utilities
 
 ### Docker Compose Services Required
 
@@ -1060,263 +1061,260 @@ The metrics system is considered **complete and validated** when:
 
 ### Phase 1: Infrastructure and Utilities (Priority: Critical)
 
-- [ ] **Create `tests/e2e_advanced/` directory structure**
-  - [ ] `tests/e2e_advanced/__init__.py`
-  - [ ] `tests/e2e_advanced/conftest.py` (pytest fixtures)
-  - [ ] `tests/e2e_advanced/utils/` (logging, Redis helpers, artifact capture)
-  - [ ] `tests/e2e_advanced/logs/.gitkeep`
-  - [ ] `tests/e2e_advanced/artifacts/.gitkeep`
+- [x] **Create `tests/e2e_advanced/` directory structure**
+  - [x] `tests/e2e_advanced/__init__.py`
+  - [x] `tests/e2e_advanced/conftest.py` (pytest fixtures)
+  - [x] `tests/e2e_advanced/utils/` (logging, Redis helpers, artifact capture)
+  - [x] `tests/e2e_advanced/logs/.gitkeep`
+  - [x] `tests/e2e_advanced/artifacts/.gitkeep`
 
-- [ ] **Implement Logging Framework** (`tests/e2e_advanced/utils/logging_framework.py`)
-  - [ ] Function: `create_test_log_directory(test_name: str) -> Path`
+- [x] **Implement Logging Framework** (`tests/e2e_advanced/utils/logging_framework.py`)
+  - [x] Function: `create_test_log_directory(test_name: str) -> Path`
     - Creates `logs/{test_name}_{iso_timestamp}/`
     - Returns Path object
-  - [ ] Function: `log_turn(log_dir: Path, turn_number: int, message: dict, response: dict) -> None`
+  - [x] Function: `log_turn(log_dir: Path, turn_number: int, message: dict, response: dict) -> None`
     - Writes JSON file: `turn_{N}.json` with message envelope, response envelope, timestamps
-  - [ ] Function: `log_stream_snapshot(log_dir: Path, stream_name: str, entries: list) -> None`
+  - [x] Function: `log_stream_snapshot(log_dir: Path, stream_name: str, entries: list) -> None`
     - Writes JSON file: `{stream_name}_snapshot.json`
-  - [ ] Function: `log_tool_call(log_dir: Path, tool_name: str, inputs: dict, outputs: dict, duration_ms: int) -> None`
+  - [x] Function: `log_tool_call(log_dir: Path, tool_name: str, inputs: dict, outputs: dict, duration_ms: int) -> None`
     - Writes JSON file: `tool_call_{tool_name}_{timestamp}.json`
-  - [ ] Configure Python logger with ISO timestamp format, file + console handlers
+  - [x] Configure Python logger with ISO timestamp format, file + console handlers
 
-- [ ] **Implement Redis Utilities** (`tests/e2e_advanced/utils/redis_helpers.py`)
-  - [ ] Extend existing `read_stream`, `get_last_stream_id` from `tests/e2e/test_end_to_end.py`
-  - [ ] Function: `poll_stream_for_event(stream: str, baseline_id: str, event_type: str, timeout: int) -> tuple[str, dict] | None`
+- [x] **Implement Redis Utilities** (`tests/e2e_advanced/utils/redis_helpers.py`)
+  - [x] Extend existing `read_stream`, `get_last_stream_id` from `tests/test_end_to_end.py`
+  - [x] Function: `poll_stream_for_event(stream: str, baseline_id: str, event_type: str, timeout: int) -> tuple[str, dict] | None`
     - Polls stream until event with matching `event` field found
     - Returns entry_id and fields, or None on timeout
-  - [ ] Function: `dump_all_streams(output_dir: Path) -> None`
+  - [x] Function: `dump_all_streams(output_dir: Path) -> None`
     - Reads all `qc:*` streams and writes to JSON files
-  - [ ] Function: `validate_stream_monotonicity(stream: str) -> bool`
+  - [x] Function: `validate_stream_monotonicity(stream: str) -> bool`
     - Asserts stream IDs are strictly increasing
-  - [ ] Function: `export_stream_to_csv(stream: str, output_path: Path) -> None`
+  - [x] Function: `export_stream_to_csv(stream: str, output_path: Path) -> None`
     - For human-readable audit logs
 
-- [ ] **Implement Artifact Capture** (`tests/e2e_advanced/utils/artifacts.py`)
-  - [ ] Function: `capture_docker_logs(service: str, output_path: Path) -> None`
+- [x] **Implement Artifact Capture** (`tests/e2e_advanced/utils/artifacts.py`)
+  - [x] Function: `capture_docker_logs(service: str, output_path: Path) -> None`
     - Runs `docker compose logs {service} > {output_path}`
-  - [ ] Function: `capture_workspace_state(workspace_id: str, output_dir: Path) -> None`
+  - [x] Function: `capture_workspace_state(workspace_id: str, output_dir: Path) -> None`
     - Copies workspace files using `workspace_copy_from` tool
-  - [ ] Function: `capture_prp_ledger(state: dict, output_path: Path) -> None`
+  - [x] Function: `capture_prp_ledger(state: dict, output_path: Path) -> None`
     - Extracts `refinement_ledger` from state and writes to JSON
-  - [ ] Function: `capture_time_travel_logs(service: str, output_dir: Path) -> None`
+  - [x] Function: `capture_time_travel_logs(service: str, output_dir: Path) -> None`
     - Copies time-travel JSONL files from `/shared/time_travel_logs/` volume
 
-- [ ] **Implement Timeout Wrappers** (`tests/e2e_advanced/utils/timeouts.py`)
-  - [ ] Function: `wait_for_condition(condition_fn: Callable[[], bool], timeout: int, poll_interval: int = 2, description: str = "") -> bool`
+- [x] **Implement Timeout Wrappers** (`tests/e2e_advanced/utils/timeouts.py`)
+  - [x] Function: `wait_for_condition(condition_fn: Callable[[], bool], timeout: int, poll_interval: int = 2, description: str = "") -> bool`
     - Generic polling utility with logging
-  - [ ] Function: `wait_for_message_on_stream(stream: str, baseline_id: str, sender: str, timeout: int) -> dict`
+  - [x] Function: `wait_for_message_on_stream(stream: str, baseline_id: str, sender: str, timeout: int) -> dict`
     - Polls for message from specific sender
     - Raises `TimeoutError` with detailed message if timeout exceeded
 
-- [ ] **Implement Agent Management Helpers** (`tests/e2e_advanced/utils/agent_helpers.py`)
-  - [ ] Function: `spawn_agent(agent_id: str, network: str = "bridge", timeout: int = 120) -> dict`
+- [x] **Implement Agent Management Helpers** (`tests/e2e_advanced/utils/agent_helpers.py`)
+  - [x] Function: `spawn_agent(agent_id: str, network: str = "bridge", timeout: int = 120) -> dict`
     - Calls `scripts/agent-management/spawn-agent.sh`
     - Parses JSON output
     - Polls agent-registry until agent is `healthy`
     - Returns agent descriptor
-  - [ ] Function: `delete_agent(agent_id: str, timeout: int = 60) -> bool`
+  - [x] Function: `delete_agent(agent_id: str, timeout: int = 60) -> bool`
     - Calls `delete-agent.sh`
     - Verifies agent removed from registry
-  - [ ] Function: `wait_for_agent_healthy(agent_id: str, timeout: int) -> dict`
+  - [x] Function: `wait_for_agent_healthy(agent_id: str, timeout: int) -> dict`
     - Polls `/agents/{agent_id}` endpoint
-  - [ ] Function: `set_agent_hotpath(agent_id: str, hotpath: bool) -> None`
+  - [x] Function: `set_agent_hotpath(agent_id: str, hotpath: bool) -> None`
     - Calls agent-registry hotpath endpoint
 
-- [ ] **Implement Metrics Collection System** (`tests/e2e_advanced/utils/metrics_collector.py`)
-  - [ ] Class: `MetricsCollector`
-    - [ ] `__init__(test_name: str, run_id: str)` - Initialize metrics dictionary and event log
-    - [ ] `record_false_stop(proposal: dict, detected_by: str, stage: str) -> None` - Record false-stop event
-    - [ ] `record_orchestrator_proposal(proposal: dict) -> None` - Track proposal to HumanClone
-    - [ ] `record_humanclone_invocation(proposal: dict, trigger: dict, outcome: str) -> None` - Record HumanClone interaction
-    - [ ] `record_prp_transition(from_state: str, to_state: str, valid: bool, exhaustion_mode: str | None) -> None` - Track state machine transitions
-    - [ ] `record_prp_cycle(cycle_data: dict) -> None` - Record complete PRP cycle with metadata
-    - [ ] `record_tool_call(tool_name: str, duration_ms: float, success: bool, inputs: dict, outputs: dict) -> None` - Track tool execution
-    - [ ] `record_verification_result(passed: bool, output: str, exit_code: int) -> None` - Store verification script results
-    - [ ] `compute_derived_metrics() -> None` - Calculate rates, percentages, and aggregates
-    - [ ] `validate_consistency() -> list[str]` - Run consistency checks, return list of violations
-    - [ ] `export(output_path: Path) -> None` - Write metrics JSON with schema validation
-  - [ ] Helper functions:
-    - [ ] `_initialize_metrics() -> dict` - Create default metrics structure
-    - [ ] `_calculate_rate(numerator: int, denominator: int) -> float` - Safe division
-    - [ ] `_compute_f1_score(precision: float, recall: float) -> float` - Harmonic mean
+- [x] **Implement Metrics Collection System** (`tests/e2e_advanced/utils/metrics_collector.py`)
+  - [x] Class: `MetricsCollector`
+    - [x] `__init__(test_name: str, run_id: str)` - Initialize metrics dictionary and event log
+    - [x] `record_false_stop(proposal: dict, detected_by: str, stage: str) -> None` - Record false-stop event
+    - [x] `record_orchestrator_proposal(proposal: dict) -> None` - Track proposal to HumanClone
+    - [x] `record_humanclone_invocation(proposal: dict, trigger: dict, outcome: str) -> None` - Record HumanClone interaction
+    - [x] `record_prp_transition(from_state: str, to_state: str, valid: bool, exhaustion_mode: str | None) -> None` - Track state machine transitions
+    - [x] `record_prp_cycle(cycle_data: dict) -> None` - Record complete PRP cycle with metadata
+    - [x] `record_tool_call(tool_name: str, duration_ms: float, success: bool, inputs: dict, outputs: dict) -> None` - Track tool execution
+    - [x] `record_verification_result(passed: bool, output: str, exit_code: int) -> None` - Store verification script results
+    - [x] `compute_derived_metrics() -> None` - Calculate rates, percentages, and aggregates
+    - [x] `validate_consistency() -> list[str]` - Run consistency checks, return list of violations
+    - [x] `export(output_path: Path) -> None` - Write metrics JSON with schema validation
+  - [x] Helper functions:
+    - [x] `_initialize_metrics() -> dict` - Create default metrics structure
+    - [x] `_calculate_rate(numerator: int, denominator: int) -> float` - Safe division
+    - [x] `_compute_f1_score(precision: float, recall: float) -> float` - Harmonic mean
 
-- [ ] **Implement LLM-as-a-Judge Framework** (`tests/e2e_advanced/utils/llm_judge.py`)
-  - [ ] Class: `LLMJudge`
-    - [ ] `__init__(model: str = "claude-3-5-sonnet", temperature: float = 0.0, cache_enabled: bool = True)`
-    - [ ] `classify_proposal(proposal: dict, task_spec: str, verification_criteria: str, workspace_summary: str | None) -> dict` - Classify orchestrator proposal (Task 1)
-    - [ ] `classify_humanclone_response(proposal: dict, trigger: dict, verification_result: dict | None) -> dict` - Assess HumanClone decision (Task 2)
-    - [ ] `cluster_exhaustion_modes(rationales: list[str]) -> dict` - Semantic clustering (Task 3)
-    - [ ] `_invoke_llm(prompt: str, max_tokens: int = 1000) -> str` - Call LLM API with retry logic
-    - [ ] `_parse_json_response(response: str) -> dict` - Extract and validate JSON from LLM output
-    - [ ] `_cache_key(prompt: str) -> str` - Generate hash for caching
-    - [ ] `_load_cache() -> dict` - Load cached judgments from disk
-    - [ ] `_save_cache(cache: dict) -> None` - Persist cache to disk
-  - [ ] Prompt templates:
-    - [ ] `PROPOSAL_CLASSIFICATION_TEMPLATE` - Task 1 template
-    - [ ] `HUMANCLONE_ASSESSMENT_TEMPLATE` - Task 2 template
-    - [ ] `EXHAUSTION_CLUSTERING_TEMPLATE` - Task 3 template
-  - [ ] Rate limiting:
-    - [ ] Implement exponential backoff for API rate limits
-    - [ ] Batch judge calls with configurable delay (default: 2s between calls)
+- [x] **Implement LLM-as-a-Judge Framework** (`tests/e2e_advanced/utils/llm_judge.py`)
+  - [x] Class: `LLMJudge`
+    - [x] `__init__(model: str = "claude-3-5-sonnet", temperature: float = 0.0, cache_enabled: bool = True)`
+    - [x] `classify_proposal(proposal: dict, task_spec: str, verification_criteria: str, workspace_summary: str | None) -> dict` - Classify orchestrator proposal (Task 1)
+    - [x] `classify_humanclone_response(proposal: dict, trigger: dict, verification_result: dict | None) -> dict` - Assess HumanClone decision (Task 2)
+    - [x] `cluster_exhaustion_modes(rationales: list[str]) -> dict` - Semantic clustering (Task 3)
+    - [x] `_invoke_llm(prompt: str, max_tokens: int = 1000) -> str` - Call LLM API with retry logic
+    - [x] `_parse_json_response(response: str) -> dict` - Extract and validate JSON from LLM output
+    - [x] `_cache_key(prompt: str) -> str` - Generate hash for caching
+    - [x] `_load_cache() -> dict` - Load cached judgments from disk
+    - [x] `_save_cache(cache: dict) -> None` - Persist cache to disk
+  - [x] Prompt templates:
+    - [x] `PROPOSAL_CLASSIFICATION_TEMPLATE` - Task 1 template
+    - [x] `HUMANCLONE_ASSESSMENT_TEMPLATE` - Task 2 template
+    - [x] `EXHAUSTION_CLUSTERING_TEMPLATE` - Task 3 template
+  - [x] Rate limiting:
+    - [x] Implement exponential backoff for API rate limits
+    - [x] Batch judge calls with configurable delay (default: 2s between calls)
 
-- [ ] **Implement Metrics Schema** (`tests/e2e_advanced/schemas/metrics_schema.json`)
-  - [ ] Define JSON schema for metrics export
-  - [ ] Include required fields: test_name, run_id, start_time, end_time, duration_ms, success
-  - [ ] Define nested schemas for false_stops, humanclone, prp, resources sections
-  - [ ] Add validation rules: numeric ranges, enum values, required fields
-  - [ ] Schema validator function in `metrics_collector.py`: `validate_against_schema(metrics: dict, schema_path: Path) -> bool`
+- [x] **Implement Metrics Schema** (`tests/e2e_advanced/schemas/metrics_schema.json`)
+  - [x] Define JSON schema for metrics export
+  - [x] Include required fields: test_name, run_id, start_time, end_time, duration_ms, success
+  - [x] Define nested schemas for false_stops, humanclone, prp, resources sections
+  - [x] Add validation rules: numeric ranges, enum values, required fields
+  - [x] Schema validator function in `metrics_collector.py`: `validate_against_schema(metrics: dict, schema_path: Path) -> bool`
 
-- [ ] **Implement Metrics Aggregation** (`tests/e2e_advanced/scripts/aggregate_metrics.py`)
-  - [ ] Function: `load_metrics_files(pattern: str) -> list[dict]`
+- [x] **Implement Metrics Aggregation** (`tests/e2e_advanced/scripts/aggregate_metrics.py`)
+  - [x] Function: `load_metrics_files(pattern: str) -> list[dict]`
     - Glob pattern matching for metrics JSON files
     - Validate each file against schema
     - Return list of metrics dictionaries
-  - [ ] Function: `compute_aggregate_statistics(metrics_list: list[dict]) -> dict`
+  - [x] Function: `compute_aggregate_statistics(metrics_list: list[dict]) -> dict`
     - Calculate mean, median, std dev for numeric metrics
     - Compute 95% bootstrap confidence intervals
     - Aggregate success rates, false-stop rates, HumanClone metrics
-  - [ ] Function: `export_aggregate_json(stats: dict, output_path: Path) -> None`
-  - [ ] Function: `export_aggregate_csv(stats: dict, output_path: Path) -> None`
-  - [ ] CLI interface with argparse
+  - [x] Function: `export_aggregate_json(stats: dict, output_path: Path) -> None`
+  - [x] Function: `export_aggregate_csv(stats: dict, output_path: Path) -> None`
+  - [x] CLI interface with argparse
 
-- [ ] **Implement Metrics Reporting** (`tests/e2e_advanced/scripts/generate_metrics_report.py`)
-  - [ ] Function: `generate_executive_summary(aggregate: dict) -> str` - Markdown table
-  - [ ] Function: `generate_humanclone_effectiveness_table(aggregate: dict) -> str`
-  - [ ] Function: `generate_prp_efficiency_table(aggregate: dict) -> str`
-  - [ ] Function: `generate_false_stop_breakdown(aggregate: dict) -> str`
-  - [ ] Function: `generate_resource_overhead_table(aggregate: dict) -> str`
-  - [ ] Function: `write_markdown_report(sections: list[str], output_path: Path) -> None`
-  - [ ] CLI interface with argparse
+- [x] **Implement Metrics Reporting** (`tests/e2e_advanced/scripts/generate_metrics_report.py`)
+  - [x] Function: `generate_executive_summary(aggregate: dict) -> str` - Markdown table
+  - [x] Function: `generate_humanclone_effectiveness_table(aggregate: dict) -> str`
+  - [x] Function: `generate_prp_efficiency_table(aggregate: dict) -> str`
+  - [x] Function: `generate_false_stop_breakdown(aggregate: dict) -> str`
+  - [x] Function: `generate_resource_overhead_table(aggregate: dict) -> str`
+  - [x] Function: `write_markdown_report(sections: list[str], output_path: Path) -> None`
+  - [x] CLI interface with argparse
 
-- [ ] **Implement Metrics Visualization** (`tests/e2e_advanced/scripts/plot_metrics.py`)
-  - [ ] Function: `plot_false_stop_rate_by_test(aggregate: dict, output_path: Path) -> None`
+- [x] **Implement Metrics Visualization** (`tests/e2e_advanced/scripts/plot_metrics.py`)
+  - [x] Function: `plot_false_stop_rate_by_test(aggregate: dict, output_path: Path) -> None`
     - Bar chart with error bars
     - X-axis: Test names, Y-axis: False-stop rate
-  - [ ] Function: `plot_humanclone_roc_curve(aggregate: dict, output_path: Path) -> None`
+  - [x] Function: `plot_humanclone_roc_curve(aggregate: dict, output_path: Path) -> None`
     - ROC curve with AUC score
-  - [ ] Function: `plot_prp_cycle_distribution(aggregate: dict, output_path: Path) -> None`
+  - [x] Function: `plot_prp_cycle_distribution(aggregate: dict, output_path: Path) -> None`
     - Histogram with KDE overlay
-  - [ ] Function: `plot_recovery_time_cdf(aggregate: dict, output_path: Path) -> None`
+  - [x] Function: `plot_recovery_time_cdf(aggregate: dict, output_path: Path) -> None`
     - Cumulative distribution function
-  - [ ] Function: `plot_token_usage_vs_success(aggregate: dict, output_path: Path) -> None`
+  - [x] Function: `plot_token_usage_vs_success(aggregate: dict, output_path: Path) -> None`
     - Scatter plot with regression line
-  - [ ] Function: `plot_exhaustion_mode_frequency(aggregate: dict, output_path: Path) -> None`
+  - [x] Function: `plot_exhaustion_mode_frequency(aggregate: dict, output_path: Path) -> None`
     - Pie chart with percentages
-  - [ ] Use matplotlib/seaborn for plots
-  - [ ] CLI interface with argparse
+  - [x] Use matplotlib/seaborn for plots
+  - [x] CLI interface with argparse
 
-- [ ] **Create Metrics Directories**
-  - [ ] `tests/e2e_advanced/metrics/.gitkeep` - Individual test metrics
-  - [ ] `tests/e2e_advanced/reports/.gitkeep` - Aggregate reports
-  - [ ] `tests/e2e_advanced/plots/.gitkeep` - Generated visualizations
-  - [ ] `tests/e2e_advanced/schemas/.gitkeep` - JSON schemas
-  - [ ] `tests/e2e_advanced/scripts/.gitkeep` - Analysis scripts
+- [x] **Create Metrics Directories**
+  - [x] `tests/e2e_advanced/metrics/.gitkeep` - Individual test metrics
+  - [x] `tests/e2e_advanced/reports/.gitkeep` - Aggregate reports
+  - [x] `tests/e2e_advanced/plots/.gitkeep` - Generated visualizations
+  - [x] `tests/e2e_advanced/schemas/.gitkeep` - JSON schemas
+  - [x] `tests/e2e_advanced/scripts/.gitkeep` - Analysis scripts
 
 ### Phase 2: Module 1 - Foundation Tests
 
-- [ ] **Implement `tests/e2e_advanced/test_foundation_long_run.py`**
-  - [ ] Test 1.1: `test_sustained_orchestrator_agent_ping_pong`
-    - [ ] Setup: Bring up stack, create log dir, init baselines
-    - [ ] Flow: 30-turn conversation loop
-    - [ ] Verification: Stream monotonicity, metrics events, mailbox counts
-    - [ ] Teardown: Dump artifacts, logs, tear down stack
-  - [ ] Test 1.2: `test_multi_agent_message_routing`
-    - [ ] Setup: Spawn 3 dynamic agents, wait for registration
-    - [ ] Flow: Route messages to each agent, verify responses
-    - [ ] Verification: Mailbox counts, registry stats
-    - [ ] Teardown: Delete agents, dump artifacts
+- [x] **Implement `tests/e2e_advanced/test_foundation_long_run.py`**
+  - [x] Test 1.1: `test_sustained_orchestrator_agent_ping_pong`
+    - [x] Setup: Bring up stack, create log dir, init baselines
+    - [x] Flow: 30-turn conversation loop
+    - [x] Verification: Stream monotonicity, metrics events, mailbox counts
+    - [x] Teardown: Dump artifacts, logs, tear down stack
+  - [x] Test 1.2: `test_multi_agent_message_routing`
+    - [x] Setup: Spawn 3 dynamic agents, wait for registration
+    - [x] Flow: Route messages to each agent, verify responses
+    - [x] Verification: Mailbox counts, registry stats
+    - [x] Teardown: Delete agents, dump artifacts
 
 ### Phase 3: Module 2 - Context Engine Stress
 
-- [ ] **Implement `tests/e2e_advanced/test_context_engine_stress.py`**
-  - [ ] Test 2.1: `test_progressive_loader_artifact_cascade`
-    - [ ] Setup: Create workspace, populate files and test artifacts
-    - [ ] Flow: Trigger progressive loading over 20 turns
-    - [ ] Verification: Assert `load` events with artifact segments
-    - [ ] Teardown: Destroy workspace, dump context metrics
-  - [ ] Test 2.2: `test_context_curation_and_externalization`
-    - [ ] Setup: Override env vars for low thresholds
-    - [ ] Flow: Force context overflow with large tool outputs
-    - [ ] Verification: Assert `curation` events with `compress`, `externalize` actions
-    - [ ] Teardown: Dump curation logs
+- [x] **Implement `tests/e2e_advanced/test_context_engine_stress.py`**
+  - [x] Test 2.1: `test_progressive_loader_artifact_cascade`
+    - [x] Setup: Create workspace, populate files and test artifacts
+    - [x] Flow: Trigger progressive loading over 20 turns
+    - [x] Verification: Assert `load` events with artifact segments
+    - [x] Teardown: Destroy workspace, dump context metrics
+  - [x] Test 2.2: `test_context_curation_and_externalization`
+    - [x] Setup: Override env vars for low thresholds
+    - [x] Flow: Force context overflow with large tool outputs
+    - [x] Verification: Assert `curation` events with `compress`, `externalize` actions
+    - [x] Teardown: Dump curation logs
 
 ### Phase 4: Module 3 - PRP and Autonomous Mode
 
-- [ ] **Implement `tests/e2e_advanced/test_prp_autonomous.py`**
-  - [ ] Test 3.1: `test_human_clone_rejection_cycle`
-    - [ ] Setup: Bring up human-clone-runtime, set supervisor to human_clone
-    - [ ] Flow: Trigger test failure, wait for HumanClone rejection, observe PRP cycle
-    - [ ] Verification: Assert PRP state transitions, refinement ledger entries
-    - [ ] Teardown: Dump refinement ledger, HumanClone logs
-  - [ ] Test 3.2: `test_autonomous_mode_full_lifecycle`
-    - [ ] Setup: Enable autonomous mode, set max iterations and runtime
-    - [ ] Flow: Autonomous task completion with checkpoints
-    - [ ] Verification: Assert checkpoint events, final review, test suite pass
-    - [ ] Teardown: Dump autonomous events, workspace artifacts
+- [x] **Implement `tests/e2e_advanced/test_prp_autonomous.py`**
+  - [x] Test 3.1: `test_human_clone_rejection_cycle`
+    - [x] Setup: Bring up human-clone-runtime, set supervisor to human_clone
+    - [x] Flow: Trigger test failure, wait for HumanClone rejection, observe PRP cycle
+    - [x] Verification: Assert PRP state transitions, refinement ledger entries
+    - [x] Teardown: Dump refinement ledger, HumanClone logs
+  - [x] Test 3.2: `test_autonomous_mode_full_lifecycle`
+    - [x] Setup: Enable autonomous mode, set max iterations and runtime
+    - [x] Flow: Autonomous task completion with checkpoints
+    - [x] Verification: Assert checkpoint events, final review, test suite pass
+    - [x] Teardown: Dump autonomous events, workspace artifacts
 
 ### Phase 5: Module 4 - Fleet Management
 
-- [ ] **Implement `tests/e2e_advanced/test_fleet_management.py`**
-  - [ ] Test 4.1: `test_dynamic_agent_spawning_and_cleanup`
-    - [ ] Setup: Base stack
-    - [ ] Flow: Spawn 5 agents, assign tasks, delete 3
-    - [ ] Verification: Registry stats, container cleanup
-    - [ ] Teardown: Delete remaining agents
-  - [ ] Test 4.2: `test_hotpath_agent_protection`
-    - [ ] Setup: Spawn agent, mark as hotpath
-    - [ ] Flow: Attempt deletion (should fail), remove protection, delete (should succeed)
-    - [ ] Verification: Parse logs for rejection message
-    - [ ] Teardown: Tear down stack
+- [x] **Implement `tests/e2e_advanced/test_fleet_management.py`**
+  - [x] Test 4.1: `test_dynamic_agent_spawning_and_cleanup`
+    - [x] Setup: Base stack
+    - [x] Flow: Spawn 5 agents, assign tasks, delete 3
+    - [x] Verification: Registry stats, container cleanup
+    - [x] Teardown: Delete remaining agents
+  - [x] Test 4.2: `test_hotpath_agent_protection`
+    - [x] Setup: Spawn agent, mark as hotpath
+    - [x] Flow: Attempt deletion (should fail), remove protection, delete (should succeed)
+    - [x] Verification: Parse logs for rejection message
+    - [x] Teardown: Tear down stack
 
 ### Phase 6: Module 5 - Workspace Integrity
 
-- [ ] **Implement `tests/e2e_advanced/test_workspace_integrity.py`**
-  - [ ] Test 5.1: `test_multi_workspace_isolation`
-    - [ ] Setup: Define 3 workspace IDs
-    - [ ] Flow: Create workspaces, write unique files, verify isolation
-    - [ ] Verification: Volume and container counts, filesystem independence
-    - [ ] Teardown: Destroy workspaces
-  - [ ] Test 5.2: `test_workspace_integrity_snapshots`
-    - [ ] Setup: Create workspace, write files
-    - [ ] Flow: Generate snapshot, modify file, detect drift, restore
-    - [ ] Verification: Checksum validation, drift detection
-    - [ ] Teardown: Destroy workspace
+- [x] **Implement `tests/e2e_advanced/test_workspace_integrity.py`**
+  - [x] Test 5.1: `test_multi_workspace_isolation`
+    - [x] Setup: Define 3 workspace IDs
+    - [x] Flow: Create workspaces, write unique files, verify isolation
+    - [x] Verification: Volume and container counts, filesystem independence
+    - [x] Teardown: Destroy workspaces
+  - [x] Test 5.2: `test_workspace_integrity_snapshots`
+    - [x] Setup: Create workspace, write files
+    - [x] Flow: Generate snapshot, modify file, detect drift, restore
+    - [x] Verification: Checksum validation, drift detection
+    - [x] Teardown: Destroy workspace
 
 ### Phase 7: Module 6 - Observability
 
-- [ ] **Implement `tests/e2e_advanced/test_observability.py`**
-  - [ ] Test 6.1: `test_time_travel_log_capture`
-    - [ ] Setup: Enable time-travel logging, mount shared volume
-    - [ ] Flow: 20-turn conversation, copy logs from volume
-    - [ ] Verification: Parse JSONL, assert state snapshots
-    - [ ] Teardown: Dump time-travel logs
-  - [ ] Test 6.2: `test_metrics_stream_comprehensive_coverage`
-    - [ ] Setup: Full stack with human-clone
-    - [ ] Flow: Trigger all major metrics events
-    - [ ] Verification: Assert event types and payload schemas
-    - [ ] Teardown: Dump all metrics streams
+- [x] **Implement `tests/e2e_advanced/test_observability.py`**
+  - [x] Test 6.1: `test_time_travel_log_capture`
+    - [x] Setup: Enable time-travel logging, mount shared volume
+    - [x] Flow: 20-turn conversation, copy logs from volume
+    - [x] Verification: Parse JSONL, assert state snapshots
+    - [x] Teardown: Dump time-travel logs
+  - [x] Test 6.2: `test_metrics_stream_comprehensive_coverage`
+    - [x] Setup: Full stack with human-clone
+    - [x] Flow: Trigger all major metrics events
+    - [x] Verification: Assert event types and payload schemas
+    - [x] Teardown: Dump all metrics streams
 
 ### Phase 8: Documentation and CI Integration
 
-- [ ] **Update `TESTS.md`**
-  - [ ] Add section: "Advanced E2E Tests"
-  - [ ] Document test modules, execution time, prerequisites
-  - [ ] Add command: `uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO`
+- [x] **Update `TESTS.md`**
+  - [x] Add section: "Advanced E2E Tests"
+  - [x] Document test modules, execution time, prerequisites
+  - [x] Add command: `uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO`
 
-- [ ] **Create `tests/e2e_advanced/README.md`**
-  - [ ] Overview of test suite
-  - [ ] Setup instructions (environment variables, Docker prerequisites)
-  - [ ] Execution commands for each module
-  - [ ] Troubleshooting guide (common failures, timeout adjustments)
+- [x] **Create `tests/e2e_advanced/README.md`**
+  - [x] Overview of test suite
+  - [x] Setup instructions (environment variables, Docker prerequisites)
+  - [x] Execution commands for each module
+  - [x] Troubleshooting guide (common failures, timeout adjustments)
 
-- [ ] **Add pytest markers** (`pytest.ini`)
-  - [ ] Add marker: `e2e_advanced` for all advanced tests
-  - [ ] Add marker: `long_running` for tests >= 10 minutes
+- [x] **Add pytest markers** (`pytest.ini`)
+  - [x] Add marker: `e2e_advanced` for all advanced tests
+  - [x] Add marker: `long_running` for tests >= 10 minutes
 
-- [ ] **Create CI workflow** (optional, `.github/workflows/e2e_advanced.yml`)
-  - [ ] Run on manual trigger (workflow_dispatch)
-  - [ ] Set timeout: 90 minutes
-  - [ ] Upload artifacts (logs, metrics) on completion
+- [x] **Create CI workflow** (skipped - optional, not required)
 
 ---
 
