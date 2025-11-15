@@ -89,6 +89,23 @@ For CI or slow environments:
 E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced -v
 ```
 
+### Run with Rate Limiting Protection
+
+If you encounter API rate limits (e.g., Anthropic 429 errors), add turn cooldowns:
+
+```bash
+# Add 1 second cooldown between turns (default is 0.5s)
+E2E_TURN_COOLDOWN_SECONDS=1.0 uv run pytest tests/e2e_advanced -v
+
+# Add 2 second cooldown for very strict rate limits
+E2E_TURN_COOLDOWN_SECONDS=2.0 uv run pytest tests/e2e_advanced -v
+
+# Disable all rate limiting delays (faster tests, but may hit limits)
+E2E_RATE_LIMIT_DISABLE=1 uv run pytest tests/e2e_advanced -v
+```
+
+See `RATE_LIMITING_ANALYSIS.md` for detailed analysis of API usage patterns.
+
 ## Metrics Collection
 
 Tests automatically collect metrics including:
@@ -152,7 +169,19 @@ Expected durations for test modules:
 **Solutions**:
 - Increase timeout multiplier: `E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0`
 - Check Docker resource allocation (CPU, memory)
-- Verify API rate limits not exceeded
+- Verify API rate limits not exceeded (see below)
+
+### API Rate Limiting (429 Errors)
+
+**Symptom**: Orchestrator logs show `429` errors or `rate_limit_error` from Anthropic API
+
+**Solutions**:
+- Add turn cooldown: `E2E_TURN_COOLDOWN_SECONDS=2.0 uv run pytest tests/e2e_advanced -v`
+- Run tests individually with delays between files
+- Check your Anthropic API tier and limits at https://console.anthropic.com/
+- See `RATE_LIMITING_ANALYSIS.md` for detailed guidance
+
+**Note**: With Tier 4 limits (4000 RPM), rate limiting should be rare. The test suite averages ~20-30 RPM.
 
 ### Redis Stream Gaps
 

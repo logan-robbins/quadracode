@@ -7,6 +7,7 @@ timeout error messages for AI coding agents.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -246,4 +247,122 @@ class TimeoutManager:
         if self.start_time is None:
             return self.timeout
         return self.timeout - (time.time() - self.start_time)
+
+
+def rate_limit_sleep(
+    base_delay: float = 0.5,
+    reason: str = "rate limiting protection",
+) -> None:
+    """Sleep to prevent API rate limiting.
+
+    This function provides configurable rate limiting delays that can be
+    adjusted via environment variables. By default, it uses a minimal delay
+    but can be increased if rate limit issues are encountered.
+
+    Args:
+        base_delay: Default delay in seconds (can be overridden by env var)
+        reason: Human-readable description of why we're sleeping
+
+    Environment Variables:
+        E2E_TURN_COOLDOWN_SECONDS: Override the delay duration (default: base_delay)
+        E2E_RATE_LIMIT_DISABLE: Set to "1" to disable all rate limiting delays
+
+    Example:
+        >>> # In test code
+        >>> for turn in range(30):
+        ...     send_message_to_orchestrator("Question?")
+        ...     response = wait_for_response()
+        ...     rate_limit_sleep(0.5, "between conversation turns")
+
+        >>> # To increase delay when running tests:
+        >>> # E2E_TURN_COOLDOWN_SECONDS=2.0 uv run pytest tests/e2e_advanced -v
+
+        >>> # To disable all rate limiting delays:
+        >>> # E2E_RATE_LIMIT_DISABLE=1 uv run pytest tests/e2e_advanced -v
+    """
+    # Check if rate limiting is disabled
+    if os.environ.get("E2E_RATE_LIMIT_DISABLE", "").strip().lower() in {"1", "true", "yes"}:
+        logger.debug("Rate limit sleep skipped (disabled via E2E_RATE_LIMIT_DISABLE)")
+        return
+
+    # Get configured delay
+    delay_str = os.environ.get("E2E_TURN_COOLDOWN_SECONDS", str(base_delay))
+    try:
+        delay = float(delay_str)
+    except ValueError:
+        logger.warning(
+            "Invalid E2E_TURN_COOLDOWN_SECONDS value '%s', using base_delay=%.2f",
+            delay_str,
+            base_delay,
+        )
+        delay = base_delay
+
+    if delay > 0:
+        logger.debug("Rate limit sleep: %.2fs (%s)", delay, reason)
+        time.sleep(delay)
+
+
+class RateLimiter:
+    """Token bucket rate limiter for API calls.
+
+    This class implements a simple token bucket algorithm to limit the rate
+    of API calls. It's useful for tests that make many rapid API calls and
+    want to stay well below rate limits.
+
+    Example:
+        >>> # Create a rate limiter: 50 requests per minute
+        >>> limiter = RateLimiter(max_requests_per_minute=50)
+        >>>
+        >>> # In test loop
+        >>> for i in range(100):
+        ...     limiter.wait_if_needed()  # Will sleep if we're going too fast
+        ...     send_message_to_orchestrator(f"Message {i}")
+        ...     response = wait_for_response()
+    """
+
+    def __init__(self, max_requests_per_minute: float = 50.0):
+        """Initialize rate limiter.
+
+        Args:
+            max_requests_per_minute: Maximum requests allowed per minute
+                                    (default: 50, well below Anthropic's 4000 RPM limit)
+        """
+        self.max_rpm = max_requests_per_minute
+        self.min_interval = 60.0 / max_requests_per_minute  # seconds between requests
+        self.last_request_time: float | None = None
+        logger.info(
+            "RateLimiter initialized: %.1f requests/minute (%.2fs minimum interval)",
+            self.max_rpm,
+            self.min_interval,
+        )
+
+    def wait_if_needed(self) -> None:
+        """Wait if necessary to stay within rate limits.
+
+        This method should be called before each API request. It will sleep
+        if insufficient time has passed since the last request.
+        """
+        now = time.time()
+
+        if self.last_request_time is not None:
+            elapsed = now - self.last_request_time
+            if elapsed < self.min_interval:
+                sleep_time = self.min_interval - elapsed
+                logger.debug(
+                    "Rate limiter: sleeping %.2fs (%.1f RPM target)",
+                    sleep_time,
+                    self.max_rpm,
+                )
+                time.sleep(sleep_time)
+                now = time.time()
+
+        self.last_request_time = now
+
+    def reset(self) -> None:
+        """Reset the rate limiter state.
+
+        Useful when starting a new test or after a long pause.
+        """
+        self.last_request_time = None
+        logger.debug("RateLimiter reset")
 
