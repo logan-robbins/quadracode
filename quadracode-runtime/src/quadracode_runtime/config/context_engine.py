@@ -91,7 +91,7 @@ class ContextEngineConfig:
     max_tool_payload_chars: int = 4_096
 
     # Reducer / summarization
-    reducer_model: Optional[str] = "anthropic:claude-3-haiku-20240307"
+    reducer_model: Optional[str] = "anthropic:claude-haiku-4-5-20251001"
     reducer_chunk_tokens: int = 600
     reducer_target_tokens: int = 200
 

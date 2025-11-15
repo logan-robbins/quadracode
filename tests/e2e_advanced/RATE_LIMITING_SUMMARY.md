@@ -65,7 +65,7 @@ for turn in range(100):
 
 The test suite uses these Anthropic models:
 - **Claude Sonnet 4** (Main driver): Orchestrator and agent decision-making
-- **Claude Haiku 3** (Context reducer): Summarizing large tool outputs
+- **Claude Haiku 4** (Context reducer): Summarizing large tool outputs
 - **Heuristic** (Governor): No API calls
 
 ## API Usage by Test

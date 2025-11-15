@@ -4,7 +4,7 @@
 
 ### Models in Use
 - **Primary Driver** (Orchestrator & Agent): `claude-sonnet-4-20250514`
-- **Context Reducer**: `claude-3-haiku-20240307` 
+- **Context Reducer**: `claude-haiku-4-5-20251001` 
 - **Governor**: `heuristic` (no API calls)
 
 ### Your API Rate Limits (Tier 4)
@@ -12,7 +12,7 @@
 | Model | Requests/Min | Input Tokens/Min | Output Tokens/Min |
 |-------|-------------|------------------|-------------------|
 | **Claude Sonnet 4.x** | 4,000 | 2M (≤200k context) | 400K (≤200k context) |
-| **Claude Haiku 3.x** | 4,000 | 400K | 80K |
+| **Claude Haiku 4.x** | 4,000 | 4M (≤200k context) | 800K (≤200k context) |
 
 ## Test Suite API Usage Analysis
 
