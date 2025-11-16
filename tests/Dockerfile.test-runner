@@ -1,0 +1,38 @@
+# Test runner container for E2E tests
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Create app directory
+WORKDIR /app
+
+# Copy Python dependencies files
+COPY pyproject.toml uv.lock ./
+COPY quadracode-runtime/pyproject.toml ./quadracode-runtime/
+COPY quadracode-orchestrator/pyproject.toml ./quadracode-orchestrator/
+COPY quadracode-agent/pyproject.toml ./quadracode-agent/
+COPY quadracode-agent-registry/pyproject.toml ./quadracode-agent-registry/
+COPY quadracode-contracts/pyproject.toml ./quadracode-contracts/
+COPY quadracode-tools/pyproject.toml ./quadracode-tools/
+COPY quadracode-ui/pyproject.toml ./quadracode-ui/
+
+# Install dependencies
+RUN uv sync --no-dev
+
+# Copy source code (will be mounted as volume in compose, but useful for standalone builds)
+COPY . .
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Default command (can be overridden)
+CMD ["sleep", "infinity"]

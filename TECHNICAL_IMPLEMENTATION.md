@@ -105,15 +105,15 @@ The PRP is a meta-cognitive loop that enables the system to recover from failure
 
 ## 5. Testing Framework
 
-Quadracode includes two tiers of end-to-end testing to validate the complete system.
+Quadracode uses a comprehensive end-to-end testing framework located in `tests/e2e_advanced/`.
 
-### 5.1. Quick E2E Tests (`tests/`)
+### 5.1. Smoke Tests
 
-- **Duration**: 5-10 minutes
-- **Purpose**: Validate core integration points and basic message flows
-- **Execution**: `uv run pytest tests/ -m e2e -v`
-- **Coverage**: Basic orchestrator-agent communication, Redis streams, agent registry, tool execution
-- **Test Files**: `test_end_to_end.py`, `test_runtime_memory_persistence.py`, `test_workspace_mount.py`
+- **Duration**: <5 minutes
+- **Purpose**: Quick infrastructure validation without requiring full LLM integration
+- **Execution**: `uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v`
+- **Coverage**: Utilities, metrics collection, logging framework, timeout management, checkpoint persistence, workspace volume inheritance
+- **Test File**: `test_foundation_smoke.py`
 
 ### 5.2. Advanced E2E Tests (`tests/e2e_advanced/`)
 
@@ -160,7 +160,7 @@ uv run python tests/e2e_advanced/scripts/aggregate_metrics.py \
 **Design Principles:**
 
 - All tests use real LLM calls (no mocks or stubs)
-- Full Docker stack required (services must be running)
+- Start by running `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime` and verify health via `docker compose ps --services --filter "status=running"`.
 - Long-running scenarios (5-20 minutes per test)
 - Verbose audit trails with timestamped logs
 - Detailed assertion messages for AI coding agents

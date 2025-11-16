@@ -4,7 +4,7 @@ All Quadracode tests are **full end-to-end checks** that exercise the production
 
 ## Core Rules
 
-- **Always run the real platform.** Every test must start the Docker Compose services (`redis`, `redis-mcp`, `agent-registry`, `orchestrator-runtime`, `agent-runtime`, and any dependencies). Tests may build images when required.
+- **Always run the real platform.** Every test must start the Docker Compose services (`redis`, `redis-mcp`, `agent-registry`, `orchestrator-runtime`, `agent-runtime`, and any dependencies). If the stack is not already running, start it with `docker compose up -d ...` and confirm health via `docker compose ps --services --filter "status=running"`.
 - **Real model traffic is mandatory.** Configure valid API keys in `.env` (e.g. `ANTHROPIC_API_KEY`) before running the suite. Tests fail immediately if required credentials are missing.
 - **No mocks or stubs.** Interactions must go through Redis Streams, LangGraph runtimes, agent registry, workspace tooling, and MCP adapters exactly as production would.
 - **Create and tear down real workloads.** Each test sends genuine chat messages, triggers tool executions, provisions workspaces/containers, and verifies cleanup.
@@ -12,13 +12,46 @@ All Quadracode tests are **full end-to-end checks** that exercise the production
 
 ## Running the Suite
 
+You can run tests in two ways: from the host machine or inside a Docker container.
+
+### Option A: Running Tests from Host Machine (Traditional)
+
 1. Export all required environment variables (see `.env` template).
 2. Ensure Docker Engine and the Compose plugin are installed and running.
-3. From the repo root, execute:
+3. Start or verify the docker-compose stack:
    ```bash
-   uv run pytest tests/ -m e2e -q
+   docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+   docker compose ps --services --filter "status=running"
    ```
-   Individual targets (e.g. `tests/test_end_to_end.py`) are acceptable but must still satisfy the rules above.
+4. From the repo root, execute:
+   ```bash
+   # Quick smoke tests (infrastructure validation, <5 minutes)
+   uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
+   
+   # Full comprehensive suite (60-90 minutes)
+   uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+   ```
+
+### Option B: Running Tests Inside Docker Network (Recommended)
+
+This approach ensures tests use the same DNS names and network as the services.
+
+1. Ensure your `.env` and `.env.docker` files are configured with API keys.
+2. Start the full stack including the test runner:
+   ```bash
+   docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner
+   docker compose ps --services --filter "status=running"
+   ```
+3. Execute tests inside the test-runner container:
+   ```bash
+   # Quick smoke tests
+   docker compose exec test-runner uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
+   
+   # Full comprehensive suite
+   docker compose exec test-runner uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+   ```
+
+The test runner container automatically detects it's running inside Docker and uses internal service names (redis, agent-registry, redis-mcp) instead of localhost.
 
 ## Advanced E2E Tests
 
@@ -98,14 +131,15 @@ For detailed documentation, see `tests/e2e_advanced/README.md`.
 
 ## Adding New Tests
 
-- New quick E2E scenarios belong under `tests/`.
-- New comprehensive E2E scenarios belong under `tests/e2e_advanced/`.
-- Reuse the helper utilities in `tests/test_end_to_end.py` or `tests/e2e_advanced/utils/` (compose orchestration, Redis helpers, etc.).
+- All new E2E scenarios belong under `tests/e2e_advanced/`.
+- Infrastructure smoke tests (still require the docker-compose stack) belong in `tests/e2e_advanced/test_foundation_smoke.py`.
+- Full-stack integration tests belong in the appropriate test module based on the feature area.
+- Reuse the helper utilities in `tests/e2e_advanced/utils/` (Redis helpers, agent management, metrics collection, etc.).
 - Every new test should:
-  1. Validate prerequisites (`require_prerequisites()`).
-  2. Bring up the compose stack (or reuse a running stack when coordinated across the suite).
-  3. Drive an observable workflow (sending messages, invoking tools, spawning agents, etc.).
-  4. Assert on real outputs (Redis streams, registry responses, container mounts, metrics).
-  5. Collect logs and tear the stack down in a `finally` block.
+  1. Use the `docker_stack` fixture (or validate prerequisites for smoke tests).
+  2. Drive an observable workflow (sending messages, invoking tools, spawning agents, etc.).
+  3. Assert on real outputs (Redis streams, registry responses, container mounts, metrics).
+  4. Collect logs and metrics for post-test analysis.
+  5. Use the advanced E2E utilities for timeouts, polling, and artifact capture.
 
-Any change to testing must keep these guarantees intact. If a faster signal is needed, introduce a new script or CLI command, but do **not** relax the full-stack coverage in this suite.
+Any change to testing must keep these guarantees intact. If a faster signal is needed, add to `test_foundation_smoke.py`, but do **not** relax the full-stack coverage in the comprehensive suite.

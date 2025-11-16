@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import redis
+import time
 
 # Import base utilities from parent test module
 import sys
@@ -117,6 +119,26 @@ def docker_stack(check_prerequisites):
     # Only teardown if we created the stack
     if should_teardown and not reuse_stack:
         run_compose(["down", "-v"], check=False)
+
+
+@pytest.fixture(scope="session")
+def redis_client():
+    """Provide a direct Redis client for advanced tests."""
+    time.sleep(5)  # Add a delay to allow Redis to initialize
+    host = os.environ.get("REDIS_HOST", "127.0.0.1")
+    port = int(os.environ.get("E2E_REDIS_PORT", "6379"))
+    client = redis.Redis(host=host, port=port, decode_responses=True)
+
+    try:
+        client.ping()
+    except Exception as exc:  # pragma: no cover - connectivity failure should fail fast
+        raise RuntimeError(
+            f"Unable to connect to Redis at {host}:{port}. "
+            "Ensure docker stack is running before executing advanced tests."
+        ) from exc
+
+    yield client
+    client.close()
 
 
 @pytest.fixture(scope="function")

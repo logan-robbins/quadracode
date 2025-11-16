@@ -141,7 +141,7 @@ class AgentRegistryIntegration:
         startup_timeout = _env_float(
             "QUADRACODE_AGENT_REGISTRATION_TIMEOUT", DEFAULT_STARTUP_TIMEOUT_SECONDS
         )
-        base_url = os.environ.get("AGENT_REGISTRY_URL", "http://quadracode-agent-registry:8090")
+        base_url = os.environ.get("AGENT_REGISTRY_URL", "http://agent-registry:8090")
         return cls(
             agent_id,
             host=host,

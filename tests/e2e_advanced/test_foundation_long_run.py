@@ -51,7 +51,11 @@ MIN_DURATION_SECONDS_TEST_1_2 = 300  # 5 minutes
 
 
 @pytest.mark.e2e_advanced
-def test_sustained_orchestrator_agent_ping_pong(docker_stack, test_log_dir):
+def test_sustained_orchestrator_agent_ping_pong(
+    docker_stack,
+    redis_client,
+    test_log_dir,
+):
     """Test 1.1: Sustained Orchestrator-Agent Ping-Pong (5 minutes).
 
     Validates message delivery, mailbox polling, and LLM response generation
@@ -192,17 +196,17 @@ def test_sustained_orchestrator_agent_ping_pong(docker_stack, test_log_dir):
         logger.info("✓ Duration: %.1fs (>= %ds required)", total_duration, MIN_DURATION_SECONDS_TEST_1_1)
 
         # Validate stream monotonicity
-        assert validate_stream_monotonicity("qc:mailbox/orchestrator"), (
+        assert validate_stream_monotonicity(redis_client, "qc:mailbox/orchestrator"), (
             "Orchestrator mailbox has gaps or reordering. This indicates message delivery issues."
         )
-        assert validate_stream_monotonicity("qc:mailbox/human"), (
+        assert validate_stream_monotonicity(redis_client, "qc:mailbox/human"), (
             "Human mailbox has gaps or reordering."
         )
         logger.info("✓ Stream monotonicity validated")
 
         # Check stream entry counts
-        orchestrator_stats = get_stream_stats("qc:mailbox/orchestrator")
-        human_stats = get_stream_stats("qc:mailbox/human")
+        orchestrator_stats = get_stream_stats(redis_client, "qc:mailbox/orchestrator")
+        human_stats = get_stream_stats(redis_client, "qc:mailbox/human")
 
         logger.info("Stream stats:")
         logger.info("  orchestrator entries: %d", orchestrator_stats.get("entry_count", 0))
@@ -247,7 +251,7 @@ def test_sustained_orchestrator_agent_ping_pong(docker_stack, test_log_dir):
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
         # Dump Redis streams
-        dump_all_streams(artifact_dir)
+        dump_all_streams(redis_client, artifact_dir)
         logger.info("Redis streams dumped to: %s", artifact_dir)
 
         # Capture service logs
@@ -274,7 +278,11 @@ def test_sustained_orchestrator_agent_ping_pong(docker_stack, test_log_dir):
 
 
 @pytest.mark.e2e_advanced
-def test_multi_agent_message_routing(docker_stack, test_log_dir):
+def test_multi_agent_message_routing(
+    docker_stack,
+    redis_client,
+    test_log_dir,
+):
     """Test 1.2: Multi-Agent Message Routing (5 minutes).
 
     Spawns 3 dynamic agents and routes messages through orchestrator to each,
@@ -426,7 +434,7 @@ def test_multi_agent_message_routing(docker_stack, test_log_dir):
 
         # Verify each agent mailbox received at least 1 message
         for agent_id in dynamic_agent_ids:
-            agent_stats = get_stream_stats(f"qc:mailbox/{agent_id}")
+            agent_stats = get_stream_stats(redis_client, f"qc:mailbox/{agent_id}")
             entry_count = agent_stats.get("entry_count", 0)
             assert entry_count >= 1, (
                 f"Agent {agent_id} mailbox has only {entry_count} entries, expected >= 1"
@@ -434,7 +442,7 @@ def test_multi_agent_message_routing(docker_stack, test_log_dir):
             logger.info("✓ Agent %s received %d messages", agent_id, entry_count)
 
         # Verify orchestrator mailbox has messages from agents
-        orchestrator_stats = get_stream_stats("qc:mailbox/orchestrator")
+        orchestrator_stats = get_stream_stats(redis_client, "qc:mailbox/orchestrator")
         logger.info("✓ Orchestrator mailbox: %d entries", orchestrator_stats.get("entry_count", 0))
 
         # Success summary
@@ -461,7 +469,7 @@ def test_multi_agent_message_routing(docker_stack, test_log_dir):
         artifact_dir = test_log_dir.parent / "artifacts" / test_log_dir.name
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        dump_all_streams(artifact_dir)
+        dump_all_streams(redis_client, artifact_dir)
         capture_all_service_logs(
             artifact_dir,
             services=["orchestrator-runtime", "agent-runtime", "agent-registry"],

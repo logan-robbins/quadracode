@@ -117,7 +117,7 @@ class ContextEngine:
         self.time_travel = get_time_travel_recorder()
         self.registry_url = os.environ.get(
             "AGENT_REGISTRY_URL",
-            "http://quadracode-agent-registry:8090",
+            "http://agent-registry:8090",
         ).rstrip("/")
         self._hotpath_probe_timeout = float(
             os.environ.get("QUADRACODE_HOTPATH_PROBE_TIMEOUT", "3")

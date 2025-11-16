@@ -1,7 +1,7 @@
 """Unit tests for advanced E2E test utilities.
 
-These tests validate the infrastructure components without requiring
-the full Docker stack or real LLM calls.
+These fast checks still assume the docker-compose stack is up and healthy;
+they simply focus on utility behavior without triggering full LLM flows.
 """
 
 from __future__ import annotations

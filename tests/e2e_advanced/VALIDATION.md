@@ -7,7 +7,7 @@
 ## Test Inventory
 
 ### Unit Tests (20 tests)
-Located in `test_utils.py` - validates core utilities without requiring Docker or LLM calls
+Located in `test_utils.py` - validates core utilities while the Docker stack is running (no LLM calls triggered)
 
 - ✅ 4 Logging Framework tests
 - ✅ 8 MetricsCollector tests  
@@ -99,8 +99,9 @@ markers =
 # Ensure API key is set
 export ANTHROPIC_API_KEY=your_key_here
 
-# Ensure Docker is running
-docker ps
+# Ensure docker-compose stack is running and healthy
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+docker compose ps --services --filter "status=running"
 ```
 
 ### Run Foundation Tests
@@ -117,7 +118,7 @@ E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced/test_founda
 
 ### Run Validation Tests Only
 ```bash
-# Quick validation (no Docker required)
+# Quick validation (stack must already be running)
 uv run pytest tests/e2e_advanced/test_utils.py tests/e2e_advanced/test_foundation_smoke.py -v
 ```
 

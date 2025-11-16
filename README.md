@@ -82,8 +82,7 @@ This monorepo contains several Python 3.12 packages and supporting assets:
 - `quadracode-contracts/` — Shared Pydantic models and message envelope contracts used across services.
 - `quadracode-ui/` — Streamlit UI for multi-chat control plane and live stream inspection.
 - `scripts/` — Agent management helpers for Docker/Kubernetes and stream tailing utilities.
-- `tests/` — Quick end-to-end tests (test_end_to_end.py, test_runtime_memory_persistence.py, test_workspace_mount.py)
-- `tests/e2e_advanced/` — Comprehensive long-running E2E test suite with metrics collection and reporting
+- `tests/e2e_advanced/` — Comprehensive long-running E2E test suite with smoke tests, metrics collection, and reporting
 
 ## Always-On Philosophy
 
@@ -371,24 +370,44 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 
 ### Testing
 
-Quadracode has two levels of end-to-end testing:
+> **Always-on Docker stack:** The Quadracode application only runs against the
+> docker-compose stack. Before executing any test (smoke, validation, or E2E),
+> start the stack if it is not already running and confirm every service is
+> healthy:
+> ```bash
+> docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+> docker compose ps --services --filter "status=running"
+> ```
 
-#### Quick E2E Tests (5-10 minutes)
+Quadracode has two levels of end-to-end testing that can be run either from the host or inside a Docker container for proper network isolation:
 
-Basic integration tests that validate core functionality:
+#### Smoke Tests (<5 minutes)
 
+Quick infrastructure validation tests (Docker stack must be running and healthy):
+
+**From host machine:**
 ```bash
-# Full end-to-end (spins Docker, requires real API keys)
-uv run pytest tests/ -m e2e -v
+# Infrastructure smoke tests (no LLM calls, validates utilities and setup)
+uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
 
-# UI integration (uses a stubbed Redis client inside the test harness)
+# UI integration tests (uses stubbed Redis client)
 uv run pytest quadracode-ui/tests -q
+```
+
+**Inside Docker network (recommended for CI/CD):**
+```bash
+# Start test runner container
+docker compose up -d test-runner
+
+# Run smoke tests inside container
+docker compose exec test-runner uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
 ```
 
 #### Advanced E2E Tests (60-90 minutes)
 
 Comprehensive, long-running tests that validate the complete system including false-stop detection, PRP cycles, context engineering, autonomous mode, fleet management, workspace integrity, and observability:
 
+**From host machine:**
 ```bash
 # Run all advanced E2E tests
 uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
@@ -400,9 +419,18 @@ uv run pytest tests/e2e_advanced/test_prp_autonomous.py -v
 E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced -v
 ```
 
+**Inside Docker network (recommended for CI/CD):**
+```bash
+# Run all tests in container
+docker compose exec test-runner uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+
+# Run specific module in container
+docker compose exec test-runner uv run pytest tests/e2e_advanced/test_prp_autonomous.py -v
+```
+
 **Prerequisites for Advanced Tests:**
 - `ANTHROPIC_API_KEY` must be set in `.env` and `.env.docker`
-- Docker stack must be running: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime`
+- Docker stack must be running: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime` and verify health with `docker compose ps --services --filter "status=running"`
 - For PRP tests: `docker compose up -d human-clone-runtime` and set `SUPERVISOR_RECIPIENT=human_clone`
 - For observability tests: Set `QUADRACODE_TIME_TRAVEL_ENABLED=true`
 
@@ -456,7 +484,12 @@ Run the suite after bringing up the stack:
 
 ```bash
 docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
-uv run pytest tests/ -m e2e -q
+
+# Quick smoke tests
+uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
+
+# Full comprehensive suite
+uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
 ```
 
 Environment for compose is sourced from `.env` and `.env.docker` by default. Ensure those files contain valid keys for your environment.
@@ -475,7 +508,7 @@ quadracode/
 ├── scripts/
 │   ├── agent-management/      # Shell scripts for spawning/deleting agents (Docker + K8s)
 │   └── ...                    # Other operational scripts
-├── tests/                     # Unit and integration test suites
+├── tests/e2e_advanced/        # Comprehensive E2E test suite with smoke tests
 └── docker-compose.yml         # Production deployment configuration
 ```
 
@@ -565,8 +598,8 @@ Automated coding assistants working on this codebase should:
    - Registry API: `quadracode-agent-registry/src` (FastAPI on port 8090)
    - Contracts: `quadracode-contracts/src`
    - Tools: `quadracode-tools/src` (includes agent_management tool)
-   - Tests: `tests/` (quick E2E), `tests/e2e_advanced/` (comprehensive suite)
-4. **Run tests with uv**: `uv run pytest tests/ -m e2e` (quick) or `uv run pytest tests/e2e_advanced -m e2e_advanced` (comprehensive)
+   - Tests: `tests/e2e_advanced/` (comprehensive E2E suite + smoke tests)
+4. **Run tests with uv**: `uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v` (smoke) or `uv run pytest tests/e2e_advanced -m e2e_advanced` (comprehensive)
 5. **Observe Redis traffic**: `scripts/tail_streams.sh` or `redis-cli monitor`
 6. **Agent management**: Scripts in `scripts/agent-management/` support both Docker and Kubernetes
 
@@ -619,9 +652,9 @@ export QUADRACODE_REDUCER_MODEL=heuristic
 ## Local Development & Testing
 
 - Sync dependencies: `uv sync`
-- Run units/fast tests in a package: `uv run pytest`
-- Run quick end-to-end tests: `uv run pytest tests/ -m e2e`
-- Run comprehensive E2E tests: `uv run pytest tests/e2e_advanced -m e2e_advanced`
+- Run package-specific tests: `uv run pytest` (from within a package directory)
+- Run smoke tests: `uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v`
+- Run comprehensive E2E tests: `uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO`
 - Launch local LangGraph dev server: `uv run langgraph dev agent --config quadracode-agent/langgraph-local.json` (swap `agent` with `orchestrator` as needed)
 
 ## Docker Stack

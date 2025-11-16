@@ -1,0 +1,10 @@
+# .cursorignore
+# This file allows Cursor to access certain files that are in .gitignore
+# Negative patterns (starting with !) make files accessible to Cursor
+
+# Allow .env files to be read by Cursor tools
+!.env
+!.env.*
+!**/.env
+!**/.env.*
+

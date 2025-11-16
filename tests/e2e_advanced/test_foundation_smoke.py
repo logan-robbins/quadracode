@@ -1,7 +1,8 @@
 """Smoke tests for foundation test infrastructure.
 
 These tests validate that the test infrastructure is set up correctly
-without requiring the full Docker stack or long execution times.
+while the full Docker Compose stack is running and healthy, but they do so
+with minimal runtime compared to the long E2E scenarios.
 """
 
 from __future__ import annotations
@@ -225,6 +226,210 @@ def test_metrics_export_and_schema(tmp_path):
 
     print("✓ Metrics export and structure validated")
     print(f"  - All {len(required_keys)} required keys present")
+
+
+@pytest.mark.e2e_advanced
+def test_checkpoint_persistence_across_restart(docker_stack, tmp_path):
+    """Validate checkpoint survives orchestrator container restart.
+    
+    This test verifies that LangGraph checkpoints are properly persisted
+    and restored when the orchestrator container is restarted, ensuring
+    conversation state is maintained across failures.
+    
+    Args:
+        docker_stack: Pytest fixture that brings up Docker Compose stack
+        tmp_path: Pytest fixture providing temporary directory
+    """
+    import json
+    import time
+    import sys
+    from pathlib import Path
+    
+    # Import required utilities from parent test suite
+    parent_tests = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(parent_tests))
+    from test_end_to_end import (
+        get_last_stream_id,
+        read_stream_after,
+        run_compose,
+        send_message_to_orchestrator,
+        wait_for_human_response,
+    )
+    
+    def _extract_ai_contents(payload_raw: str) -> list[str]:
+        """Extract AI message contents from payload."""
+        payload = json.loads(payload_raw)
+        messages = payload.get("messages", [])
+        outputs: list[str] = []
+        for entry in messages:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") != "ai":
+                continue
+            data = entry.get("data")
+            if isinstance(data, dict):
+                content = data.get("content")
+                if isinstance(content, str):
+                    outputs.append(content.strip())
+        return [text for text in outputs if text]
+    
+    print("\n" + "=" * 70)
+    print("TEST: Checkpoint Persistence Across Restart")
+    print("=" * 70)
+    
+    # Send initial message with information to remember
+    baseline_human = get_last_stream_id("qc:mailbox/human")
+    metrics_baseline = get_last_stream_id("qc:context:metrics")
+    
+    print("→ Sending initial message with code name 'Orion'")
+    send_message_to_orchestrator("Remember that my project code name is Orion.", reply_to="agent-runtime")
+    first_response = wait_for_human_response(baseline_human)
+    first_payload = first_response.get("payload") or ""
+    first_ai_contents = _extract_ai_contents(first_payload)
+    assert first_ai_contents, "Initial orchestrator turn produced no AI content"
+    print(f"✓ Initial response received: {len(first_ai_contents)} AI messages")
+    
+    # Restart orchestrator container to verify checkpoint restoration
+    print("→ Restarting orchestrator container...")
+    run_compose(["restart", "orchestrator-runtime"])
+    time.sleep(10)  # Give container time to restart and resume polling
+    print("✓ Orchestrator container restarted")
+    
+    # Query the remembered information
+    second_baseline = get_last_stream_id("qc:mailbox/human")
+    print("→ Asking for code name after restart")
+    send_message_to_orchestrator("What is my project code name?", reply_to="agent-runtime")
+    second_response = wait_for_human_response(second_baseline)
+    second_payload = second_response.get("payload") or ""
+    second_ai_contents = _extract_ai_contents(second_payload)
+    assert second_ai_contents, "Follow-up orchestrator turn produced no AI content after restart"
+    
+    combined_lower = " ".join(second_ai_contents).lower()
+    assert "orion" in combined_lower, f"Orchestrator failed to recall project code name after restart. Response: {combined_lower}"
+    print(f"✓ Checkpoint restored successfully - code name 'Orion' recalled")
+    
+    # Ensure context metrics continued after restart
+    metrics_after = read_stream_after("qc:context:metrics", metrics_baseline, count=400)
+    post_process_events = [entry for entry in metrics_after if entry[1].get("event") == "post_process"]
+    assert post_process_events, "Context metrics did not resume after orchestrator restart"
+    print(f"✓ Context metrics resumed: {len(post_process_events)} post_process events")
+    
+    print("=" * 70)
+    print("✓ TEST PASSED: Checkpoint persistence validated")
+    print("=" * 70)
+
+
+@pytest.mark.e2e_advanced
+def test_workspace_volume_inheritance(tmp_path):
+    """Validate spawned agents inherit workspace volumes correctly.
+    
+    This test verifies that when an agent is spawned with workspace
+    configuration, the workspace volume is properly mounted in the
+    agent container at the expected mount path.
+    
+    Args:
+        tmp_path: Pytest fixture providing temporary directory
+    """
+    import json
+    import os
+    import shutil
+    import subprocess
+    import time
+    from pathlib import Path
+    
+    from quadracode_tools.tools.workspace import ensure_workspace, workspace_destroy
+    
+    if shutil.which("docker") is None:
+        pytest.skip("Docker CLI must be installed and available on PATH for workspace mount test")
+    
+    print("\n" + "=" * 70)
+    print("TEST: Workspace Volume Inheritance")
+    print("=" * 70)
+    
+    # Ensure agent image is available
+    agent_image = "quadracode-agent"
+    image_check = subprocess.run(["docker", "image", "inspect", agent_image], capture_output=True, text=True)
+    if image_check.returncode != 0:
+        print("→ Building agent image...")
+        build = subprocess.run(["docker", "compose", "build", "agent-runtime"], capture_output=True, text=True)
+        if build.returncode != 0:
+            pytest.fail(
+                f"Failed to build agent image (docker compose build agent-runtime).\nstdout: {build.stdout}\nstderr: {build.stderr}"
+            )
+        print("✓ Agent image built")
+    
+    # Create workspace
+    workspace_id = f"ws-test-{int(time.time())}"
+    print(f"→ Creating workspace: {workspace_id}")
+    success, descriptor, error = ensure_workspace(workspace_id, image="python:3.12-slim", network="bridge")
+    if not success or descriptor is None:
+        pytest.fail(f"Unable to provision workspace for test: {error}")
+    print(f"✓ Workspace created: {descriptor.volume} -> {descriptor.mount_path}")
+    
+    agent_container = None
+    try:
+        # Spawn agent with workspace configuration
+        env = os.environ.copy()
+        env.update(
+            {
+                "QUADRACODE_WORKSPACE_VOLUME": descriptor.volume,
+                "QUADRACODE_WORKSPACE_ID": workspace_id,
+                "QUADRACODE_WORKSPACE_MOUNT": descriptor.mount_path,
+            }
+        )
+        spawn_script = Path("scripts/agent-management/spawn-agent.sh")
+        print(f"→ Spawning agent with workspace volume...")
+        result = subprocess.run(
+            [str(spawn_script), "", agent_image, "bridge"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode != 0:
+            pytest.fail(f"Unable to spawn agent container: {result.stderr.strip() or result.stdout}")
+        
+        payload = json.loads(result.stdout)
+        assert payload.get("success"), f"Spawn script reported failure: {payload}"
+        agent_container = payload.get("container_name")
+        assert agent_container, "Spawn script did not return container name"
+        print(f"✓ Agent spawned: {agent_container}")
+        
+        # Verify workspace volume is mounted
+        print(f"→ Inspecting container mounts...")
+        inspect = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                agent_container,
+                "--format",
+                "{{json .Mounts}}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        mounts = json.loads(inspect.stdout)
+        has_workspace_mount = any(
+            mount.get("Destination") == descriptor.mount_path and mount.get("Name") == descriptor.volume
+            for mount in mounts
+        )
+        assert has_workspace_mount, (
+            f"Workspace volume {descriptor.volume} not mounted at {descriptor.mount_path} in {agent_container}. "
+            f"Mounts found: {mounts}"
+        )
+        print(f"✓ Workspace volume correctly mounted: {descriptor.volume} -> {descriptor.mount_path}")
+        
+    finally:
+        # Cleanup
+        if agent_container:
+            print(f"→ Cleaning up agent container: {agent_container}")
+            subprocess.run(["docker", "rm", "-f", agent_container], capture_output=True)
+        print(f"→ Cleaning up workspace: {workspace_id}")
+        workspace_destroy.invoke({"workspace_id": workspace_id, "delete_volume": True})
+    
+    print("=" * 70)
+    print("✓ TEST PASSED: Workspace volume inheritance validated")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

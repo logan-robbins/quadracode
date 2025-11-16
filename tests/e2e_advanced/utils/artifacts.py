@@ -232,7 +232,7 @@ def capture_context_metrics(output_path: Path, entries: list[tuple[str, dict[str
         entries: List of (entry_id, fields) tuples from qc:context:metrics stream
 
     Example:
-        >>> entries = read_stream("qc:context:metrics", count=1000)
+        >>> entries = read_stream(redis_client, "qc:context:metrics", count=1000)
         >>> capture_context_metrics(
         ...     output_path=Path("artifacts/test_123/context_metrics.json"),
         ...     entries=entries,
