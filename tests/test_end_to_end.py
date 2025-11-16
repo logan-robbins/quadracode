@@ -58,11 +58,99 @@ def run_compose(args: list[str], *, env: dict[str, str] | None = None, check: bo
 
 
 def redis_cli(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return run_compose(
-        ["exec", "-T", "redis", "redis-cli", *args],
-        check=check,
-        capture_output=True,
-    )
+    # Check if we're running inside a container
+    if os.environ.get("TEST_MODE") or os.path.exists("/.dockerenv"):
+        # Running inside container - use redis-cli directly connecting to host
+        host = os.environ.get("REDIS_HOST", "localhost")
+        port = os.environ.get("REDIS_PORT", "6379")
+        cmd = ["redis-cli", "-h", host, "-p", port, *args]
+        # Install redis-cli if not available (won't be in Python container)
+        # Instead, we'll use Python Redis client in wait_for_redis
+        import redis as redis_module
+        client = redis_module.Redis(host=host, port=int(port), decode_responses=True)
+        try:
+            # Simulate subprocess.CompletedProcess for compatibility
+            if args[0] == "PING":
+                result = client.ping()
+                stdout = "PONG" if result else ""
+            elif args[0] == "FLUSHALL":
+                client.flushall()
+                stdout = "OK"
+            elif args[0] == "XADD":
+                # Handle XADD command for sending messages
+                # XADD stream_key * field1 value1 field2 value2 ...
+                stream_key = args[1]
+                # Skip the "*" (auto ID) at args[2]
+                # Remaining args are field-value pairs
+                fields = {}
+                for i in range(3, len(args), 2):
+                    if i+1 < len(args):
+                        fields[args[i]] = args[i+1]
+                result = client.xadd(stream_key, fields)
+                stdout = result.decode() if isinstance(result, bytes) else str(result)
+            elif args[0] == "XREVRANGE":
+                # Handle XREVRANGE for reading streams
+                stream_key = args[1]
+                start = args[2]  # Usually "+"
+                end = args[3]    # Usually "-"
+                count = None
+                if "COUNT" in args:
+                    count_idx = args.index("COUNT")
+                    if count_idx + 1 < len(args):
+                        count = int(args[count_idx + 1])
+                entries = client.xrevrange(stream_key, start, end, count)
+                # Format as JSON if --json flag is present
+                if "--json" in args:
+                    stdout = json.dumps(entries) if entries else "[]"
+                else:
+                    stdout = str(entries)
+            elif args[0] == "XRANGE":
+                # Handle XRANGE for reading streams
+                stream_key = args[1]
+                start = args[2]  # Usually "-"
+                end = args[3]    # Usually "+"
+                count = None
+                if "COUNT" in args:
+                    count_idx = args.index("COUNT")
+                    if count_idx + 1 < len(args):
+                        count = int(args[count_idx + 1])
+                entries = client.xrange(stream_key, start, end, count)
+                # Format as JSON if --json flag is present
+                if "--json" in args:
+                    # Convert entries to JSON format expected by the test
+                    json_entries = []
+                    for entry_id, fields in entries:
+                        json_entries.append([entry_id, fields])
+                    stdout = json.dumps(json_entries) if json_entries else "[]"
+                else:
+                    stdout = str(entries)
+            else:
+                # For other commands, try to execute
+                result = client.execute_command(*args)
+                stdout = str(result) if result else ""
+            
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=stdout,
+                stderr=""
+            )
+        except Exception as e:
+            if check:
+                raise
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr=str(e)
+            )
+    else:
+        # Original logic for running on host
+        return run_compose(
+            ["exec", "-T", "redis", "redis-cli", *args],
+            check=check,
+            capture_output=True,
+        )
 
 
 def get_last_stream_id(stream: str) -> str:
@@ -166,13 +254,33 @@ def wait_for_container(service: str, *, timeout: int = 120) -> None:
 
 
 def wait_for_redis(timeout: int = 60) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        proc = redis_cli("PING", check=False)
-        if proc.returncode == 0 and proc.stdout.strip() == "PONG":
-            return
-        time.sleep(1)
-    raise TimeoutError("Redis did not respond to PING within timeout")
+    # Check if we're running inside a container
+    if os.environ.get("TEST_MODE") or os.path.exists("/.dockerenv"):
+        # Running inside container - connect directly to Redis
+        import redis as redis_module
+        host = os.environ.get("REDIS_HOST", "localhost")
+        port = int(os.environ.get("REDIS_PORT", "6379"))
+        
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                client = redis_module.Redis(host=host, port=port, decode_responses=True)
+                if client.ping():
+                    client.close()
+                    return
+            except Exception:
+                pass
+            time.sleep(1)
+        raise TimeoutError("Redis did not respond to PING within timeout")
+    else:
+        # Original logic for running on host
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            proc = redis_cli("PING", check=False)
+            if proc.returncode == 0 and proc.stdout.strip() == "PONG":
+                return
+            time.sleep(1)
+        raise TimeoutError("Redis did not respond to PING within timeout")
 
 
 def _fetch_registry_json(path: str) -> dict:
@@ -308,14 +416,26 @@ def wait_for_human_response(baseline_id: str, *, timeout: int = 120) -> dict[str
 
 
 def require_prerequisites() -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker CLI must be installed and available on PATH for end-to-end tests")
-    missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
-    if missing:
-        pytest.skip(
-            "Missing required environment variables for real LLM calls: "
-            + ", ".join(missing)
-        )
+    # Check if we're running inside a container
+    # When running in the test container, we don't need docker CLI
+    if os.environ.get("TEST_MODE") or os.path.exists("/.dockerenv"):
+        # Running inside container - only check for API keys
+        missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+        if missing:
+            pytest.skip(
+                "Missing required environment variables for real LLM calls: "
+                + ", ".join(missing)
+            )
+    else:
+        # Running on host - check for docker CLI
+        if shutil.which("docker") is None:
+            pytest.skip("Docker CLI must be installed and available on PATH for end-to-end tests")
+        missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+        if missing:
+            pytest.skip(
+                "Missing required environment variables for real LLM calls: "
+                + ", ".join(missing)
+            )
 
 
 # NOTE: The actual E2E tests have been migrated to tests/e2e_advanced/.

@@ -96,8 +96,8 @@ markers =
 
 ### Prerequisites
 ```bash
-# Ensure API key is set
-export ANTHROPIC_API_KEY=your_key_here
+# Ensure API key is set in .env file (no export needed):
+# ANTHROPIC_API_KEY=sk-ant-...
 
 # Ensure docker-compose stack is running and healthy
 docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime

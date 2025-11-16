@@ -61,6 +61,26 @@ def docker_stack(check_prerequisites):
     - orchestrator-runtime
     - agent-runtime
     """
+    # Check if we're running inside a container
+    in_container = os.environ.get("TEST_MODE") or os.path.exists("/.dockerenv")
+    
+    if in_container:
+        # Running inside test container - services are already running on host
+        # Just verify connectivity and flush Redis
+        try:
+            # Wait for Redis to be available
+            wait_for_redis(timeout=30)
+            # Flush Redis to start clean for this test
+            redis_cli("FLUSHALL")
+        except Exception as e:
+            pytest.fail(f"Failed to connect to Redis from test container: {e}")
+        
+        yield
+        
+        # No teardown needed when running in container
+        return
+    
+    # Original logic for running on host
     reuse_stack = os.environ.get("E2E_REUSE_STACK", "").strip().lower() in {"1", "true", "yes"}
     should_teardown = True
     
@@ -121,6 +141,14 @@ def docker_stack(check_prerequisites):
         run_compose(["down", "-v"], check=False)
 
 
+@pytest.fixture(scope="function")
+def docker_services(docker_stack):
+    """Alias for docker_stack fixture to match test expectations."""
+    # This fixture is just a pass-through to docker_stack
+    # The tests expect docker_services but our implementation uses docker_stack
+    return docker_stack
+
+
 @pytest.fixture(scope="session")
 def redis_client():
     """Provide a direct Redis client for advanced tests."""
@@ -150,6 +178,26 @@ def docker_stack_with_humanclone(check_prerequisites):
     If E2E_REUSE_STACK=1 is set, this will reuse existing containers
     (including human-clone) instead of rebuilding.
     """
+    # Check if we're running inside a container
+    in_container = os.environ.get("TEST_MODE") or os.path.exists("/.dockerenv")
+    
+    if in_container:
+        # Running inside test container - services are already running on host
+        # Just verify connectivity and flush Redis
+        try:
+            # Wait for Redis to be available
+            wait_for_redis(timeout=30)
+            # Flush Redis to start clean for this test
+            redis_cli("FLUSHALL")
+        except Exception as e:
+            pytest.fail(f"Failed to connect to Redis from test container: {e}")
+        
+        yield
+        
+        # No teardown needed when running in container
+        return
+    
+    # Original logic for running on host
     reuse_stack = os.environ.get("E2E_REUSE_STACK", "").strip().lower() in {"1", "true", "yes"}
     should_teardown = True
     

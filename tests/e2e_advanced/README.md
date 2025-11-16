@@ -43,8 +43,8 @@ tests/e2e_advanced/
 ## Prerequisites
 
 1. **Docker**: All tests run services in Docker Compose
-2. **Environment Variables**:
-   - `ANTHROPIC_API_KEY`: Required for real LLM calls
+2. **Environment Variables** (set in `.env` file - NO export needed):
+   - `ANTHROPIC_API_KEY`: Required for real LLM calls (set in `.env` file in repo root)
    - `E2E_ADVANCED_TIMEOUT_MULTIPLIER`: Optional timeout multiplier (default: 1.0)
 3. **Python Dependencies**:
    ```bash
@@ -83,9 +83,14 @@ uv run pytest tests/e2e_advanced/test_observability.py -v
 
 ### Run with Increased Timeouts
 
-For CI or slow environments:
+For CI or slow environments (add to `.env` file or set inline):
 
 ```bash
+# Option 1: Add to .env file
+echo "E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0" >> .env
+uv run pytest tests/e2e_advanced -v
+
+# Option 2: Set inline (temporary override)
 E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced -v
 ```
 
@@ -94,11 +99,12 @@ E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0 uv run pytest tests/e2e_advanced -v
 If you encounter API rate limits (e.g., Anthropic 429 errors), add turn cooldowns:
 
 ```bash
-# Add 1 second cooldown between turns (default is 0.5s)
-E2E_TURN_COOLDOWN_SECONDS=1.0 uv run pytest tests/e2e_advanced -v
+# Option 1: Add to .env file (recommended)
+echo "E2E_TURN_COOLDOWN_SECONDS=1.0" >> .env  # 1 second cooldown
+uv run pytest tests/e2e_advanced -v
 
-# Add 2 second cooldown for very strict rate limits
-E2E_TURN_COOLDOWN_SECONDS=2.0 uv run pytest tests/e2e_advanced -v
+# Option 2: Inline override for testing
+E2E_TURN_COOLDOWN_SECONDS=2.0 uv run pytest tests/e2e_advanced -v  # 2 second cooldown
 
 # Disable all rate limiting delays (faster tests, but may hit limits)
 E2E_RATE_LIMIT_DISABLE=1 uv run pytest tests/e2e_advanced -v
@@ -239,10 +245,15 @@ docker compose exec redis redis-cli XRANGE qc:context:metrics - + COUNT 10
 To run in CI pipeline:
 
 ```yaml
-- name: Run Advanced E2E Tests
+- name: Setup Environment
   run: |
-    export ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-    export E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0
+    # Create .env file with secrets
+    echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" > .env
+    echo "E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0" >> .env
+
+- name: Run Advanced E2E Tests  
+  run: |
+    # Tests automatically use .env file
     uv run pytest tests/e2e_advanced -v --junitxml=test-results.xml
   timeout-minutes: 120
 

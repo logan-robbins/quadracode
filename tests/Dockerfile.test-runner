@@ -1,5 +1,9 @@
-# Test runner container for E2E tests
+# Test runner container - runs tests with clear output for AI monitoring
 FROM python:3.12-slim
+
+# Set environment to reduce output noise
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -8,31 +12,37 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
 # Create app directory
 WORKDIR /app
 
-# Copy entire project (for standalone builds)
-# In docker-compose, this will be overridden by volume mount
+# Copy the entire project (tests need access to source code)
 COPY . .
 
-# Create virtual environment
-RUN uv venv /app/.venv
+# Install Python dependencies directly
+# Using pip since we're in a container and don't need uv's benefits here
+RUN pip install --no-cache-dir \
+    pytest==8.4.2 \
+    redis==7.0.1 \
+    requests==2.32.5 \
+    python-dotenv==1.2.1 \
+    anthropic==0.72.0 \
+    langchain==0.3.27 \
+    langchain-anthropic==0.3.22 \
+    langchain-core==0.3.79 \
+    langgraph==0.6.11 \
+    langgraph-checkpoint==2.1.2 \
+    pydantic==2.12.3 \
+    structlog==25.5.0 \
+    httpx==0.28.1 \
+    asyncio \
+    typing-extensions \
+    jsonschema
 
-# Install ALL dependencies (including dev/test dependencies)
-RUN uv sync
+# Make test runner executable
+RUN chmod +x /app/tests/run_tests_in_container.py
 
-# Make test runner scripts executable
-RUN chmod +x /app/tests/e2e_advanced/run_individual_tests.sh || true
-RUN chmod +x /app/tests/e2e_advanced/run_tests.py || true
+# Set Python path to include source directories
+ENV PYTHONPATH=/app:/app/quadracode-runtime/src:/app/quadracode-contracts/src:/app/quadracode-tools/src
 
-# Set Python path and activate venv in PATH
-ENV PYTHONPATH=/app
-ENV PATH="/app/.venv/bin:$PATH"
-ENV VIRTUAL_ENV=/app/.venv
-
-# Default command (can be overridden)
-CMD ["sleep", "infinity"]
+# Default to running the test script
+ENTRYPOINT ["python", "/app/tests/run_tests_in_container.py"]
