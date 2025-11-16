@@ -10,6 +10,50 @@ All Quadracode tests are **full end-to-end checks** that exercise the production
 - **Create and tear down real workloads.** Each test sends genuine chat messages, triggers tool executions, provisions workspaces/containers, and verifies cleanup.
 - **Fail fast on missing prerequisites.** Lack of Docker, Compose, or API keys is a test failure, not a skip.
 
+## QUICK START FOR AI AGENTS
+
+### EASIEST METHOD: Interactive Test Runner
+
+```bash
+# Run this single script - it handles EVERYTHING
+./run_e2e_tests_for_ai.sh
+
+# The script will:
+# - Check Docker is running
+# - Verify API keys
+# - Start all services
+# - Wait for health checks
+# - Give you a menu to choose tests
+# - Run tests and report results
+```
+
+### MANUAL METHOD: Direct Commands
+
+To run the full E2E integration tests with live LLM calls:
+
+```bash
+# Step 1: Ensure API keys are configured
+# Check that .env and .env.docker have ANTHROPIC_API_KEY set
+cat .env | grep ANTHROPIC_API_KEY  # Should show your key
+cat .env.docker | grep ANTHROPIC_API_KEY  # Should show your key
+
+# Step 2: Start the complete Docker stack
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner
+
+# Step 3: Verify all services are healthy (should show 6 running services)
+docker compose ps --services --filter "status=running" | wc -l  # Should output: 6
+
+# Step 4: Run individual test modules (recommended for step-by-step debugging)
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh foundation_smoke"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh prp_autonomous"
+```
+
+**Expected behavior:**
+- Tests will make real API calls to Anthropic Claude
+- Tests will spawn/delete Docker containers dynamically
+- Full suite takes 60-90 minutes
+- Individual modules take 5-20 minutes each
+
 ## Running the Suite
 
 You can run tests in two ways: from the host machine or inside a Docker container.
@@ -53,30 +97,103 @@ This approach ensures tests use the same DNS names and network as the services.
 
 The test runner container automatically detects it's running inside Docker and uses internal service names (redis, agent-registry, redis-mcp) instead of localhost.
 
-## Advanced E2E Tests
+## Running Tests Individually for Debugging
 
-The `tests/e2e_advanced/` directory contains long-running, comprehensive end-to-end tests designed to validate:
+For debugging and development, you can run test modules one at a time using the test runner:
 
-- **False-Stop Detection**: HumanClone's ability to catch premature task completion
-- **Perpetual Refinement Protocol (PRP)**: Recovery mechanisms and refinement cycles
-- **Context Engineering**: Progressive loading, curation, and quality management
-- **Autonomous Mode**: Checkpoints, escalations, and final review processes
-- **Fleet Management**: Agent spawning, deletion, and hotpath protection
-- **Workspace Integrity**: Isolation, snapshots, and drift detection
-- **Observability**: Time-travel logging and metrics streams
+### Using the Test Runner Script
 
-### Test Modules
+**From host machine:**
+```bash
+cd tests/e2e_advanced
 
-| Module | Tests | Duration | Description |
-|--------|-------|----------|-------------|
-| `test_foundation_long_run.py` | 2 | 5-10 min | Sustained message flows and multi-agent routing |
-| `test_context_engine_stress.py` | 2 | 10-15 min | Progressive loading and context curation |
-| `test_prp_autonomous.py` | 2 | 15-20 min | HumanClone rejection cycles and autonomous execution |
-| `test_fleet_management.py` | 2 | 5-10 min | Dynamic agent lifecycle and hotpath protection |
-| `test_workspace_integrity.py` | 2 | 10-15 min | Multi-workspace isolation and integrity snapshots |
-| `test_observability.py` | 2 | 10-15 min | Time-travel logs and metrics stream coverage |
+# List all available test modules
+./run_individual_tests.sh --list
 
-**Total suite runtime:** ~60-90 minutes
+# Run a specific module
+./run_individual_tests.sh foundation_smoke
+./run_individual_tests.sh prp_autonomous
+
+# Run with verbose output for debugging
+./run_individual_tests.sh -v context_engine_stress
+
+# Run with debug pauses between test functions
+./run_individual_tests.sh -d fleet_management
+
+# Run all modules in sequence, stopping at first failure
+./run_individual_tests.sh all --stop-on-fail
+```
+
+**Inside Docker container (Recommended for consistent environment):**
+
+The test-runner container includes:
+- Full project with all dependencies installed via `uv sync`
+- Environment variables from `.env` and `.env.docker` (including API keys)
+- Internal Docker DNS names (redis, agent-registry, redis-mcp)
+- Test runner scripts at `/app/tests/e2e_advanced/`
+
+```bash
+# Build and start test runner container
+docker compose up -d --build test-runner
+
+# Verify the container setup (optional)
+./tests/verify_test_runner.sh
+
+# Run individual tests inside container
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh foundation_smoke"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh -v prp_autonomous"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh all --stop-on-fail"
+
+# Or enter the container interactively
+docker compose exec -it test-runner bash
+cd /app/tests/e2e_advanced
+./run_individual_tests.sh --list
+./run_individual_tests.sh foundation_smoke
+```
+
+### Using the Python Test Runner
+
+```bash
+cd tests/e2e_advanced
+
+# List available modules
+uv run python run_tests.py --list
+
+# Run specific module
+uv run python run_tests.py foundation_smoke
+
+# Run with verbose output
+uv run python run_tests.py foundation_smoke --verbose
+
+# Run all modules
+uv run python run_tests.py all
+```
+
+The test runner creates detailed logs in `tests/e2e_advanced/logs/` for each run, including:
+- Full output capture
+- JUnit XML reports
+- HTML reports
+- Execution summaries
+
+## Advanced E2E Test Modules
+
+### CRITICAL FOR AI AGENTS: Test Module Details
+
+Each test module performs REAL operations with the live Docker stack:
+
+| Module | What It Actually Does | Duration | Real Operations |
+|--------|----------------------|----------|-----------------|
+| `test_foundation_smoke.py` | Validates test infrastructure WITHOUT LLM calls | 2-5 min | - Checks Redis connectivity<br>- Verifies agent registry<br>- Tests logging framework<br>- No API costs |
+| `test_foundation_long_run.py` | Sustained orchestrator-agent communication | 5-10 min | - Sends 50+ messages via Redis<br>- Real LLM calls to Claude<br>- Multi-agent routing tests |
+| `test_context_engine_stress.py` | Tests context management under load | 10-15 min | - Progressive context loading<br>- Memory curation with LLM<br>- Tests token limits |
+| `test_prp_autonomous.py` | HumanClone rejection & refinement cycles | 15-20 min | - Multiple LLM rejection cycles<br>- Tests autonomous recovery<br>- Most API-intensive test |
+| `test_fleet_management.py` | Dynamic agent spawning/deletion | 5-10 min | - Creates/destroys Docker containers<br>- Tests orchestrator scaling<br>- Registry health checks |
+| `test_workspace_integrity.py` | Multi-workspace isolation testing | 10-15 min | - Creates multiple workspaces<br>- Tests snapshot/restore<br>- File system operations |
+| `test_observability.py` | Logging and metrics validation | 10-15 min | - Time-travel log capture<br>- Metrics stream validation<br>- Event correlation |
+
+**Total suite runtime:** ~60-90 minutes  
+**Expected API calls:** 500-1000 to Anthropic Claude  
+**Docker operations:** Spawns/deletes 10+ containers dynamically
 
 ### Running Advanced E2E Tests
 
@@ -143,3 +260,71 @@ For detailed documentation, see `tests/e2e_advanced/README.md`.
   5. Use the advanced E2E utilities for timeouts, polling, and artifact capture.
 
 Any change to testing must keep these guarantees intact. If a faster signal is needed, add to `test_foundation_smoke.py`, but do **not** relax the full-stack coverage in the comprehensive suite.
+
+## Troubleshooting Guide for AI Agents
+
+### Quick Diagnostic Commands
+
+```bash
+# Check if Docker is running
+docker version > /dev/null 2>&1 && echo "✓ Docker is running" || echo "✗ Docker not running"
+
+# Check if services are up (should show 6)
+docker compose ps --services --filter "status=running" | wc -l
+
+# Check if API key is set
+grep -q "ANTHROPIC_API_KEY=sk-" .env && echo "✓ API key in .env" || echo "✗ Missing API key in .env"
+grep -q "ANTHROPIC_API_KEY=sk-" .env.docker && echo "✓ API key in .env.docker" || echo "✗ Missing API key in .env.docker"
+
+# Check Redis connectivity
+docker compose exec -T redis redis-cli PING  # Should output: PONG
+
+# Check agent registry
+curl -s http://localhost:8090/health | grep -q "ok" && echo "✓ Registry healthy" || echo "✗ Registry not responding"
+```
+
+### Common Test Failures & Solutions
+
+| Error Message | Likely Cause | Solution |
+|--------------|-------------|----------|
+| `ANTHROPIC_API_KEY not set` | Missing API key | Add valid key to `.env` and `.env.docker` |
+| `Connection refused` | Services not running | Run `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner` |
+| `TimeoutError` in tests | Services not healthy | Wait 30s after starting stack, check `docker compose ps` |
+| `redis.exceptions.ConnectionError` | Redis not accessible | Ensure running inside test-runner container or correct host configured |
+| `404 from agent-registry` | Registry not ready | Wait for health check: `docker compose ps agent-registry` should show "healthy" |
+| `Container not found` | Docker socket issue | Ensure `/var/run/docker.sock` is mounted (check docker-compose.yml) |
+
+### Test Execution Checklist
+
+- [ ] Docker Desktop/Engine is running
+- [ ] `.env` file exists with valid `ANTHROPIC_API_KEY`
+- [ ] `.env.docker` file exists with valid `ANTHROPIC_API_KEY`
+- [ ] All 6 services are running: `docker compose ps --services --filter "status=running" | wc -l` shows `6`
+- [ ] Redis responds: `docker compose exec -T redis redis-cli PING` returns `PONG`
+- [ ] Agent registry healthy: `curl http://localhost:8090/health` returns `{"status":"ok"}`
+- [ ] Test runner container is running: `docker compose ps test-runner` shows "running"
+
+### Emergency Reset
+
+If tests are failing unexpectedly:
+
+```bash
+# Complete reset (DESTRUCTIVE - removes all data)
+docker compose down -v
+docker system prune -af
+docker volume prune -f
+
+# Rebuild and restart everything
+docker compose build --no-cache
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner
+
+# Wait for services
+sleep 30
+
+# Verify health
+docker compose ps
+docker compose exec -T redis redis-cli PING
+
+# Retry tests
+docker compose exec test-runner bash -c "cd /app && uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v"
+```

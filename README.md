@@ -370,16 +370,42 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 
 ### Testing
 
-> **Always-on Docker stack:** The Quadracode application only runs against the
-> docker-compose stack. Before executing any test (smoke, validation, or E2E),
-> start the stack if it is not already running and confirm every service is
-> healthy:
-> ```bash
-> docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
-> docker compose ps --services --filter "status=running"
-> ```
+> **IMPORTANT FOR AI AGENTS:** All tests require a live Docker stack with real services and API keys. These are integration tests with actual LLM calls, not unit tests.
 
-Quadracode has two levels of end-to-end testing that can be run either from the host or inside a Docker container for proper network isolation:
+#### Complete Test Execution Steps for AI Agents
+
+```bash
+# STEP 1: Verify prerequisites
+# Ensure Docker is running
+docker version > /dev/null 2>&1 || echo "ERROR: Docker not running"
+
+# STEP 2: Configure API keys
+# Copy sample files if they don't exist
+[ ! -f .env ] && cp .env.sample .env
+[ ! -f .env.docker ] && cp .env.docker.sample .env.docker
+
+# Add your ANTHROPIC_API_KEY to both files
+# The key MUST be set or tests will fail
+grep -q "ANTHROPIC_API_KEY=sk-" .env || echo "ERROR: Set ANTHROPIC_API_KEY in .env"
+grep -q "ANTHROPIC_API_KEY=sk-" .env.docker || echo "ERROR: Set ANTHROPIC_API_KEY in .env.docker"
+
+# STEP 3: Start the complete Docker stack
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner
+
+# STEP 4: Wait for services to be healthy (critical!)
+sleep 10  # Initial wait for services to start
+docker compose ps --services --filter "status=running" | wc -l  # Should show 6
+
+# STEP 5: Run tests INDIVIDUALLY for debugging (5-20 minutes each)
+# List available test modules
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh --list"
+
+# Run specific test module
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh foundation_smoke"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh prp_autonomous"
+```
+
+Quadracode has two levels of end-to-end testing:
 
 #### Smoke Tests (<5 minutes)
 
@@ -426,6 +452,23 @@ docker compose exec test-runner uv run pytest tests/e2e_advanced -m e2e_advanced
 
 # Run specific module in container
 docker compose exec test-runner uv run pytest tests/e2e_advanced/test_prp_autonomous.py -v
+```
+
+**Running Tests Individually for Debugging:**
+```bash
+cd tests/e2e_advanced
+
+# List all test modules with descriptions
+./run_individual_tests.sh --list
+
+# Run specific module with output capture
+./run_individual_tests.sh foundation_smoke
+
+# Run with verbose debugging output
+./run_individual_tests.sh -v prp_autonomous
+
+# Run all modules, stopping at first failure
+./run_individual_tests.sh all --stop-on-fail
 ```
 
 **Prerequisites for Advanced Tests:**
@@ -584,7 +627,9 @@ Quadracode is designed to operate as the control plane for "always-on" AI automa
 
 We welcome contributions! Whether you're building new agents, adding tool integrations, improving the core runtime, or extending platform support, please open an issue or submit a pull request.
 
-## AI Coding Agents: Development Notes
+## AI Coding Agents: Development & Testing Guide
+
+### Development Setup
 
 Automated coding assistants working on this codebase should:
 
@@ -598,12 +643,72 @@ Automated coding assistants working on this codebase should:
    - Registry API: `quadracode-agent-registry/src` (FastAPI on port 8090)
    - Contracts: `quadracode-contracts/src`
    - Tools: `quadracode-tools/src` (includes agent_management tool)
-   - Tests: `tests/e2e_advanced/` (comprehensive E2E suite + smoke tests)
-4. **Run tests with uv**: `uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v` (smoke) or `uv run pytest tests/e2e_advanced -m e2e_advanced` (comprehensive)
-5. **Observe Redis traffic**: `scripts/tail_streams.sh` or `redis-cli monitor`
-6. **Agent management**: Scripts in `scripts/agent-management/` support both Docker and Kubernetes
+   - Tests: `tests/e2e_advanced/` (comprehensive E2E suite with real LLM calls)
 
-This workflow ensures repeatable builds and full repository context for AI-assisted development.
+### Running Full E2E Integration Tests
+
+**CRITICAL**: These are real integration tests that make actual LLM API calls and spawn Docker containers. They are NOT unit tests.
+
+#### SIMPLEST METHOD: Use the AI Test Runner Script
+
+```bash
+# Run the interactive test runner (handles everything for you)
+./run_e2e_tests_for_ai.sh
+
+# This script will:
+# 1. Check Docker is running
+# 2. Verify API keys are set
+# 3. Start all required services
+# 4. Wait for services to be healthy
+# 5. Let you choose: smoke test, single module, or full suite
+# 6. Run tests and report results
+```
+
+#### MANUAL METHOD: Step-by-step execution
+
+```bash
+# STEP-BY-STEP TEST EXECUTION:
+
+# 1. Prerequisites check
+docker version  # Must have Docker running
+ls -la .env .env.docker  # Must have both env files with ANTHROPIC_API_KEY set
+
+# 2. Start all services (required for tests)
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime test-runner
+
+# 3. Verify services are healthy (MUST show 6)
+docker compose ps --services --filter "status=running" | wc -l
+
+# 4. Run individual test modules (5-20 minutes each)
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh --list"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh foundation_smoke"
+docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_individual_tests.sh prp_autonomous -v"
+```
+
+### Test Verification Commands
+
+```bash
+# Verify test runner container is properly configured
+./tests/verify_test_runner.sh
+
+# Check logs for any test run
+docker compose exec test-runner ls -la /app/tests/e2e_advanced/logs/
+
+# Monitor Redis traffic during tests
+docker compose exec -T redis redis-cli MONITOR
+
+# Check container health
+docker compose ps
+```
+
+### Common Issues & Solutions
+
+- **"ANTHROPIC_API_KEY not set"**: Add key to both `.env` and `.env.docker`
+- **"Services not healthy"**: Run `docker compose down -v` then restart stack
+- **"Connection refused"**: Ensure all 6 services are running with `docker compose ps`
+- **Test timeouts**: Set `E2E_ADVANCED_TIMEOUT_MULTIPLIER=2.0` for slower environments
+
+This workflow ensures repeatable builds and full E2E test coverage with real LLM interactions.
 
 ## License
 

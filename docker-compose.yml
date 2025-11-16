@@ -260,6 +260,7 @@ services:
       - shared-data:/shared
       - mcp-remote-cache:/var/lib/mcp-remote
       - ./tests/logs:/app/tests/logs
+      - ./tests/e2e_advanced/logs:/app/tests/e2e_advanced/logs
       - ./tests/e2e_advanced/metrics:/app/tests/e2e_advanced/metrics
       - ./tests/e2e_advanced/reports:/app/tests/e2e_advanced/reports
     working_dir: /app

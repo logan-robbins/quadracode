@@ -15,24 +15,24 @@ ENV PATH="/root/.cargo/bin:$PATH"
 # Create app directory
 WORKDIR /app
 
-# Copy Python dependencies files
-COPY pyproject.toml uv.lock ./
-COPY quadracode-runtime/pyproject.toml ./quadracode-runtime/
-COPY quadracode-orchestrator/pyproject.toml ./quadracode-orchestrator/
-COPY quadracode-agent/pyproject.toml ./quadracode-agent/
-COPY quadracode-agent-registry/pyproject.toml ./quadracode-agent-registry/
-COPY quadracode-contracts/pyproject.toml ./quadracode-contracts/
-COPY quadracode-tools/pyproject.toml ./quadracode-tools/
-COPY quadracode-ui/pyproject.toml ./quadracode-ui/
-
-# Install dependencies
-RUN uv sync --no-dev
-
-# Copy source code (will be mounted as volume in compose, but useful for standalone builds)
+# Copy entire project (for standalone builds)
+# In docker-compose, this will be overridden by volume mount
 COPY . .
 
-# Set Python path
+# Create virtual environment
+RUN uv venv /app/.venv
+
+# Install ALL dependencies (including dev/test dependencies)
+RUN uv sync
+
+# Make test runner scripts executable
+RUN chmod +x /app/tests/e2e_advanced/run_individual_tests.sh || true
+RUN chmod +x /app/tests/e2e_advanced/run_tests.py || true
+
+# Set Python path and activate venv in PATH
 ENV PYTHONPATH=/app
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV=/app/.venv
 
 # Default command (can be overridden)
 CMD ["sleep", "infinity"]
