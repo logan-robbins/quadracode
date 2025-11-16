@@ -286,6 +286,19 @@ def metrics_collector(request):
 
 
 @pytest.fixture(scope="function")
+def test_config():
+    """Provide test configuration dict.
+    
+    This fixture exists for backwards compatibility with test function signatures.
+    It's currently unused but removing it would require updating all test signatures.
+    
+    Returns:
+        Empty dict for configuration
+    """
+    return {}
+
+
+@pytest.fixture(scope="function")
 def stream_baselines():
     """Capture baseline stream IDs for comparison.
 

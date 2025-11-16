@@ -127,8 +127,6 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
             tools_condition,
             {"tools": "tools", END: END},
         )
-        workflow.add_edge("context_post", END)
-        workflow.add_edge("context_post", "tools")
         workflow.add_edge("tools", "context_tool")
         workflow.add_edge("context_tool", "driver")
     else:

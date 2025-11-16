@@ -1,0 +1,55 @@
+{
+  "stream": "qc:context:metrics",
+  "timestamp": "2025-11-16T08:47:49Z",
+  "entry_count": 6,
+  "entries": [
+    {
+      "id": "1763282779687-0",
+      "fields": {
+        "event": "pre_process",
+        "timestamp": "2025-11-16T08:46:19.686284+00:00",
+        "payload": "{\"quality_score\": 0.7401624625162038, \"quality_components\": {\"relevance\": 1.0, \"coherence\": 0.9544479103240741, \"completeness\": 0.0, \"freshness\": 0.9930989649140212, \"diversity\": 1.0, \"efficiency\": 0.003080357142857143}, \"context_window_used\": 276, \"context_window_max\": 128000, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282779690-0",
+      "fields": {
+        "event": "governor_plan",
+        "timestamp": "2025-11-16T08:46:19.688182+00:00",
+        "payload": "{\"action_counts\": {\"retain\": 7}, \"ordered_segments\": [\"context-code-overview\", \"context-test-suite\", \"context-file-structure\", \"context-coverage-reports\", \"context-architecture-docs\", \"tool-3\", \"context-design-patterns\"], \"focus\": \"completeness\", \"context_window_used\": 276}"
+      }
+    },
+    {
+      "id": "1763282779690-1",
+      "fields": {
+        "event": "govern_context",
+        "timestamp": "2025-11-16T08:46:19.690592+00:00",
+        "payload": "{\"plan_items\": 7, \"deliberative_steps\": 1, \"planning_success_probability\": 0.5, \"planning_uncertainty\": 0.23, \"memory_guidance_present\": false, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0, \"context_window_used\": 276}"
+      }
+    },
+    {
+      "id": "1763282779690-2",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:46:19.690674+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"execute\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282782749-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:46:22.745369+00:00",
+        "payload": "{\"quality_score\": 0.7401624625162038, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 276, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282782750-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:46:22.750178+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    }
+  ]
+}

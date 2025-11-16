@@ -1,0 +1,663 @@
+{
+  "stream": "qc:context:metrics",
+  "timestamp": "2025-11-16T08:40:54Z",
+  "entry_count": 82,
+  "entries": [
+    {
+      "id": "1763282364399-0",
+      "fields": {
+        "event": "pre_process",
+        "timestamp": "2025-11-16T08:39:24.399166+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"quality_components\": {\"relevance\": 1.0, \"coherence\": 0.8999261262673611, \"completeness\": 0.0, \"freshness\": 0.9971226239583334, \"diversity\": 1.0, \"efficiency\": 0.00140625}, \"context_window_used\": 126, \"context_window_max\": 128000, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282364402-0",
+      "fields": {
+        "event": "governor_plan",
+        "timestamp": "2025-11-16T08:39:24.401496+00:00",
+        "payload": "{\"action_counts\": {\"retain\": 3}, \"ordered_segments\": [\"context-code-overview\", \"context-file-structure\", \"tool-3\"], \"focus\": \"completeness\", \"context_window_used\": 126}"
+      }
+    },
+    {
+      "id": "1763282364402-1",
+      "fields": {
+        "event": "govern_context",
+        "timestamp": "2025-11-16T08:39:24.402303+00:00",
+        "payload": "{\"plan_items\": 3, \"deliberative_steps\": 1, \"planning_success_probability\": 0.5, \"planning_uncertainty\": 0.23, \"memory_guidance_present\": false, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0, \"context_window_used\": 126}"
+      }
+    },
+    {
+      "id": "1763282364402-2",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:24.402383+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"execute\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282368338-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:28.335349+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282368338-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:28.338312+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282370186-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:30.183007+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282370186-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:30.186808+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282372342-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:32.340154+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282372342-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:32.342478+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282374280-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:34.278343+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282374280-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:34.280568+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282376429-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:36.427614+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282376429-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:36.429232+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282378593-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:38.589824+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282378593-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:38.593614+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282380766-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:40.763218+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282380766-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:40.766790+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282382950-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:42.948463+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282382950-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:42.950709+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282384938-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:44.933709+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282384939-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:44.938934+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282387491-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:47.488929+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282387491-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:47.491669+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282389955-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:49.952026+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282389956-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:49.956120+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282391997-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:51.996762+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282391997-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:51.997855+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282393976-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:53.972826+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282393976-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:53.976694+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282395993-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:55.990193+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282395994-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:55.994126+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282398254-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:39:58.250462+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282398254-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:39:58.254613+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282400400-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:00.396211+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282400401-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:00.401102+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282402746-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:02.744517+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282402747-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:02.747067+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282405517-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:05.513992+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282405518-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:05.518064+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282407664-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:07.660915+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282407664-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:07.664585+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282410221-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:10.220525+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282410222-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:10.222046+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282412484-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:12.482808+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282412485-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:12.485087+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282414527-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:14.523870+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282414528-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:14.528301+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282416718-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:16.714925+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282416719-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:16.719118+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282418797-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:18.795515+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282418797-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:18.797889+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282420706-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:20.702754+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282420707-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:20.707153+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282422709-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:22.707018+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282422709-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:22.709446+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282425362-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:25.358851+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282425362-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:25.362305+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282427634-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:27.632093+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282427637-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:27.637175+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282429687-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:29.683698+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282429688-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:29.688036+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282433298-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:33.294939+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282433299-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:33.299516+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282435517-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:35.514285+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282435517-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:35.517546+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282437565-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:37.562577+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282437565-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:37.565886+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282439843-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:39.841917+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282439844-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:39.844075+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282441970-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:41.966075+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282441971-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:41.971154+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282444103-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:44.102014+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282444104-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:44.104014+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282446313-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:46.307083+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282446314-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:46.314307+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282448527-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:48.523925+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282448527-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:48.527751+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282450577-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:50.573496+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282450578-0",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:50.578032+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    },
+    {
+      "id": "1763282452416-0",
+      "fields": {
+        "event": "post_process",
+        "timestamp": "2025-11-16T08:40:52.413601+00:00",
+        "payload": "{\"quality_score\": 0.7296942438472224, \"focus_metric\": \"completeness\", \"issues\": [\"completeness below threshold (0.00)\", \"efficiency below threshold (0.00)\"], \"recommendations\": [\"load missing context types\", \"refresh context hierarchy\", \"load context types: archived_memory, background_knowledge, conversation_history, current_goal, error_context, recent_decisions, system_prompt, tool_outputs\", \"compress verbose segments\", \"externalize archival content\"], \"context_window_used\": 126, \"exhaustion_mode\": \"none\", \"exhaustion_probability\": 0.0}"
+      }
+    },
+    {
+      "id": "1763282452416-1",
+      "fields": {
+        "event": "prp_invalid_transition",
+        "timestamp": "2025-11-16T08:40:52.416439+00:00",
+        "payload": "{\"from_state\": \"propose\", \"to_state\": \"propose\", \"exhaustion_mode\": \"none\", \"human_clone_triggered\": false, \"reason\": \"transition_not_defined\", \"description\": \"\", \"applied\": false}"
+      }
+    }
+  ]
+}
