@@ -636,22 +636,23 @@ class ContextEngine:
         snapshot = self._plan_segments_snapshot(state)
         summary = self._plan_context_summary(state, snapshot)
 
-        system_prompt = (
-            "You are the context governor for a long-running AI agent. "
-            "Your job is to keep the context window focused, concise, and free of conflicts."
-        )
-        instructions = (
-            "Review the provided JSON summary. Produce a strict JSON object with keys "
-            "'actions' and 'prompt_outline'. Each action must include 'segment_id' and 'decision'"
-            " (retain, compress, summarize, isolate, externalize, discard). Optionally include "
-            "'priority' or 'focus'. The prompt_outline should contain optional 'system', 'focus',"
-            " and 'ordered_segments'. Do not include any additional prose."
-        )
-
+        # Use configurable prompts
+        prompts = self.config.prompt_templates
+        system_prompt = prompts.governor_system_prompt
+        instructions = prompts.governor_instructions
+        
         payload = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+        
+        # Format the input using the template
+        formatted_input = prompts.get_prompt(
+            "governor_input_format",
+            instructions=instructions,
+            payload=payload
+        )
+        
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"{instructions}\n\nINPUT:\n```json\n{payload}\n```"),
+            HumanMessage(content=formatted_input),
         ]
         response = await asyncio.to_thread(llm.invoke, messages)
         return self._parse_plan_response(response.content)
@@ -1650,6 +1651,10 @@ class ContextEngine:
     def _recommendations_for_metric(
         self, metric: str, state: QuadraCodeState
     ) -> List[str]:
+        # Check if we should use more aggressive compression based on context pressure
+        context_ratio = self._context_ratio(state)
+        pressure_modifier = self.config.prompt_templates.get_pressure_modifier(context_ratio)
+        
         suggestions: Dict[str, List[str]] = {
             "relevance": [
                 "prioritize high-priority segments in context",
@@ -1676,6 +1681,10 @@ class ContextEngine:
                 "externalize archival content",
             ],
         }
+        
+        # Add adaptive compression recommendation if under pressure
+        if context_ratio > 0.75 and metric == "efficiency":
+            suggestions["efficiency"].append(f"Apply {self.config.compression_profile} compression profile")
 
         recs = suggestions.get(metric, [])
         if metric == "completeness":

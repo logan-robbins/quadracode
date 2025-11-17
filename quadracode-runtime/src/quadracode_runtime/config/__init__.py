@@ -9,5 +9,6 @@ runtime easier to manage and deploy. Each model in this package corresponds to a
 specific component of the runtime, such as the context engine.
 """
 from .context_engine import ContextEngineConfig
+from .prompt_templates import PromptTemplates
 
-__all__ = ["ContextEngineConfig"]
+__all__ = ["ContextEngineConfig", "PromptTemplates"]

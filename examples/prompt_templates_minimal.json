@@ -1,0 +1,12 @@
+{
+  "governor_system_prompt": "Manage context efficiently.",
+  "governor_instructions": "Output JSON with 'actions' and 'prompt_outline'.",
+  "reducer_system_prompt": "Summarize concisely.",
+  "reducer_chunk_prompt": "Summarize: {chunk}",
+  "compression_profiles": {
+    "default": {
+      "summary_ratio": 0.5,
+      "preserve_detail": true
+    }
+  }
+}

@@ -17,6 +17,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .prompt_templates import PromptTemplates
+
 
 @dataclass(slots=True)
 class ContextEngineConfig:
@@ -120,6 +122,28 @@ class ContextEngineConfig:
             "efficiency": 0.10,
         }
     )
+    
+    # Prompt templates (lazily loaded from PromptManager)
+    _prompt_templates: Optional[PromptTemplates] = field(default=None, init=False, repr=False)
+    
+    @property  
+    def prompt_templates(self) -> PromptTemplates:
+        """Get prompt templates, loading from PromptManager if needed."""
+        if self._prompt_templates is None:
+            from .prompt_manager import get_prompt_manager
+            manager = get_prompt_manager()
+            self._prompt_templates = manager.get_templates()
+        return self._prompt_templates
+    
+    def refresh_prompts(self) -> None:
+        """Force a refresh of prompt templates from the manager."""
+        from .prompt_manager import get_prompt_manager
+        manager = get_prompt_manager()
+        self._prompt_templates = manager.get_templates()
+    
+    # Compression settings
+    compression_profile: str = "balanced"  # conservative | balanced | aggressive | extreme
+    adaptive_compression: bool = True  # Automatically adjust based on context pressure
 
     # Context type priorities
     context_priorities: Dict[str, int] = field(

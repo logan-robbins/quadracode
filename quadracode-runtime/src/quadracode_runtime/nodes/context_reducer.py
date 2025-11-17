@@ -138,29 +138,47 @@ class ContextReducer:
         llm = await self._ensure_llm()
         chunks = self._chunk_content(content)
         partial_summaries: list[str] = []
-        system_prompt = (
-            "You condense technical context. Use structured bullet points. Keep critical details."
-        )
+        
+        # Use configurable prompts
+        prompts = self.config.prompt_templates
+        system_prompt = prompts.reducer_system_prompt
+        
+        # Check if we should use domain-specific templates
+        domain = self._detect_domain(content, focus)
+        if domain:
+            system_prompt = prompts.customize_for_domain(system_prompt, domain)
+        
+        # Get compression profile based on context pressure
+        compression_profile = prompts.get_compression_profile(self.config.compression_profile)
+        
         for chunk in chunks:
-            focus_clause = f" Focus on {focus}." if focus else ""
-            prompt = (
-                "Summarize the following context into concise bullet points." + focus_clause +
-                " Limit to approximately "
-                f"{self.target_tokens} tokens.\n\n```\n{chunk}\n```"
+            # Build focus clause if needed
+            focus_clause = prompts.reducer_focus_clause.format(focus=focus) if focus else ""
+            
+            # Format the chunk prompt
+            prompt = prompts.get_prompt(
+                "reducer_chunk_prompt",
+                focus_clause=focus_clause,
+                target_tokens=self.target_tokens,
+                chunk=chunk
             )
+            
             response = await asyncio.to_thread(
                 llm.invoke,
                 [SystemMessage(content=system_prompt), HumanMessage(content=prompt)],
             )
             partial_summaries.append(str(response.content).strip())
+        
         combined = "\n\n".join(partial_summaries)
         if len(partial_summaries) == 1:
             return combined
-        final_prompt = (
-            "Combine the following partial summaries into a single concise summary."
-            " Preserve key facts and actions. Use bullet points when helpful."
-            "\n\n" + combined
+        
+        # Use configurable combine prompt
+        final_prompt = prompts.get_prompt(
+            "reducer_combine_prompt",
+            combined=combined
         )
+        
         response = await asyncio.to_thread(
             llm.invoke,
             [
@@ -169,6 +187,29 @@ class ContextReducer:
             ],
         )
         return str(response.content).strip()
+    
+    def _detect_domain(self, content: str, focus: str | None = None) -> str | None:
+        """Detect the domain of the content for domain-specific compression."""
+        if focus:
+            focus_lower = focus.lower()
+            if "code" in focus_lower or "function" in focus_lower or "class" in focus_lower:
+                return "code"
+            if "doc" in focus_lower or "readme" in focus_lower:
+                return "documentation"
+            if "test" in focus_lower:
+                return "test_results"
+            if "tool" in focus_lower:
+                return "tool_output"
+        
+        # Simple heuristic based on content patterns
+        if "def " in content or "class " in content or "import " in content:
+            return "code"
+        if "# " in content and "##" in content:  # Markdown headers
+            return "documentation"
+        if "PASSED" in content or "FAILED" in content or "test_" in content:
+            return "test_results"
+        
+        return None
 
     async def _ensure_llm(self):
         """
