@@ -84,13 +84,13 @@ The **structure exists** but features need implementation within existing pages:
 
 **Chat Page (`1_💬_Chat.py`):**
 - Basic send/receive works ✅
-- TODO: Load chat history from Redis on startup (reconstruct conversation from mailbox streams)
-- TODO: Persist chat_id and supervisor mode to Redis
-- TODO: Enhanced message bubbles (styled, color-coded by sender)
-- TODO: Markdown rendering in messages
-- TODO: Expandable trace/payload views
+- ✅ Load chat history from Redis on startup (reconstruct conversation from mailbox streams)
+- ✅ Persist chat_id and supervisor mode to Redis
+- ✅ Enhanced message bubbles (styled, color-coded by sender: blue=human, purple=orchestrator, green=agents)
+- ✅ Markdown rendering in messages (using st.markdown)
+- ✅ Expandable trace/payload views (collapsible expanders with JSON display)
 - TODO: Background polling thread (currently polls on page interaction)
-- TODO: **"Clear All Context" button** - Wipes chat history, workspaces, Redis streams, resets to fresh state
+- ✅ **"Clear All Context" button** - Wipes chat history, workspaces, Redis streams, resets to fresh state
 
 **Mailbox Monitor (`2_📡_Mailbox_Monitor.py`):**
 - Basic table view works ✅
@@ -101,12 +101,13 @@ The **structure exists** but features need implementation within existing pages:
 
 **Workspaces Page (`3_📁_Workspaces.py`):**
 - Basic create/destroy works ✅
-- TODO: Load workspace descriptors from Redis on startup
-- TODO: Persist workspace metadata to Redis hash
+- ✅ Load workspace descriptors from Redis on startup
+- ✅ Persist workspace metadata to Redis hash
+- ✅ File browser with icon-based file type display
 - TODO: Hierarchical tree view with expandable folders
 - TODO: File metadata display (size, modified time)
 - TODO: Snapshot/diff functionality
-- TODO: Enhanced syntax highlighting options
+- ✅ Syntax highlighting for code files (using Pygments with monokai theme)
 - TODO: **"Destroy All Workspaces" button** - Batch delete all workspaces and volumes
 
 **Dashboard (`4_📊_Dashboard.py`):**
@@ -182,10 +183,17 @@ Focus on **enhancing existing pages** rather than adding new infrastructure. All
 - Create separate database for persistence (use Redis for everything)
 
 **REQUIRED - Persistence Implementation:**
-- Store chat metadata in Redis: `qc:chat:metadata` → `{chat_id, created, supervisor, autonomous_settings}`
-- Store workspace descriptors: `qc:workspace:descriptors:{workspace_id}` → `{container, volume, image, mount_path, created}`
-- Load state on UI startup, create new if missing
-- Implement "Clear All Context" functionality accessible from main page or chat settings
+- ✅ Store chat metadata in Redis: `qc:chat:metadata` → `{chat_id, created, supervisor, autonomous_settings}`
+- ✅ Store workspace descriptors: `qc:workspace:descriptors:{workspace_id}` → `{container, volume, image, mount_path, created}`
+- ✅ Load state on UI startup, create new if missing
+- ✅ Implement "Clear All Context" functionality accessible from chat settings with confirmation dialog
+
+**Implementation Details:**
+- Created `utils/persistence.py` with Redis CRUD operations for metadata
+- Chat page loads metadata on first render, falls back to creating new if empty
+- Autonomous settings persisted automatically when changed
+- Workspace descriptors saved/deleted on create/destroy operations
+- Clear All Context: deletes all `qc:*` keys + destroys all workspaces with confirmation
 
 ---
 
@@ -247,47 +255,49 @@ Focus on **enhancing existing pages** rather than adding new infrastructure. All
 - [ ] Delete chat option (clears from session state, optional: Redis cleanup)
 
 #### Mode Toggle (Critical Feature)
-- [ ] **Radio buttons:** `Human Mode` | `HumanClone Mode`
-- [ ] **Human Mode:**
+- [x] **Toggle switch:** `Enable Autonomous Mode` (Human vs HumanClone)
+- [x] **Human Mode:**
   - Sends messages with `sender: "human"`, `recipient: "orchestrator"`
   - Listens on `qc:mailbox/human`
   - Supervisor in payload: `"supervisor": "human"`
-- [ ] **HumanClone Mode:**
+- [x] **HumanClone Mode:**
   - Sends messages with `sender: "human_clone"`, `recipient: "orchestrator"`
   - Listens on `qc:mailbox/human_clone`
   - Supervisor in payload: `"supervisor": "human_clone"`
-  - Visual indicator (banner/badge): "🤖 HumanClone Active"
-- [ ] Mode persisted in session state per chat
-- [ ] Warning dialog when switching modes mid-conversation
+  - Visual indicator: "🤖 HumanClone Mode" shown in page header
+- [x] Mode persisted to Redis (`qc:chat:metadata`)
+- [x] Autonomous settings (max_iterations, max_hours, max_agents) shown when enabled
+- [ ] Warning dialog when switching modes mid-conversation (currently shows info banner)
 
-#### Settings Panel (Collapsible)
-- [ ] Redis connection status indicator
-- [ ] Agent registry URL input (default: `http://localhost:8090`)
-- [ ] Checkbox: "Auto-scroll to new messages"
-- [ ] Checkbox: "Show raw payload JSON"
-- [ ] Clear chat history button
+#### Settings Panel (Sidebar)
+- [x] Redis connection status indicator (tested on page load, blocks if unavailable)
+- [ ] Agent registry URL input (default: `http://localhost:8090`) - configured via env var
+- [x] Checkbox: "Auto-scroll to new messages"
+- [x] Checkbox: "Show message payloads" (shows expandable payload sections)
+- [x] Clear All Context button (with confirmation dialog in Danger Zone section)
 
 ### 2.3 Main Chat Area
 
 #### Message Display
-- [ ] Scrollable message list with timestamps
-- [ ] Message bubbles:
-  - **Human/HumanClone messages:** Right-aligned, blue
-  - **Orchestrator messages:** Left-aligned, gray
-  - **Agent messages:** Left-aligned, green (if present)
-- [ ] Each message shows:
-  - Sender name
-  - Timestamp (human-readable)
-  - Message content
-  - Expandable "Show Payload" section (JSON viewer)
-- [ ] Optional: Markdown rendering for code blocks in messages
+- [x] Scrollable message list with timestamps
+- [x] Message bubbles:
+  - **Human/HumanClone messages:** Streamlit chat_message format with color-coded badges
+  - **Orchestrator messages:** Purple-badged sender label
+  - **Agent messages:** Green-badged sender label
+- [x] Each message shows:
+  - Sender name (color-coded badge with icon)
+  - Timestamp (human-readable format)
+  - Message content (markdown rendered)
+  - Expandable "Show Payload" section (JSON viewer) - when enabled
+  - Expandable "Show Trace" section (JSON viewer) - when trace present
+- [x] Markdown rendering for code blocks in messages
 - [ ] Optional: Show workspace info badge (workspace_id, container status)
 
 #### Message Input
-- [ ] Text area for composing message
-- [ ] Send button (or Ctrl+Enter)
+- [x] Text area for composing message (st.chat_input)
+- [x] Send button (integrated in chat_input)
 - [ ] Character count indicator (optional)
-- [ ] Disabled state while waiting for response (with spinner)
+- [x] Disabled state while waiting for response (Streamlit handles automatically)
 
 ### 2.4 Message Sending Logic
 ```python
@@ -322,11 +332,13 @@ def send_message(content, chat_id, mode):
 ```
 
 ### 2.5 Message Receiving Logic
-- [ ] Background thread polls `qc:mailbox/human` or `qc:mailbox/human_clone` based on mode
-- [ ] Uses blocking `XREAD` with timeout
-- [ ] Filters messages by chat_id from payload
-- [ ] Triggers Streamlit rerun on new message
-- [ ] Updates last-read offset in session state
+- [x] Polls `qc:mailbox/human` or `qc:mailbox/human_clone` based on mode (non-blocking)
+- [x] Uses `XREAD` to fetch new messages
+- [x] Filters messages by chat_id from payload
+- [x] Adds messages to session state history
+- [x] Updates last-read offset in session state
+- [x] History reconstructed from Redis streams on startup
+- TODO: Background thread for blocking `XREAD` with auto-refresh trigger
 
 ---
 
@@ -469,29 +481,29 @@ def get_all_messages(mailboxes, limit=50):
 - [ ] Click file to view content
 
 #### Artifact Highlighting
-- [ ] Special badges for known artifact patterns:
-  - 📄 Source code (`.py`, `.js`, `.ts`)
-  - 📊 Data files (`.csv`, `.json`, `.yaml`)
+- [x] Special icons for known artifact patterns (via `get_file_icon` utility):
+  - 📄 Source code (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.c`, `.cpp`, `.rs`, `.go`)
+  - 📊 Data files (`.csv`, `.json`, `.yaml`, `.yml`, `.xml`)
   - 📋 Test files (`test_*.py`, `*.test.js`)
-  - 📦 Build outputs (`dist/`, `build/`, `__pycache__/`)
-  - 📝 Documentation (`.md`, `.txt`)
-  - ⚙️ Config files (`.yaml`, `.toml`, `.env`)
+  - 📦 Build outputs (`dist/`, `build/`, `__pycache__/`, `node_modules`)
+  - 📝 Documentation (`.md`, `.txt`, `.rst`)
+  - ⚙️ Config files (`.yaml`, `.toml`, `.ini`, `.conf`, `.env`)
 
 #### File Operations
-- [ ] Search files by name/content
-- [ ] Filter by file type
-- [ ] Sort by name/date/size
+- [x] Search files by name (text input filter in file_browser component)
+- [x] Filter by file type (multiselect by extension)
+- [ ] Sort by name/date/size (currently sorted alphabetically)
 
 ### 4.4 File Viewer (Bottom Right Panel)
 
 #### Content Display
-- [ ] Syntax highlighting for code files (use `pygments` or similar)
-- [ ] Plain text for text files
-- [ ] JSON pretty-print for JSON files
-- [ ] Markdown rendering for `.md` files
+- [x] Syntax highlighting for code files (using Pygments with monokai theme)
+- [x] Plain text for text files
+- [x] JSON pretty-print for JSON files (via st.json)
+- [x] Markdown rendering for `.md` files (st.markdown)
 - [ ] "Raw view" toggle
-- [ ] Line numbers
-- [ ] Copy to clipboard button
+- [x] Line numbers (Pygments inline linenos option)
+- [x] Copy to clipboard button (displays content for copy)
 
 #### File Metadata
 - [ ] Full path
