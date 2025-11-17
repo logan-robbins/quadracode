@@ -141,9 +141,7 @@ class ContextEngine:
     ) -> QuadraCodeState:
         """Synchronous wrapper for the `handle_tool_response` method."""
         tool_messages = self._extract_tool_messages(state)
-        if not tool_messages:
-            return asyncio.run(self.handle_tool_response(state, None))
-        return asyncio.run(self._handle_tool_messages(state, tool_messages))
+        return asyncio.run(self.handle_tool_response(state, tool_messages))
 
     async def pre_process(self, state: QuadraCodeState) -> QuadraCodeState:
         """
@@ -355,67 +353,23 @@ class ContextEngine:
             The updated state.
         """
         state = self._ensure_state_defaults(state)
-        if tool_response is not None:
-            state, _ = process_autonomous_tool_response(state, tool_response)
-            state, _ = process_manage_refinement_ledger_tool_response(state, tool_response)
-        else:
+        if not tool_response:
             return state
-        scoring_payload: Any
-        if isinstance(tool_response, ToolMessage):
-            self._capture_testing_outputs(state, tool_response)
-            self._maybe_issue_skepticism_challenge(state, tool_response)
-            tool_payload = self._render_tool_message(tool_response)
-            self.time_travel.log_tool(
-                state,
-                tool_name=tool_response.name or "unknown_tool",
-                payload=tool_payload,
-            )
-            scoring_payload = tool_payload
-        else:
-            scoring_payload = tool_response
-        relevance = await self.scorer.score_tool_output(scoring_payload)
-        operation = await self._decide_operation(relevance, state)
-        state = await self._apply_operation(state, tool_response, operation)
-        state = await self._enforce_limits(state)
-        state = await self._update_exhaustion_mode(
-            state,
-            stage="handle_tool_response",
-            tool_response=tool_response,
-        )
-        exhaustion_mode = state.get("exhaustion_mode", ExhaustionMode.NONE)
-        current_prp_state = state.get("prp_state", PRPState.HYPOTHESIZE)
-        if current_prp_state != PRPState.EXECUTE:
-            self._apply_prp_transition(state, PRPState.EXECUTE)
-        self._apply_prp_transition(state, PRPState.TEST)
-        if exhaustion_mode in {
-            ExhaustionMode.TEST_FAILURE,
-            ExhaustionMode.HYPOTHESIS_EXHAUSTED,
-        }:
-            self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
-        else:
-            self._apply_prp_transition(state, PRPState.CONCLUDE)
-        await self._flush_prp_metrics(state)
-        await self.metrics.emit(
-            state,
-            "tool_response",
-            {
-                "operation": operation.value,
-                "relevance": relevance,
-                "segment_count": len(state.get("context_segments", [])),
-                "exhaustion_mode": state.get("exhaustion_mode", ExhaustionMode.NONE).value,
-                "exhaustion_probability": float(state.get("exhaustion_probability", 0.0)),
-            },
-        )
-        self.time_travel.log_stage(
-            state,
-            stage="handle_tool_response",
-            payload={
-                "operation": operation.value,
-                "relevance": relevance,
-                "segment_count": len(state.get("context_segments", [])),
-            },
-        )
-        self._record_stage_observability(state, "handle_tool_response")
+
+        # Ensure messages list exists and is mutable
+        messages = list(state.get("messages") or [])
+
+        # The tool_response is a list of ToolMessage objects from the ToolNode
+        if isinstance(tool_response, list):
+            for message in tool_response:
+                if isinstance(message, ToolMessage):
+                    messages.append(message)
+                    state, _ = process_autonomous_tool_response(state, message)
+                    state, _ = process_manage_refinement_ledger_tool_response(state, message)
+        
+        # Update the state with the new messages list
+        state["messages"] = messages
+        
         return state
 
     async def _decide_operation(

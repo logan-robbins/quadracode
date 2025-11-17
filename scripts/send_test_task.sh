@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Send a test task to the orchestrator and monitor responses
+# Send a test task to the orchestrator
 # Usage: ./scripts/send_test_task.sh [task_description]
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Check if stack is running
 if ! docker compose ps orchestrator-runtime | grep -q "Up"; then
-    echo "❌ Error: orchestrator-runtime is not running"
-    echo "   Start it with: docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime"
+    echo "❌ orchestrator-runtime not running"
+    echo "   Start: docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime"
     exit 1
 fi
 
@@ -28,33 +27,17 @@ Please create a plan, spawn agents if needed to work in parallel, and implement 
 
 TASK="${1:-$DEFAULT_TASK}"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Sending test task to orchestrator"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# Execute the task sender from within the orchestrator container
-docker compose exec orchestrator-runtime python -c "
+# Send task
+docker compose exec test-runner python -c "
 import sys
 sys.path.insert(0, '/app/tests/e2e_advanced')
 from send_task import send_task
-
 task = '''$TASK'''
-success = send_task(task, timeout=600)
-sys.exit(0 if success else 1)
+message_id = send_task(task)
+print(f'Task: {task[:100]}...')
+print(f'✓ Sent to qc:mailbox/orchestrator (ID: {message_id})')
+print()
+print('Watch message flow:')
+print('  ./scripts/tail_streams.sh')
 "
-
-EXIT_CODE=$?
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "✓ Test task completed successfully"
-else
-    echo "✗ Test task failed or timed out"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-exit $EXIT_CODE
 

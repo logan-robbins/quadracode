@@ -2,39 +2,31 @@
 """
 Simple task sender for E2E testing.
 
-This script sends a task to the orchestrator and monitors for responses.
-It's designed to run inside the Docker stack (e.g., from orchestrator-runtime container).
+Sends a message to orchestrator. Use scripts/tail_streams.sh to watch message flow.
 """
 import sys
 import json
-import time
 from datetime import datetime, timezone
 
 import redis
 
 
-def send_task(task_description: str, timeout: int = 300) -> bool:
+def send_task(task_description: str) -> str:
     """
-    Send a task to orchestrator and monitor results.
+    Send a task to orchestrator.
     
     Args:
         task_description: The task to send
-        timeout: Maximum time to wait for response in seconds
     
     Returns:
-        True if response received, False if timeout
+        Message ID added to qc:mailbox/orchestrator
     """
     client = redis.Redis(host="redis", port=6379, decode_responses=True)
     
-    # Get baseline
-    baseline = client.xrevrange("qc:mailbox/human", count=1)
-    baseline_id = baseline[0][0] if baseline else "0-0"
-    
-    # Send message to orchestrator
     timestamp = datetime.now(timezone.utc).isoformat()
     payload = json.dumps({"supervisor": "human"})
     
-    client.xadd(
+    message_id = client.xadd(
         "qc:mailbox/orchestrator",
         {
             "timestamp": timestamp,
@@ -45,56 +37,7 @@ def send_task(task_description: str, timeout: int = 300) -> bool:
         }
     )
     
-    print(f"✓ Sent task to orchestrator")
-    print(f"  Task: {task_description[:80]}...")
-    print(f"→ Monitoring qc:mailbox/human for response...")
-    print()
-    
-    # Poll for response
-    start = time.time()
-    message_count = 0
-    
-    while time.time() - start < timeout:
-        elapsed = int(time.time() - start)
-        messages = client.xread(
-            {"qc:mailbox/human": baseline_id}, 
-            count=10, 
-            block=2000
-        )
-        
-        if messages:
-            for stream, entries in messages:
-                for entry_id, fields in entries:
-                    message_count += 1
-                    msg_text = fields.get("message", "")
-                    
-                    print(f"[{elapsed}s] ✓ Response #{message_count}")
-                    print(f"  From: {fields.get('sender', 'unknown')}")
-                    print(f"  Message: {msg_text[:200]}")
-                    
-                    # Check payload for additional info
-                    payload_str = fields.get("payload", "{}")
-                    try:
-                        payload_data = json.loads(payload_str)
-                        if "messages" in payload_data:
-                            print(f"  Trace entries: {len(payload_data['messages'])}")
-                    except json.JSONDecodeError:
-                        pass
-                    
-                    print()
-                    baseline_id = entry_id
-                    
-                    # Check for completion indicators
-                    if any(word in msg_text.lower() for word in ["completed", "finished", "done"]):
-                        print(f"✓ Task appears complete after {elapsed}s")
-                        return True
-        
-        # Print progress every 30 seconds
-        if elapsed > 0 and elapsed % 30 == 0:
-            print(f"[{elapsed}s] Still waiting... (received {message_count} messages so far)")
-    
-    print(f"✗ Timeout after {timeout}s (received {message_count} messages)")
-    return False
+    return message_id
 
 
 def main():
@@ -113,10 +56,14 @@ Please create a plan, consider if you need multiple agents to work in parallel, 
 """
     
     if len(sys.argv) > 1:
-        task = sys.argv[1]
+        task = " ".join(sys.argv[1:])
     
-    success = send_task(task)
-    sys.exit(0 if success else 1)
+    print(f"Task: {task[:100]}...")
+    message_id = send_task(task)
+    print(f"✓ Sent to qc:mailbox/orchestrator (ID: {message_id})")
+    print()
+    print("Watch message flow:")
+    print("  ./scripts/tail_streams.sh")
 
 
 if __name__ == "__main__":

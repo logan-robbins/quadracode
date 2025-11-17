@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-python-env: &python-env
   MCP_REDIS_SERVER_URL: http://redis-mcp:8000/mcp/
   MCP_REDIS_TRANSPORT: streamable_http

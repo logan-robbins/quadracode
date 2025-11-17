@@ -419,12 +419,15 @@ class RuntimeRunner:
             if self._registry:
                 await self._registry.start()
             while True:
+                LOGGER.debug("Checking mailbox for %s...", self._identity)
                 entries = await messaging.read(
                     self._identity, batch_size=self._batch_size
                 )
                 if not entries:
+                    LOGGER.debug("Mailbox empty, sleeping for %s s", self._poll_interval)
                     await asyncio.sleep(self._poll_interval)
                     continue
+                LOGGER.debug("Found %d new message(s)", len(entries))
                 for entry_id, envelope in entries:
                     await self._handle_entry(messaging, entry_id, envelope)
         finally:
