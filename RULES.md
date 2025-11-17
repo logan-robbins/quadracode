@@ -1,0 +1,170 @@
+# Core Project Rules
+
+These rules apply to **all** agents, all models, and all directories in this repository.
+
+## 1. Environment & Platform Assumptions
+
+- Assume the primary development environment is:
+  - macOS on **Apple Silicon (M4)**.
+  - **128 GB RAM** available.
+- Prefer macOS-native tooling:
+  - Use `brew` (Homebrew) for system-level package installation when needed.
+  - Do **not** assume Linux-only tooling (`apt`, `yum`, etc.) unless explicitly requested.
+- If you need to generate shell commands, default to **zsh** syntax compatible with macOS.
+
+## 2. Codebase Navigation & Reuse
+
+Before you propose **any new file or module**, you MUST:
+
+1. **Search the existing codebase** for similar functionality, patterns, or names.
+   - Use Cursor’s code search, semantic search, “Go to Definition”, and file list.
+   - Look for existing helpers, utilities, service layers, and patterns that can be extended.
+2. If similar functionality exists:
+   - Prefer **extending or refactoring existing code** instead of creating a variant.
+   - Reuse existing abstractions and follow their naming and structure.
+3. Only create a new file when:
+   - No suitable abstraction exists, **and**
+   - You can clearly explain why a new file is warranted (e.g. a new bounded context, or the change would overcomplicate an existing module).
+
+When you do create new files:
+
+- Place them in the **most specific, domain-appropriate directory**.
+- Use naming that is clear and descriptive, not generic (`utils2`, `helpers_old`, etc.).
+
+## 3. No Legacy/Fallback/Compatibility Paths
+
+**Do not** introduce or reference “second-path” code for compatibility unless explicitly instructed.
+
+Specifically:
+
+- **Never** create files, directories, flags, or branches whose purpose is a:
+  - “legacy” implementation
+  - “fallback” implementation
+  - “compat” or “compatibility” layer
+  - “deprecated” version
+- Do not add feature flags, environment toggles, or duplicate code paths “just in case.”
+- Implement the **single, intended design** and make it correct and robust.
+- If a feature cannot be fully supported on a platform or configuration:
+  - **Fail fast** with a clear error and explicit explanation of the prerequisite,
+  - Rather than silently degrading behavior or using a hidden fallback.
+
+## 4. Optionality & Compatibility
+
+Unless the user explicitly asks otherwise:
+
+- Do **not**:
+  - Create optional sub-systems solely for compatibility.
+  - Add “best-effort” behavior that hides errors or swallows exceptions.
+  - Introduce “config knobs” that switch between old and new behavior.
+- Prefer:
+  - A **single, canonical implementation** that either:
+    - Works as designed, or
+    - Fails early with a descriptive error and clear remediation steps.
+
+## 5. Python, Environments, and Tooling
+
+All Python-related work in this repository MUST follow these rules:
+
+- Always use the **local virtual environment**:
+  - Assume there is a `.venv` in the project root.
+  - Run scripts and tests as:
+
+    - `uv run python path/to/script.py`
+    - `uv run pytest`
+    - `uv run <tool>` (e.g. `uv run ruff`, `uv run mypy`)
+
+- Dependency management:
+  - Use **`pyproject.toml`** as the single source of truth for Python dependencies.
+  - Add or remove dependencies using **uv** commands (e.g. `uv add`, `uv remove`) rather than `pip`.
+  - Do **not** edit `requirements.txt` or similar legacy files unless explicitly requested.
+
+- When you propose new Python commands:
+  - Prefer `uv run ...` over `python ...` or global `pip`.
+  - Make sure commands run from the repository root and honor `.venv`.
+
+If you need to bootstrap the environment (only if clearly necessary):
+
+- Propose:
+
+  - `uv venv .venv`
+  - `uv sync`
+
+and then all subsequent commands should use `uv run` or be executed from the `.venv` context.
+
+## 6. Multi-Agent & Domain Boundaries
+
+These rules apply whenever **multiple agents or plans** operate on this repository (including Cloud Agents and Plan Mode):
+
+- **Declare a domain**:
+  - At the start of any substantial task, the agent must identify the primary domain it is working in
+    (e.g. `backend/api`, `frontend/ui`, `ml/training`, `infra/ci`).
+- **Stay within your domain**:
+  - Do not modify files outside your declared domain unless explicitly asked.
+  - If you must touch another domain to finish the task, call this out clearly in your explanation and keep such changes minimal and well-isolated.
+
+- **Parallel work**:
+  - Assume other agents may be working at the same time on different domains.
+  - Design changes to be:
+    - Local and composable.
+    - Avoiding cross-cutting edits across the entire repo.
+  - For changes that span multiple domains:
+    - Prefer creating a small, clear sequence of steps or a checklist that another agent can follow.
+    - Do not refactor the entire codebase in a single pass.
+
+- **Conflict avoidance**:
+  - Avoid large, sweeping renames or reorganizations when not explicitly asked.
+  - Prefer incremental, well-scoped PR-style changes referencing specific files and directories.
+
+## 7. Planning, Execution & Verification
+
+When performing a non-trivial task:
+
+- Use a lightweight **plan → execute → verify** loop:
+  1. Sketch a short plan (*max 5 bullets*) of concrete steps.
+  2. Execute those steps in small, reviewable chunks.
+  3. Run relevant tests or checks using the `.venv` + `uv` commands.
+- Always:
+  - Run targeted tests (`uv run pytest path/to/tests` or similar) when you significantly change behavior.
+  - Communicate which commands should be run to validate the work.
+
+## 8. Summaries & Communication Style
+
+When you finish a task or an agent run:
+
+- Provide a **brief summary only**:
+  - At most **3 short bullet points**.
+  - Focus on what changed and where (with file paths).
+- **Do NOT**:
+  - Include code snippets in the summary.
+  - Paste large diffs or long-form explanations into the summary section.
+  - Generate verbose writeups unless explicitly requested.
+
+Example completion format:
+
+- `Summary:`
+  - `- Implemented X in path/to/file.py`
+  - `- Updated Y to support Z in path/to/other_file.ts`
+  - `- Added tests in tests/test_feature.py (all passing)`
+
+If the user asks for detailed explanation or code walk-through, provide it **separately from the summary**.
+
+## 9. Style & Quality Expectations (Language-Agnostic)
+
+- Prioritize:
+  - **Correctness** and clear behavior over cleverness.
+  - Readable, well-structured code with meaningful names.
+  - Localized side effects and predictable control flow.
+- When modifying existing code:
+  - Match the existing style and patterns of the surrounding code.
+  - Do not introduce a new framework or pattern unless explicitly asked or clearly necessary.
+
+## 10. Things You Must Not Do (Unless Explicitly Requested)
+
+- Do **not**:
+  - Add “legacy”, “fallback”, “compat”, or “deprecated” implementations or flags.
+  - Add optional compatibility layers or multi-path behaviors just to be “safe”.
+  - Generate long summaries, essays, or post-task writeups with embedded code blocks by default.
+  - Create new files before searching for exsiting files.
+  - Use global Python installations, `pip install` into the system environment, or non-uv dependency management for this project.
+
+Follow these rules strictly. When in doubt, **ask for clarification rather than guessing**, and prefer failing fast with a clear explanation over silently compensating with hidden compatibility logic.

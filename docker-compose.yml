@@ -263,6 +263,7 @@ services:
       - ./tests/e2e_advanced/logs:/app/tests/e2e_advanced/logs
       - ./tests/e2e_advanced/metrics:/app/tests/e2e_advanced/metrics
       - ./tests/e2e_advanced/reports:/app/tests/e2e_advanced/reports
+      - /var/run/docker.sock:/var/run/docker.sock  # Allow spawning sibling containers
     working_dir: /app
     command: ["sleep", "infinity"]  # Keep container running for test execution
     networks:

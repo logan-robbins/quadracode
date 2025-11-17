@@ -784,6 +784,12 @@ timeout 300 uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
 
 This workflow ensures repeatable builds and full E2E test coverage with real LLM interactions.
 
+## Documentation
+
+- **[TESTING.md](TESTING.md)** - Complete guide for running E2E tests with live LLM API calls, monitoring system behavior, and debugging
+- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** - Detailed implementation notes for each component
+- **[TECHNICAL_IMPLEMENTATION.md](TECHNICAL_IMPLEMENTATION.md)** - Technical architecture and design decisions
+
 ## License
 
 [Add your license here]
