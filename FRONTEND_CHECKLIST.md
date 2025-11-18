@@ -107,7 +107,7 @@ The **structure exists** but features need implementation within existing pages:
 - ✅ File browser with icon-based file type display
 - ✅ Hierarchical tree view with expandable folders (using st.expander for each directory)
 - ✅ File metadata display (size in B/KB/MB, modified time, file type)
-- TODO: Snapshot/diff functionality
+- ✅ Snapshot/diff functionality
 - ✅ Syntax highlighting for code files (using Pygments with monokai theme)
 - ✅ **"Destroy All Workspaces" button** - Batch delete all workspaces and volumes with confirmation
 
@@ -564,8 +564,8 @@ def get_all_messages(mailboxes, limit=50):
 
 #### Workspace Controls
 - [ ] Select workspace to browse
-- [ ] "Snapshot" button: Create integrity snapshot (checksums + manifest)
-- [ ] "Diff" button: Compare with previous snapshot
+- [x] "Snapshot" button: Create integrity snapshot (checksums + manifest)
+- [x] "Diff" button: Compare with previous snapshot
 - [ ] "Download" button: Download workspace as tarball (optional)
 - [ ] "Refresh" button: Re-scan file tree
 
@@ -612,21 +612,21 @@ def get_all_messages(mailboxes, limit=50):
 ### 4.5 Snapshot & Diff Features
 
 #### Snapshot View
-- [ ] Show snapshot metadata:
+- [x] Show snapshot metadata:
   - Timestamp
   - Total files
   - Total size
   - Checksum manifest
-- [ ] List all files in snapshot
-- [ ] Compare button to diff with current state
+- [x] List all files in snapshot
+- [x] Compare button to diff with current state
 
 #### Diff View
-- [ ] Side-by-side comparison:
+- [x] Side-by-side comparison:
   - Files added (green)
   - Files deleted (red)
   - Files modified (yellow)
-- [ ] Content diff for modified files (unified or split view)
-- [ ] Summary stats: X added, Y modified, Z deleted
+- [x] Content diff for modified files (unified or split view)
+- [x] Summary stats: X added, Y modified, Z deleted
 
 ### 4.6 Implementation Notes
 ```python

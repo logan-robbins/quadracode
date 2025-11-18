@@ -18,12 +18,17 @@ from quadracode_ui.utils.persistence import (
 )
 from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
 from quadracode_ui.utils.workspace_utils import (
+    compare_snapshots,
     copy_from_workspace,
     create_workspace,
+    create_workspace_snapshot,
+    delete_workspace_snapshot,
     destroy_workspace,
     list_workspace_logs,
     load_workspace_events,
+    load_workspace_snapshots,
     read_workspace_log,
+    save_workspace_snapshot,
     summarize_workspace_event,
 )
 
@@ -241,10 +246,11 @@ with st.expander("Full Descriptor", expanded=False):
 st.divider()
 
 # Tabs for different views
-file_tab, logs_tab, events_tab, export_tab = st.tabs([
+file_tab, logs_tab, events_tab, snapshot_tab, export_tab = st.tabs([
     "📄 Files",
     "📋 Logs",
     "📊 Events",
+    "📸 Snapshots",
     "💾 Export",
 ])
 
@@ -331,6 +337,150 @@ with events_tab:
                     st.markdown(f"ID: `{event.get('id')}`")
                     st.json(event.get("payload", {}))
                     st.divider()
+
+with snapshot_tab:
+    st.subheader("📸 Workspace Snapshots")
+    st.caption("Create point-in-time snapshots and compare changes over time")
+    
+    # Create snapshot section
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        if st.button("📸 Create New Snapshot", type="primary", use_container_width=True):
+            with st.spinner("Creating snapshot..."):
+                success, snapshot_data, error = create_workspace_snapshot(workspace_id)
+                if success and snapshot_data:
+                    # Save to Redis
+                    if save_workspace_snapshot(client, workspace_id, snapshot_data):
+                        st.success(f"✅ Snapshot created with {snapshot_data['total_files']} files")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to save snapshot to Redis")
+                else:
+                    st.error(f"❌ Failed to create snapshot: {error}")
+    
+    with col2:
+        # Load existing snapshots
+        snapshots = load_workspace_snapshots(client, workspace_id)
+        if snapshots:
+            st.metric("Total Snapshots", len(snapshots))
+    
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+    
+    st.divider()
+    
+    # Display existing snapshots
+    if not snapshots:
+        st.info("📸 No snapshots yet. Create your first snapshot to track file changes.")
+    else:
+        # Snapshot selection and comparison
+        st.subheader("Snapshot History")
+        
+        # Display snapshots in a table format
+        for idx, snapshot in enumerate(snapshots):
+            with st.expander(
+                f"Snapshot {idx + 1}: {snapshot['timestamp'][:19]} "
+                f"({snapshot['total_files']} files, {snapshot['total_size']:,} bytes)",
+                expanded=(idx == 0)
+            ):
+                # Snapshot metadata
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Files", snapshot['total_files'])
+                with col2:
+                    st.metric("Total Size", f"{snapshot['total_size']:,} bytes")
+                with col3:
+                    st.caption(f"Created: {snapshot['timestamp']}")
+                with col4:
+                    if st.button("🗑️ Delete", key=f"delete_snap_{snapshot['snapshot_id']}"):
+                        if delete_workspace_snapshot(client, workspace_id, snapshot['snapshot_id']):
+                            st.success("Snapshot deleted")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete snapshot")
+                
+                # Show file list
+                if st.checkbox("Show files", key=f"show_files_{snapshot['snapshot_id']}"):
+                    files_data = []
+                    for file_path, file_info in snapshot['files'].items():
+                        files_data.append({
+                            "File": file_path,
+                            "Size": f"{file_info['size']:,}" if file_info['size'] else "0",
+                            "Modified": file_info.get('modified', 'N/A'),
+                            "Checksum": file_info['checksum'][:12] + "...",
+                        })
+                    
+                    if files_data:
+                        df = pd.DataFrame(files_data)
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                
+                # Compare with current state button
+                if st.button(
+                    "🔍 Compare with Current", 
+                    key=f"compare_current_{snapshot['snapshot_id']}",
+                    use_container_width=True
+                ):
+                    st.session_state[f"compare_mode_{workspace_id}"] = "current"
+                    st.session_state[f"compare_snapshot_{workspace_id}"] = snapshot
+                    st.rerun()
+        
+        # Comparison view
+        if st.session_state.get(f"compare_mode_{workspace_id}"):
+            st.divider()
+            st.subheader("📊 Comparison Results")
+            
+            compare_snapshot = st.session_state.get(f"compare_snapshot_{workspace_id}")
+            if compare_snapshot:
+                # Perform comparison
+                with st.spinner("Comparing..."):
+                    if st.session_state[f"compare_mode_{workspace_id}"] == "current":
+                        # Compare snapshot with current state
+                        comparison = compare_snapshots(workspace_id, compare_snapshot, None)
+                    else:
+                        # Future: compare two snapshots
+                        comparison = {"error": "Two-snapshot comparison not yet implemented"}
+                
+                if "error" in comparison:
+                    st.error(comparison["error"])
+                else:
+                    # Display comparison summary
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("➕ Added", comparison['summary']['added_count'], 
+                                help="Files added since snapshot")
+                    with col2:
+                        st.metric("➖ Deleted", comparison['summary']['deleted_count'],
+                                help="Files deleted since snapshot")
+                    with col3:
+                        st.metric("✏️ Modified", comparison['summary']['modified_count'],
+                                help="Files modified since snapshot")
+                    with col4:
+                        st.metric("✓ Unchanged", comparison['summary']['unchanged_count'],
+                                help="Files unchanged since snapshot")
+                    
+                    # Detailed changes
+                    if comparison['summary']['added_count'] > 0:
+                        with st.expander(f"➕ Added Files ({comparison['summary']['added_count']})", expanded=True):
+                            for file in comparison['added']:
+                                st.text(f"  + {file}")
+                    
+                    if comparison['summary']['deleted_count'] > 0:
+                        with st.expander(f"➖ Deleted Files ({comparison['summary']['deleted_count']})", expanded=True):
+                            for file in comparison['deleted']:
+                                st.text(f"  - {file}")
+                    
+                    if comparison['summary']['modified_count'] > 0:
+                        with st.expander(f"✏️ Modified Files ({comparison['summary']['modified_count']})", expanded=True):
+                            for file in comparison['modified']:
+                                st.text(f"  ~ {file}")
+                    
+                    # Clear comparison button
+                    if st.button("❌ Clear Comparison", type="secondary"):
+                        del st.session_state[f"compare_mode_{workspace_id}"]
+                        del st.session_state[f"compare_snapshot_{workspace_id}"]
+                        st.rerun()
 
 with export_tab:
     st.subheader("Export Workspace Files")
