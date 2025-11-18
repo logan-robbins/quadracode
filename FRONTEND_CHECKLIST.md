@@ -40,6 +40,7 @@ quadracode-ui/src/quadracode_ui/
 ├── utils/
 │   ├── redis_client.py       # Cached Redis connection
 │   ├── message_utils.py      # Message send/receive, polling
+│   ├── polling_thread.py     # Background polling thread for auto-refresh
 │   └── workspace_utils.py    # Workspace lifecycle, file operations
 └── pages/
     ├── 1_💬_Chat.py          # Chat interface with orchestrator
@@ -89,32 +90,32 @@ The **structure exists** but features need implementation within existing pages:
 - ✅ Enhanced message bubbles (styled, color-coded by sender: blue=human, purple=orchestrator, green=agents)
 - ✅ Markdown rendering in messages (using st.markdown)
 - ✅ Expandable trace/payload views (collapsible expanders with JSON display)
-- TODO: Background polling thread (currently polls on page interaction)
+- ✅ Background polling thread with automatic message updates every 10 seconds
 - ✅ **"Clear All Context" button** - Wipes chat history, workspaces, Redis streams, resets to fresh state
 
 **Mailbox Monitor (`2_📡_Mailbox_Monitor.py`):**
 - Basic table view works ✅
-- TODO: Advanced filtering (time range, regex search)
-- TODO: Message detail panel (click to expand)
-- TODO: Stream health indicators with visual status
-- TODO: Real-time auto-refresh with configurable interval
+- ✅ Advanced filtering (time range with presets and custom, regex search)
+- ✅ Message detail panel (row selector with full message details)
+- ✅ Stream health indicators with visual status (✓ Active | ○ Idle | ✗ Error)
+- ✅ Real-time auto-refresh with configurable interval (1-60 seconds)
 
 **Workspaces Page (`3_📁_Workspaces.py`):**
 - Basic create/destroy works ✅
 - ✅ Load workspace descriptors from Redis on startup
 - ✅ Persist workspace metadata to Redis hash
 - ✅ File browser with icon-based file type display
-- TODO: Hierarchical tree view with expandable folders
-- TODO: File metadata display (size, modified time)
+- ✅ Hierarchical tree view with expandable folders (using st.expander for each directory)
+- ✅ File metadata display (size in B/KB/MB, modified time, file type)
 - TODO: Snapshot/diff functionality
 - ✅ Syntax highlighting for code files (using Pygments with monokai theme)
-- TODO: **"Destroy All Workspaces" button** - Batch delete all workspaces and volumes
+- ✅ **"Destroy All Workspaces" button** - Batch delete all workspaces and volumes with confirmation
 
 **Dashboard (`4_📊_Dashboard.py`):**
 - Basic metrics display works ✅
-- TODO: Interactive charts (Plotly integration)
-- TODO: Event timeline visualization
-- TODO: Agent activity drill-down
+- ✅ Interactive charts (Plotly integration with enhanced styling and interactivity)
+- ✅ Event timeline visualization (color-coded scatter plot for autonomous events)
+- ✅ Agent activity drill-down (selector with detailed metrics and configuration view)
 
 ### Critical Technical Notes
 
@@ -190,10 +191,107 @@ Focus on **enhancing existing pages** rather than adding new infrastructure. All
 
 **Implementation Details:**
 - Created `utils/persistence.py` with Redis CRUD operations for metadata
+- Created `utils/polling_thread.py` with background thread for automatic message polling
 - Chat page loads metadata on first render, falls back to creating new if empty
 - Autonomous settings persisted automatically when changed
 - Workspace descriptors saved/deleted on create/destroy operations
 - Clear All Context: deletes all `qc:*` keys + destroys all workspaces with confirmation
+- Background polling thread uses blocking XREAD (2s timeout) and checks UI every 10 seconds
+- Auto-refresh toggle in sidebar allows users to enable/disable automatic message updates
+
+**Latest Update (Background Polling Thread - November 2025):**
+- ✅ Implemented `PollingThread` class in `utils/polling_thread.py`
+  - Daemon thread with blocking Redis `XREAD` (efficient, non-busy-waiting)
+  - Thread-safe message queue with lock-protected operations
+  - Filters messages by `chat_id` in background
+  - Automatic mailbox switching when mode changes
+- ✅ Integrated polling thread into Chat page (`1_💬_Chat.py`)
+  - Managed via Streamlit session state (persists across reruns)
+  - UI checks for new messages every 10 seconds
+  - Only triggers `st.rerun()` when messages are available
+  - User-controllable "Auto-refresh for new messages" checkbox in Display Settings
+- ✅ Browser testing confirmed functionality
+  - "Running..." indicator shows when polling is active
+  - Toggle control properly enables/disables background polling
+  - Messages appear automatically without user interaction
+- 📄 Documentation: `quadracode-ui/POLLING_IMPLEMENTATION.md` explains architecture and design decisions
+
+**Latest Update (Mailbox Monitor Advanced Filtering - November 2025):**
+- ✅ Advanced filtering capabilities in `2_📡_Mailbox_Monitor.py`
+  - **Time range filtering:** Presets (Last 5/15/60 min, Last 24 hours) + Custom time range
+  - **Regex support:** Toggle to enable regex matching in sender/recipient/content filters
+  - Pattern validation with error handling for invalid regex
+  - Filters work independently and can be combined
+- ✅ Enhanced message detail panel
+  - Row selector to choose messages from table (0-based indexing)
+  - Two-column layout with full message metadata
+  - Relative time display ("X minutes ago")
+  - Copy button for message IDs
+  - Expandable JSON payload viewer
+  - Full message content in scrollable text area
+- ✅ Configurable auto-refresh
+  - User-adjustable interval (1-60 seconds)
+  - Persisted in session state
+  - Replaces fixed 2-second refresh
+- ✅ Improved stream health indicators
+  - Already existed but now properly documented (✓ Active | ○ Idle | ✗ Error)
+  - Shows message counts per mailbox
+  - Real-time XLEN queries for accurate counts
+
+**Latest Update (Workspace File Browser Enhancements - November 2025):**
+- ✅ Hierarchical tree view in `components/file_browser.py`
+  - **Folder structure:** Nested expanders for each directory level
+  - Auto-expand first 2 levels for immediate visibility
+  - Recursive rendering of subdirectories
+  - Folders sorted alphabetically with 📁 icons
+  - Files displayed under their parent folders
+- ✅ File metadata display
+  - **get_file_metadata()** function in `workspace_utils.py`
+  - Uses `stat` command (macOS and Linux compatible)
+  - Returns size, modified timestamp, file type
+  - Size display: Intelligent formatting (B/KB/MB)
+  - Modified time: ISO format with human-readable display (YYYY-MM-DD HH:MM)
+- ✅ Enhanced file content viewer
+  - 4-column metadata header: File name, Size, Type, Modified time
+  - Expandable "Full Path & Metadata" section with JSON viewer
+  - File size shown next to each file in tree (KB format)
+  - Clickable file buttons with full-width layout
+- ✅ **"Destroy All Workspaces" button** in `3_📁_Workspaces.py`
+  - Located in sidebar "Danger Zone" section
+  - Batch deletes all workspaces and volumes
+  - Confirmation dialog with workspace count
+  - Shows success/failure count for each workspace
+  - Clears Redis descriptors and session state
+  - Error handling with individual workspace failure tracking
+- ✅ Code verification performed
+  - No linter errors in all modified files
+  - Integration tested (requires running workspace Docker infrastructure for full demo)
+
+**Latest Update (Dashboard Interactive Charts & Visualizations - November 2025):**
+- ✅ Enhanced Plotly chart styling in `4_📊_Dashboard.py`
+  - **Quality Score Trend:** Line chart with markers, custom colors (#00cc96), thicker lines
+  - **Context Window Usage:** Area chart with rgba fill, border styling
+  - **Agent Status Distribution:** Donut chart (hole=0.3) with Set3 color palette, inside labels
+  - **Agent Type Distribution:** Bar chart with Pastel colors, hidden legend
+  - All charts include: axis labels, unified hover mode, professional styling
+- ✅ Enhanced event timeline visualization
+  - Color-coded scatter plot using `go.Figure` for fine control
+  - Event-specific colors: checkpoint (green), critique (red), escalation (orange), etc.
+  - Interactive markers with hover templates
+  - Legend showing event types
+  - 400px height for better visibility
+- ✅ Agent activity drill-down feature
+  - Dropdown selector to choose specific agent
+  - 4-metric card display: Status, Type, Last Heartbeat (relative time), Hotpath status
+  - Two-column layout: Agent Configuration vs Full Agent Data
+  - JSON viewers for detailed inspection
+  - "All Agents Summary" with expandable sections
+- ✅ Browser testing confirmed
+  - All three Context Metrics charts rendering with real data
+  - Interactive Plotly toolbars functional (Download, Zoom, Pan, etc.)
+  - Quality Score showing 0.6-0.75 trend over time
+  - Context tokens showing ~2500 token usage
+  - Operation Distribution showing "retain" operations
 
 ---
 
@@ -338,7 +436,7 @@ def send_message(content, chat_id, mode):
 - [x] Adds messages to session state history
 - [x] Updates last-read offset in session state
 - [x] History reconstructed from Redis streams on startup
-- TODO: Background thread for blocking `XREAD` with auto-refresh trigger
+- [x] Background thread for blocking `XREAD` with auto-refresh every 10 seconds
 
 ---
 
@@ -634,6 +732,7 @@ quadracode-ui/
 │       ├── utils/
 │       │   ├── redis_client.py ✅
 │       │   ├── message_utils.py ✅
+│       │   ├── polling_thread.py ✅
 │       │   └── workspace_utils.py ✅
 │       └── config.py ✅
 ├── tests/

@@ -107,6 +107,64 @@ with st.sidebar:
     
     st.divider()
     
+    # Destroy All Workspaces button (Danger Zone)
+    if st.session_state.workspace_descriptors:
+        st.subheader("⚠️ Danger Zone")
+        if st.button("🗑️ Destroy All Workspaces", use_container_width=True, type="secondary"):
+            st.session_state.show_destroy_all_confirm = True
+        
+        # Show confirmation dialog
+        if st.session_state.get("show_destroy_all_confirm", False):
+            workspace_count = len(st.session_state.workspace_descriptors)
+            st.warning(
+                f"⚠️ This will destroy ALL {workspace_count} workspace(s) and delete their volumes. "
+                "This action is IRREVERSIBLE!"
+            )
+            col1, col2 = st.columns(2)
+            if col1.button("✅ Confirm Destroy All", use_container_width=True, type="primary"):
+                # Destroy all workspaces
+                workspace_ids = list(st.session_state.workspace_descriptors.keys())
+                destroyed_count = 0
+                failed_count = 0
+                
+                for ws_id in workspace_ids:
+                    success, _, error = destroy_workspace(ws_id, delete_volume=True)
+                    if success:
+                        destroyed_count += 1
+                        # Delete from Redis
+                        delete_workspace_descriptor(client, ws_id)
+                    else:
+                        failed_count += 1
+                        st.session_state.workspace_messages.append({
+                            "kind": "error",
+                            "message": f"❌ Failed to destroy '{ws_id}': {error}",
+                        })
+                
+                # Clear all from session state
+                st.session_state.workspace_descriptors.clear()
+                st.session_state.selected_workspace_id = None
+                st.session_state.show_destroy_all_confirm = False
+                
+                # Show summary message
+                if destroyed_count > 0:
+                    st.session_state.workspace_messages.append({
+                        "kind": "success",
+                        "message": f"✅ Destroyed {destroyed_count} workspace(s)",
+                    })
+                if failed_count > 0:
+                    st.session_state.workspace_messages.append({
+                        "kind": "warning",
+                        "message": f"⚠️ {failed_count} workspace(s) failed to destroy",
+                    })
+                
+                st.rerun()
+            
+            if col2.button("❌ Cancel", use_container_width=True):
+                st.session_state.show_destroy_all_confirm = False
+                st.rerun()
+        
+        st.divider()
+    
     # List existing workspaces
     if st.session_state.workspace_descriptors:
         st.subheader("Active Workspaces")

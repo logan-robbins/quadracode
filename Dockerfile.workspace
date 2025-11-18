@@ -1,0 +1,52 @@
+# Dockerfile for Quadracode Workspace Containers
+# This provides a sandboxed execution environment for agent operations
+# BUILD FROM ROOT: docker build -f Dockerfile.workspace -t quadracode-workspace:latest .
+
+FROM arm64v8/python:3.12-slim
+
+# Install common development tools and utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core build tools
+    build-essential \
+    git \
+    curl \
+    wget \
+    # Language runtimes
+    nodejs \
+    npm \
+    # Shell utilities
+    bash \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    # File tools
+    file \
+    tree \
+    # Development tools
+    vim \
+    nano \
+    # System tools
+    procps \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV for Python package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Install corepack for Node.js package management
+RUN npm install -g corepack
+
+# Set up workspace directory
+RUN mkdir -p /workspace /workspace/logs
+WORKDIR /workspace
+
+# Set Python environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WORKSPACE_MOUNT=/workspace
+
+# Default command: sleep infinity (container stays alive for exec commands)
+CMD ["sleep", "infinity"]
+

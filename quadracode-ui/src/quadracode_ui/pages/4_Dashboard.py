@@ -199,7 +199,15 @@ with agents_tab:
                 status_data = pd.DataFrame([
                     {"Status": k, "Count": v} for k, v in status_counts.items()
                 ])
-                fig = px.pie(status_data, names="Status", values="Count")
+                fig = px.pie(
+                    status_data,
+                    names="Status",
+                    values="Count",
+                    title="Agent Status",
+                    hole=0.3,  # Donut chart
+                    color_discrete_sequence=px.colors.qualitative.Set3,
+                )
+                fig.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig, use_container_width=True)
             
             with type_col:
@@ -208,13 +216,90 @@ with agents_tab:
                 type_data = pd.DataFrame([
                     {"Type": k, "Count": v} for k, v in type_counts.items()
                 ])
-                fig = px.bar(type_data, x="Type", y="Count")
+                fig = px.bar(
+                    type_data,
+                    x="Type",
+                    y="Count",
+                    title="Agent Types",
+                    color="Type",
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                )
+                fig.update_layout(showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
             
             st.divider()
             
-            # Detailed agent list
-            st.subheader("Agent Details")
+            # Agent activity drill-down
+            st.subheader("Agent Activity Drill-Down")
+            
+            # Agent selector
+            agent_ids = [agent.get("id", "unknown") for agent in agents]
+            selected_agent = st.selectbox(
+                "Select agent to view details",
+                options=agent_ids,
+                key="agent_selector",
+            )
+            
+            if selected_agent:
+                agent_info = next((a for a in agents if a.get("id") == selected_agent), None)
+                
+                if agent_info:
+                    # Agent metadata cards
+                    agent_col1, agent_col2, agent_col3, agent_col4 = st.columns(4)
+                    
+                    with agent_col1:
+                        st.metric("Status", agent_info.get("status", "unknown"))
+                    
+                    with agent_col2:
+                        st.metric("Type", agent_info.get("type", "unknown"))
+                    
+                    with agent_col3:
+                        last_hb = agent_info.get("last_heartbeat", "")
+                        if last_hb:
+                            try:
+                                from datetime import UTC, datetime
+                                hb_time = datetime.fromisoformat(last_hb.replace("Z", "+00:00"))
+                                time_ago = datetime.now(UTC) - hb_time
+                                if time_ago.total_seconds() < 60:
+                                    hb_display = f"{int(time_ago.total_seconds())}s ago"
+                                elif time_ago.total_seconds() < 3600:
+                                    hb_display = f"{int(time_ago.total_seconds() / 60)}m ago"
+                                else:
+                                    hb_display = f"{int(time_ago.total_seconds() / 3600)}h ago"
+                            except Exception:
+                                hb_display = "unknown"
+                        else:
+                            hb_display = "never"
+                        st.metric("Last Heartbeat", hb_display)
+                    
+                    with agent_col4:
+                        hotpath = "✅ Yes" if agent_info.get("hotpath") else "❌ No"
+                        st.metric("Hotpath", hotpath)
+                    
+                    st.divider()
+                    
+                    # Agent configuration and metadata
+                    config_col1, config_col2 = st.columns(2)
+                    
+                    with config_col1:
+                        st.markdown("**Agent Configuration**")
+                        config_data = {
+                            k: v for k, v in agent_info.items()
+                            if k not in ["id", "status", "type", "last_heartbeat", "hotpath"]
+                        }
+                        if config_data:
+                            st.json(config_data)
+                        else:
+                            st.caption("No additional configuration")
+                    
+                    with config_col2:
+                        st.markdown("**Full Agent Data**")
+                        st.json(agent_info)
+            
+            st.divider()
+            
+            # All agents summary table
+            st.subheader("All Agents Summary")
             for agent in agents:
                 with st.expander(f"🤖 {agent.get('id', 'unknown')}", expanded=False):
                     st.json(agent)
@@ -274,8 +359,24 @@ with metrics_tab:
         if quality_data:
             st.subheader("Quality Score Trend")
             df = pd.DataFrame(quality_data)
-            fig = px.line(df, x="timestamp", y="quality", title="Quality Score Over Time")
-            st.plotly_chart(fig, use_container_width=True)
+            fig = px.line(
+                df,
+                x="timestamp",
+                y="quality",
+                title="Quality Score Over Time",
+                markers=True,
+            )
+            fig.update_layout(
+                hovermode='x unified',
+                xaxis_title="Time",
+                yaxis_title="Quality Score",
+            )
+            fig.update_traces(
+                line_color='#00cc96',
+                line_width=2,
+                marker=dict(size=6),
+            )
+            st.plotly_chart(fig, use_container_width=True, key="quality_chart")
         
         # Context window usage
         window_data = []
@@ -290,8 +391,23 @@ with metrics_tab:
         if window_data:
             st.subheader("Context Window Usage")
             df = pd.DataFrame(window_data)
-            fig = px.area(df, x="timestamp", y="tokens", title="Context Tokens Over Time")
-            st.plotly_chart(fig, use_container_width=True)
+            fig = px.area(
+                df,
+                x="timestamp",
+                y="tokens",
+                title="Context Tokens Over Time",
+            )
+            fig.update_layout(
+                hovermode='x unified',
+                xaxis_title="Time",
+                yaxis_title="Tokens Used",
+            )
+            fig.update_traces(
+                fillcolor='rgba(99, 110, 250, 0.3)',
+                line_color='#636efa',
+                line_width=2,
+            )
+            st.plotly_chart(fig, use_container_width=True, key="context_chart")
         
         # Operation distribution
         operations = Counter(
@@ -362,24 +478,56 @@ with autonomous_tab:
         ])
         st.dataframe(count_data, use_container_width=True, hide_index=True)
         
-        # Event timeline
+        # Enhanced event timeline
         st.subheader("Event Timeline")
         timeline_data = []
+        event_colors = {
+            "checkpoint": "#00cc96",
+            "critique": "#ef553b",
+            "escalation": "#ffa15a",
+            "prp_transition": "#ab63fa",
+            "approval": "#19d3f3",
+            "rejection": "#ff6692",
+        }
+        
         for event in events:
+            event_type = event.get("event", "unknown")
             timeline_data.append({
                 "Timestamp": event.get("timestamp", ""),
-                "Event": event.get("event", "unknown"),
+                "Event": event_type,
+                "Color": event_colors.get(event_type, "#636efa"),
             })
         
         df = pd.DataFrame(timeline_data)
-        fig = px.scatter(
-            df,
-            x="Timestamp",
-            y="Event",
-            title="Event Timeline",
+        
+        # Create interactive timeline
+        fig = go.Figure()
+        
+        for event_type in df["Event"].unique():
+            event_df = df[df["Event"] == event_type]
+            fig.add_trace(go.Scatter(
+                x=event_df["Timestamp"],
+                y=event_df["Event"],
+                mode='markers',
+                name=event_type,
+                marker=dict(
+                    size=12,
+                    color=event_df["Color"].iloc[0] if not event_df.empty else "#636efa",
+                    line=dict(width=1, color='white'),
+                ),
+                text=event_type,
+                hovertemplate='<b>%{y}</b><br>%{x}<extra></extra>',
+            ))
+        
+        fig.update_layout(
+            title="Autonomous Event Timeline",
             height=400,
+            hovermode='closest',
+            showlegend=True,
+            xaxis_title="Time",
+            yaxis_title="Event Type",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="timeline_chart")
         
         # Raw events
         with st.expander("Raw Events Data", expanded=False):

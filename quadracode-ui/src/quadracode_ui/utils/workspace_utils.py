@@ -366,6 +366,55 @@ def summarize_workspace_event(payload: dict[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"))[:200]
 
 
+def get_file_metadata(workspace_id: str, file_path: str) -> dict[str, Any]:
+    """
+    Retrieves metadata for a file in a workspace.
+
+    Args:
+        workspace_id: The workspace ID.
+        file_path: The full path to the file inside the workspace.
+
+    Returns:
+        A dictionary containing file metadata (size, modified_time, type).
+    """
+    safe_path = shlex.quote(file_path)
+    # Use stat to get file metadata (macOS compatible format)
+    command = f"stat -f '%z,%m,%HT' {safe_path} 2>&1 || stat -c '%s,%Y,%F' {safe_path} 2>&1"
+    success, stdout, _ = exec_in_workspace(workspace_id, command)
+    
+    if not success or not stdout:
+        return {
+            "size": 0,
+            "modified_time": "",
+            "file_type": "unknown",
+        }
+    
+    parts = stdout.strip().split(",")
+    if len(parts) >= 2:
+        try:
+            size = int(parts[0])
+            modified_timestamp = int(parts[1])
+            file_type = parts[2] if len(parts) > 2 else "file"
+            
+            # Convert timestamp to readable format
+            from datetime import UTC, datetime
+            modified_time = datetime.fromtimestamp(modified_timestamp, tz=UTC).isoformat()
+            
+            return {
+                "size": size,
+                "modified_time": modified_time,
+                "file_type": file_type,
+            }
+        except (ValueError, IndexError):
+            pass
+    
+    return {
+        "size": 0,
+        "modified_time": "",
+        "file_type": "unknown",
+    }
+
+
 def get_file_icon(file_path: str) -> str:
     """
     Returns an appropriate icon for a file based on its extension.

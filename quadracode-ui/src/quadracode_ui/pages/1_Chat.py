@@ -4,6 +4,7 @@ Chat interface page for Quadracode UI.
 This page provides the main chat interface for interacting with the orchestrator.
 """
 
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -13,7 +14,6 @@ from quadracode_ui.components.message_list import render_message_input, render_m
 from quadracode_ui.components.mode_toggle import render_mode_status
 from quadracode_ui.utils.message_utils import (
     active_supervisor,
-    poll_messages,
     send_message,
     set_supervisor,
     supervisor_mailbox,
@@ -23,6 +23,7 @@ from quadracode_ui.utils.persistence import (
     load_message_history,
     save_chat_metadata,
 )
+from quadracode_ui.utils.polling_thread import get_polling_thread
 from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
 from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
 
@@ -205,40 +206,36 @@ with st.sidebar:
     
     # Display settings
     st.subheader("Display Settings")
+    st.session_state.auto_refresh_enabled = st.checkbox(
+        "Auto-refresh for new messages",
+        value=st.session_state.get("auto_refresh_enabled", True),
+        help="Automatically check for new messages every 10 seconds",
+    )
     show_payload = st.checkbox("Show message payloads", value=False)
     auto_scroll = st.checkbox("Auto-scroll to new messages", value=True)
 
-# Poll for new messages
+# Initialize and manage background polling thread
 mailbox = supervisor_mailbox()
-messages, new_last_id = poll_messages(
+polling_thread = get_polling_thread(
     client,
     mailbox,
-    st.session_state.last_seen_id,
     st.session_state.chat_id,
+    st.session_state.last_seen_id,
 )
 
-# Update last seen ID
-if new_last_id != st.session_state.last_seen_id:
-    st.session_state.last_seen_id = new_last_id
+# Create a placeholder for dynamic message updates
+message_placeholder = st.empty()
 
-# Add new messages to history
-for envelope in messages:
-    trace_payload = envelope.payload.get("messages")
-    trace_list = trace_payload if isinstance(trace_payload, list) else None
-    st.session_state.history.append({
-        "role": "assistant",
-        "content": envelope.message,
-        "ticket_id": envelope.payload.get("ticket_id"),
-        "trace": trace_list,
-        "sender": envelope.sender,
-        "timestamp": envelope.payload.get("timestamp"),
-    })
+# Function to render current messages
+def render_current_messages():
+    if st.session_state.history:
+        render_message_list(st.session_state.history, show_payload=show_payload)
+    else:
+        st.info("👋 Start a conversation with the orchestrator!")
 
-# Render chat history
-if st.session_state.history:
-    render_message_list(st.session_state.history, show_payload=show_payload)
-else:
-    st.info("👋 Start a conversation with the orchestrator!")
+# Initial render
+with message_placeholder.container():
+    render_current_messages()
 
 # Message input
 prompt = render_message_input(
@@ -277,11 +274,51 @@ if prompt:
     
     st.rerun()
 
-# Auto-refresh
+# Auto-scroll
 if auto_scroll:
     st.markdown(
         "<script>window.scrollTo(0, document.body.scrollHeight);</script>",
         unsafe_allow_html=True,
     )
 
-
+# Periodic check for new messages from background thread
+# The background thread polls Redis Streams with blocking XREAD
+# We check every 10 seconds and only rerun if there are new messages
+if st.session_state.get("auto_refresh_enabled", True):
+    # Track when we last checked for messages
+    last_ui_check = st.session_state.get("last_ui_check_time", 0.0)
+    current_time = time.time()
+    
+    # Only check and potentially rerun every 10 seconds
+    if current_time - last_ui_check >= 10.0:
+        st.session_state.last_ui_check_time = current_time
+        
+        # Check if background thread has new messages
+        if polling_thread.has_new_messages():
+            # New messages available - get them and add to history
+            messages, new_last_id = polling_thread.get_new_messages()
+            
+            # Update last seen ID
+            st.session_state.last_seen_id = new_last_id
+            
+            # Add new messages to history
+            for envelope in messages:
+                trace_payload = envelope.payload.get("messages")
+                trace_list = trace_payload if isinstance(trace_payload, list) else None
+                st.session_state.history.append({
+                    "role": "assistant",
+                    "content": envelope.message,
+                    "ticket_id": envelope.payload.get("ticket_id"),
+                    "trace": trace_list,
+                    "sender": envelope.sender,
+                    "timestamp": envelope.payload.get("timestamp"),
+                })
+            
+            # Rerun to display the new messages
+            st.rerun()
+        else:
+            # No new messages - schedule next check by sleeping and rerunning
+            time.sleep(10.0)
+            st.rerun()
+    # If less than 10 seconds since last check, don't rerun automatically
+    # The page will naturally rerun on user interactions

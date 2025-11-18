@@ -23,7 +23,13 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Two-Level Autonomy Loop**: A `HumanClone` agent acts as a relentless, skeptical reviewer for the orchestrator, ensuring that work is never prematurely considered "done."
 - **MCP Integration**: Standardized tool interfaces via Model Context Protocol for seamless agent capability sharing
 - **Context Engineering Node**: Progressive loader, prioritised compression, LLM-backed summarisation, and Redis-backed metrics keep long-running chats sharp without losing history
-- **Full Observability**: Streamlit control plane with conversation management, real-time stream inspection, and message tracing
+- **Full Observability**: Streamlit control plane with:
+  - Real-time chat with 10-second background polling
+  - Advanced Redis Streams monitoring with time range and regex filtering
+  - Hierarchical workspace file browser with syntax highlighting
+  - Interactive Plotly dashboards for metrics visualization
+  - Agent activity drill-down and event timeline
+- **Workspace Isolation**: Docker-based sandboxed environments with volume persistence for agent file operations
 - **Workspace Integrity Management**: HumanClone rejections and exhaustion events trigger deterministic snapshots, diffable manifests, and checksum validation with automatic restoration when drift is detected
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
@@ -78,9 +84,10 @@ This monorepo contains several Python 3.12 packages and supporting assets:
 - `quadracode-orchestrator/` — Orchestrator service wrapper. Provides system prompt, runtime profile, and process entrypoint to run the orchestrator graph.
 - `quadracode-agent/` — Generic agent service wrapper. Uses the shared runtime with the agent profile to execute delegated work.
 - `quadracode-agent-registry/` — Uvicorn/FastAPI registry on port 8090 for agent discovery, health, and stats used by the orchestrator.
-- `quadracode-tools/` — Reusable tools exposed to agents (LangChain and MCP-backed) such as `agent_registry`, file IO, bash, etc.
+- `quadracode-tools/` — Reusable tools exposed to agents (LangChain and MCP-backed) such as `agent_management`, workspace management, file IO, etc.
 - `quadracode-contracts/` — Shared Pydantic models and message envelope contracts used across services.
-- `quadracode-ui/` — Streamlit UI for multi-chat control plane and live stream inspection.
+- `quadracode-ui/` — Streamlit UI with 5 pages: Chat (background polling), Mailbox Monitor (advanced filtering), Workspaces (hierarchical tree), Dashboard (Plotly charts), and Prompt Settings.
+- `Dockerfile.workspace` — Docker image for sandboxed workspace containers (`quadracode-workspace:latest`)
 - `scripts/` — Agent management helpers for Docker/Kubernetes and stream tailing utilities.
 - `tests/e2e_advanced/` — Comprehensive long-running E2E test suite with smoke tests, metrics collection, and reporting
 
@@ -96,17 +103,40 @@ Quadracode is built for Always-On AI: agents and orchestrators maintain progress
 ## Architecture Overview
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│  Streamlit  │◄────►│ Redis Streams    │◄────►│  Orchestrator   │
-│     UI      │      │  (Event Fabric)  │      │    Runtime      │
-└─────────────┘      └──────────────────┘      └────────┬────────┘
-                              ▲                         │
-                              │                         │ spawns/deletes
-                              │                         ▼
-                     ┌────────┴────────┐      ┌─────────────────┐
-                     │  Agent Registry │      │  Dynamic Agent  │
-                     │   (FastAPI)     │      │      Fleet      │
-                     └─────────────────┘      └─────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     Streamlit UI (port 8501)                     │
+│  💬 Chat  |  📡 Mailbox Monitor  |  📁 Workspaces  |  📊 Dashboard │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │ (background polling)
+                         ▼
+              ┌──────────────────┐
+              │  Redis Streams   │
+              │  (Event Fabric)  │
+              └─────────┬────────┘
+                        │
+       ┌────────────────┼────────────────┐
+       ▼                ▼                ▼
+┌─────────────┐  ┌─────────────┐  ┌──────────────┐
+│Orchestrator │  │Agent Runtime│  │HumanClone    │
+│  Runtime    │  │             │  │  Runtime     │
+└──────┬──────┘  └─────────────┘  └──────────────┘
+       │
+       │ spawns/manages via Docker socket
+       ▼
+┌──────────────────────────────────────────┐
+│     Dynamic Fleet & Workspace Engine     │
+│  ┌───────────┐  ┌────────────────────┐  │
+│  │  Agents   │  │ Workspace Volumes  │  │
+│  │ (on-demand│  │ (persistent files) │  │
+│  └───────────┘  └────────────────────┘  │
+└──────────┬───────────────────────────────┘
+           │
+           ▼
+    ┌─────────────┐
+    │   Agent     │
+    │  Registry   │
+    │  (FastAPI)  │
+    └─────────────┘
 ```
 
 ### Core Components
@@ -115,8 +145,13 @@ Quadracode is built for Always-On AI: agents and orchestrators maintain progress
 - **LangGraph runtimes** consume their mailbox, execute stateful graphs, and publish responses back onto the fabric
 - **Agent Registry** (FastAPI on port `8090`) tracks agent identities, health, and ports for dynamic routing
 - **Agent Management** scripts and tools enable the orchestrator to spawn/delete agents autonomously based on workload
+- **Workspace Engine** (Docker-based) provides isolated containers with mounted volumes for agent file operations
 - **Redis-MCP proxy** exposes the Redis transport to MCP-compatible clients for runtime tool loading
-- **Streamlit UI** (`8501`) provides multi-chat management, live stream inspection, and trace visualization
+- **Streamlit UI** (port `8501`) provides comprehensive control plane:
+  - Real-time chat with background polling
+  - Advanced mailbox monitoring with filtering
+  - Hierarchical workspace file browser
+  - Interactive Plotly dashboards with metrics
 - **Context Metrics Stream** (`qc:context:metrics`) records every `pre_process`, `post_process`, `tool_response`, `curation`, `load`, `externalize`, and `governor_plan` event so you can audit what the context engine did turn-by-turn
 
 Every message is a simple envelope: `timestamp`, `sender`, `recipient`, `message`, and `payload` (JSON). The payload carries threading metadata, correlation IDs, tool outputs, and routing hints.
@@ -223,19 +258,29 @@ Notes
 - `.env` is used by local tooling and host processes (UI, tests).
 - `.env.docker` is mounted into containers by Compose so services inherit the same keys.
 
-### 2. Launch Services (Docker)
+### 2. Build Workspace Image
+
+Build the workspace Docker image that agents use for sandboxed execution:
 
 ```bash
-# Bring up Redis, registry, orchestrator, and agent runtimes
-docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+docker build -f Dockerfile.workspace -t quadracode-workspace:latest .
+```
+
+This image provides a Python 3.12 environment with build tools, Node.js, UV, and common development utilities.
+
+### 3. Launch Services (Docker)
+
+```bash
+# Bring up all services including UI
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime ui
 
 # Verify services are healthy
 docker compose ps
 ```
 
-The orchestrator will have access to the Docker socket and can spawn additional agents dynamically as workload requires.
+The orchestrator will have access to the Docker socket and can spawn additional agents and workspaces dynamically as workload requires.
 
-### 3. Run the UI
+**Alternatively, run UI locally for development:**
 
 ```bash
 # Create virtual environment (one-time setup)
@@ -252,9 +297,20 @@ REDIS_HOST=localhost REDIS_PORT=6379 AGENT_REGISTRY_URL=http://localhost:8090 \
 
 ### 4. Access the UI
 
-Open http://localhost:8501 and start a conversation. The orchestrator will delegate work to agents and dynamically scale the fleet as needed. You'll see real-time updates as the system processes your request.
+Open **http://localhost:8501** to access the Streamlit control plane. The UI provides:
 
-When experimenting with HUMAN_OBSOLETE mode, open the sidebar and enable **Autonomous Mode**. You can configure guardrails (max iterations, runtime hours, transient agent cap) and trigger an emergency stop if you want to return control to the human. The chat UI also exposes an **Autonomous** tab that streams checkpoints, critiques, guardrail hits, and escalations emitted by the runtime.
+- **💬 Chat page**: Send messages to the orchestrator with automatic 10-second background polling for responses
+- **📡 Mailbox Monitor**: View all Redis Streams traffic with advanced filtering (time range, regex, sender/recipient)
+- **📁 Workspaces**: Create/manage Docker-based workspaces, browse files in hierarchical tree view with syntax highlighting
+- **📊 Dashboard**: Interactive Plotly charts showing context metrics, agent status, and autonomous event timeline
+
+**Autonomous Mode:**
+In the Chat page sidebar, enable **Autonomous Mode** to activate HumanClone operation. Configure guardrails:
+- Max iterations (default: 1000)
+- Max runtime hours (default: 48)
+- Max agents (default: 4)
+
+The orchestrator will operate autonomously within these constraints. Use the emergency stop button if needed to return control to human supervision.
 
 #### HUMAN_OBSOLETE Autonomy Loop
 
@@ -292,19 +348,16 @@ When experimenting with HUMAN_OBSOLETE mode, open the sidebar and enable **Auton
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Optional**: Containerize the UI by uncommenting the `ui` service in `docker-compose.yml`:
-
-```bash
-docker compose up -d ui
-```
-
 ### Endpoints
 
-- **UI**: http://localhost:8501
-- **Agent registry**: http://localhost:8090
+After launching the stack, access these services:
+
+- **UI (Streamlit)**: http://localhost:8501
+- **Agent Registry API**: http://localhost:8090
+- **Orchestrator LangGraph Studio** (dev mode): http://localhost:8123
 - **Redis CLI**: `docker compose exec -T redis redis-cli ...`
 - **Stream tailer**: `bash scripts/tail_streams.sh`
- - **Workspace purge**: `bash scripts/agent-management/purge-workspaces.sh --dry-run`
+- **Workspace purge**: `bash scripts/agent-management/purge-workspaces.sh --dry-run`
 
 ## Kubernetes Deployment
 
@@ -337,13 +390,48 @@ When a spike in requests arrives, the orchestrator automatically scales the agen
 
 ## Streamlit Control Plane
 
-- **Chat sidebar**: ChatGPT-style conversation list (new chat, rename, switch). Each chat persists its history and baseline stream offset
-- **Chat view**: Real-time conversation with trace expanders revealing `payload.messages` for every response
-- **Streams tab**: Raw Redis mailbox inspector with manual refresh, ordering controls, and JSON payload display
-- **Context Metrics tab**: Live charts sourced from `qc:context:metrics` showing quality scores, focus metrics, and operation distributions emitted by the context engineering node
-- **Registry panel**: Summaries of total/healthy agents; orchestrator determines routing and scaling dynamically
+The Quadracode UI is a comprehensive Streamlit-based control plane providing real-time observability, workspace management, and chat interface.
 
-The UI writes `chat_id` and `ticket_id` into each payload. A per-session watcher thread maintains a blocking `XREAD` on `qc:mailbox/human`; when a new envelope arrives, it triggers a Streamlit rerun. The interface remains responsive even when no traffic is flowing.
+### Features
+
+**💬 Chat Interface**
+- Real-time conversation with orchestrator via background polling (auto-refresh every 10 seconds)
+- Human/HumanClone mode toggle for autonomous operation
+- Persistent chat history loaded from Redis on startup
+- Enhanced message bubbles with color-coding (blue=human, purple=orchestrator, green=agents)
+- Markdown rendering and expandable trace/payload views
+- "Clear All Context" button to wipe entire deployment state
+
+**📡 Mailbox Monitor**
+- Real-time view of all Redis Streams traffic across the system
+- Advanced filtering: Time range (5/15/60 min, 24h, custom), Regex search, Sender/Recipient filters
+- Message detail panel with full metadata, relative timestamps, copy buttons
+- Configurable auto-refresh (1-60 seconds)
+- Stream health indicators (✓ Active | ○ Idle | ✗ Error)
+- Table/Cards/Detailed display modes
+
+**📁 Workspace Browser**
+- Create and destroy Docker-based workspaces with mounted volumes
+- Hierarchical file tree with expandable folders (3+ levels deep)
+- File metadata display: size (B/KB/MB), modified time, file type
+- Syntax-highlighted code viewer (Pygments with monokai theme)
+- File search and type filtering
+- Export workspace files to local machine
+- Workspace event stream viewer
+- "Destroy All Workspaces" batch deletion with confirmation
+
+**📊 System Dashboard**
+- Interactive Plotly charts: Quality Score Trend, Context Window Usage, Operation Distribution
+- Agent activity drill-down with detailed metrics
+- Color-coded event timeline for autonomous operations
+- Agent status/type distribution (donut and bar charts)
+- Configurable history depth and auto-refresh
+
+**⚙️ Prompt Settings**
+- System prompt template management
+- Variable substitution and preview
+
+The UI uses a background polling thread with blocking `XREAD` on Redis Streams. When new messages arrive, the thread signals the UI to rerun, displaying updates automatically without user interaction. All state (chat history, workspace descriptors, autonomous settings) persists in Redis and survives UI restarts.
 
 ## Development
 
@@ -547,8 +635,9 @@ quadracode/
 ├── quadracode-agent/          # Agent profile and prompts
 ├── quadracode-agent-registry/ # FastAPI service for agent registration and health
 ├── quadracode-contracts/      # Pydantic envelope contracts and mailbox helpers
-├── quadracode-tools/          # Reusable MCP / LangChain tool wrappers (includes agent_management)
-├── quadracode-ui/             # Streamlit chat client with multi-thread controls
+├── quadracode-tools/          # Reusable MCP / LangChain tool wrappers (includes workspace management)
+├── quadracode-ui/             # Streamlit UI (5 pages: Chat, Mailbox Monitor, Workspaces, Dashboard, Prompt Settings)
+├── Dockerfile.workspace       # Workspace container image for sandboxed agent operations
 ├── scripts/
 │   ├── agent-management/      # Shell scripts for spawning/deleting agents (Docker + K8s)
 │   └── ...                    # Other operational scripts
@@ -844,5 +933,16 @@ export QUADRACODE_REDUCER_MODEL=heuristic
 
 ## Docker Stack
 
-- Bring up Redis, registry, orchestrator, and agent runtimes: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime`
-- Tail streams: `bash scripts/tail_streams.sh`
+```bash
+# Build workspace image (one-time)
+docker build -f Dockerfile.workspace -t quadracode-workspace:latest .
+
+# Bring up all services including UI
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime ui
+
+# Verify services are running
+docker compose ps
+
+# Access UI at http://localhost:8501
+# Tail streams: bash scripts/tail_streams.sh
+```

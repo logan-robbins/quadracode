@@ -2,6 +2,7 @@
 File browser component for workspace file exploration.
 """
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -13,14 +14,105 @@ from pygments.util import ClassNotFound
 
 from quadracode_ui.utils.workspace_utils import (
     get_file_icon,
+    get_file_metadata,
     list_workspace_files,
     read_workspace_file,
 )
 
 
+def build_file_tree_structure(files: list[str]) -> dict[str, Any]:
+    """
+    Builds a hierarchical tree structure from a flat list of file paths.
+    
+    Args:
+        files: List of file paths.
+    
+    Returns:
+        A nested dictionary representing the folder structure.
+    """
+    tree: dict[str, Any] = {"_files": [], "_dirs": {}}
+    
+    for file_path in files:
+        path = Path(file_path)
+        parts = path.parts
+        
+        # Navigate/create directory structure
+        current_level = tree
+        for i, part in enumerate(parts[:-1]):  # All but the last (filename)
+            if part not in current_level["_dirs"]:
+                current_level["_dirs"][part] = {"_files": [], "_dirs": {}}
+            current_level = current_level["_dirs"][part]
+        
+        # Add file to the appropriate directory level
+        current_level["_files"].append(file_path)
+    
+    return tree
+
+
+def render_hierarchical_tree(
+    workspace_id: str,
+    tree: dict[str, Any],
+    path_prefix: str = "",
+    level: int = 0,
+) -> str | None:
+    """
+    Recursively renders a hierarchical file tree with expandable folders.
+    
+    Args:
+        workspace_id: The workspace ID.
+        tree: The tree structure dictionary.
+        path_prefix: Current path prefix for building full paths.
+        level: Current nesting level for visual indentation.
+    
+    Returns:
+        Selected file path or None.
+    """
+    selected_file = None
+    indent = "  " * level
+    
+    # Render directories (folders)
+    for dir_name in sorted(tree["_dirs"].keys()):
+        dir_path = f"{path_prefix}/{dir_name}" if path_prefix else dir_name
+        
+        with st.expander(f"📁 {dir_name}", expanded=level < 2):
+            # Recursively render subdirectories and files
+            result = render_hierarchical_tree(
+                workspace_id,
+                tree["_dirs"][dir_name],
+                dir_path,
+                level + 1,
+            )
+            if result:
+                selected_file = result
+    
+    # Render files in current directory
+    for file_path in sorted(tree["_files"]):
+        path = Path(file_path)
+        icon = get_file_icon(file_path)
+        
+        # Get file metadata
+        metadata = get_file_metadata(workspace_id, file_path)
+        size_kb = metadata.get("size", 0) / 1024
+        size_display = f"{size_kb:.1f} KB" if size_kb > 0 else "0 KB"
+        
+        # Create clickable file button with metadata
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            if st.button(
+                f"{icon} {path.name}",
+                key=f"file_btn_{workspace_id}_{file_path}",
+                use_container_width=True,
+            ):
+                selected_file = file_path
+        with col2:
+            st.caption(size_display)
+    
+    return selected_file
+
+
 def render_file_tree(workspace_id: str) -> str | None:
     """
-    Renders a file tree browser for a workspace.
+    Renders a file tree browser for a workspace with hierarchical structure.
 
     Args:
         workspace_id: The workspace ID to browse.
@@ -28,43 +120,28 @@ def render_file_tree(workspace_id: str) -> str | None:
     Returns:
         The selected file path, or None if no selection.
     """
+    # Initialize selected file in session state
+    session_key = f"selected_file_{workspace_id}"
+    if session_key not in st.session_state:
+        st.session_state[session_key] = None
+    
     files = list_workspace_files(workspace_id)
     
     if not files:
         st.info("No files found in workspace")
         return None
     
-    # Organize files by directory
-    file_tree: dict[str, list[str]] = {}
-    for file_path in files:
-        path = Path(file_path)
-        parent = str(path.parent)
-        if parent not in file_tree:
-            file_tree[parent] = []
-        file_tree[parent].append(file_path)
+    # Build hierarchical structure
+    tree_structure = build_file_tree_structure(files)
     
-    # Create selectbox with icons
-    file_options = []
-    for file_path in sorted(files):
-        icon = get_file_icon(file_path)
-        file_options.append(f"{icon} {file_path}")
+    # Render hierarchical tree
+    selected = render_hierarchical_tree(workspace_id, tree_structure)
     
-    if not file_options:
-        st.info("No files available")
-        return None
-    
-    selected = st.selectbox(
-        "Select file to view",
-        options=file_options,
-        key=f"file_browser_{workspace_id}",
-    )
-    
+    # Update session state if a file was selected
     if selected:
-        # Remove icon from selection
-        file_path = selected.split(" ", 1)[1] if " " in selected else selected
-        return file_path
+        st.session_state[session_key] = selected
     
-    return None
+    return st.session_state[session_key]
 
 
 def render_file_content(
@@ -88,12 +165,52 @@ def render_file_content(
         st.error(f"Failed to read file: {content}")
         return
     
-    # Show file metadata
+    # Show detailed file metadata
     path = Path(file_path)
-    cols = st.columns(3)
-    cols[0].caption(f"**File:** {path.name}")
-    cols[1].caption(f"**Size:** {len(content)} bytes")
-    cols[2].caption(f"**Type:** {path.suffix or 'no extension'}")
+    metadata = get_file_metadata(workspace_id, file_path)
+    
+    # Metadata display
+    meta_cols = st.columns(4)
+    
+    with meta_cols[0]:
+        st.caption("**File:**")
+        st.code(path.name, language=None)
+    
+    with meta_cols[1]:
+        size_bytes = metadata.get("size", len(content))
+        if size_bytes < 1024:
+            size_display = f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            size_display = f"{size_bytes / 1024:.1f} KB"
+        else:
+            size_display = f"{size_bytes / (1024 * 1024):.1f} MB"
+        
+        st.caption("**Size:**")
+        st.code(size_display, language=None)
+    
+    with meta_cols[2]:
+        st.caption("**Type:**")
+        st.code(path.suffix or 'no ext', language=None)
+    
+    with meta_cols[3]:
+        modified_time = metadata.get("modified_time", "")
+        if modified_time:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(modified_time.replace("Z", "+00:00"))
+                time_display = dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                time_display = "unknown"
+        else:
+            time_display = "unknown"
+        
+        st.caption("**Modified:**")
+        st.code(time_display, language=None)
+    
+    # Full path display
+    with st.expander("📂 Full Path & Metadata", expanded=False):
+        st.code(file_path, language=None)
+        st.json(metadata)
     
     # Determine language for syntax highlighting
     if syntax_highlight:
