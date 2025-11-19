@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import warnings
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
@@ -122,10 +123,75 @@ def _ensure_npx_available(server_name: str) -> None:
     )
 
 
+def _running_inside_container() -> bool:
+    """Heuristic to detect containerized execution (Docker/Kubernetes)."""
+    return Path("/.dockerenv").exists() or os.environ.get("QUADRACODE_IN_CONTAINER") == "1"
+
+
+def _shared_path_candidates() -> List[Path]:
+    configured = os.environ.get("SHARED_PATH")
+    candidates: List[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    override = os.environ.get("QUADRACODE_LOCAL_SHARED_PATH")
+    if override:
+        override_path = Path(override).expanduser()
+        if override_path not in candidates:
+            candidates.append(override_path)
+
+    docker_first = _running_inside_container()
+    defaults = [
+        Path("/shared"),
+        Path.home() / ".quadracode" / "shared",
+    ]
+    if not docker_first:
+        defaults.reverse()
+
+    for default in defaults:
+        if default not in candidates:
+            candidates.append(default)
+
+    return candidates
+
+
+def _resolve_shared_path() -> str:
+    """
+    Ensures the configured shared path is writable, falling back to a local directory.
+    """
+    last_error: Exception | None = None
+    for candidate in _shared_path_candidates():
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:  # noqa: BLE001 - want to keep the real error context.
+            LOGGER.warning("Failed to prepare SHARED_PATH '%s': %s", candidate, exc)
+            last_error = exc
+            continue
+        if os.access(candidate, os.W_OK):
+            resolved = str(candidate)
+            previous = os.environ.get("SHARED_PATH")
+            os.environ["SHARED_PATH"] = resolved
+            if previous and previous != resolved:
+                LOGGER.info(
+                    "SHARED_PATH '%s' not usable; using '%s' for local execution.",
+                    previous,
+                    resolved,
+                )
+            elif not previous:
+                LOGGER.info("Using default SHARED_PATH '%s'.", resolved)
+            return resolved
+        LOGGER.warning("Shared path '%s' is not writable; trying next candidate.", candidate)
+
+    raise RuntimeError(
+        "Unable to locate a writable SHARED_PATH. Set SHARED_PATH or "
+        "QUADRACODE_LOCAL_SHARED_PATH to a directory the host can access."
+    ) from last_error
+
+
 def _filesystem_server() -> Dict[str, Any]:
     """Builds the configuration for the filesystem MCP server."""
     _ensure_npx_available("filesystem")
-    root = _require_env("SHARED_PATH")
+    root = _resolve_shared_path()
     return {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", root],

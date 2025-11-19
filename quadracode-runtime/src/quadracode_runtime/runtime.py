@@ -37,7 +37,12 @@ from quadracode_contracts import (
 )
 from quadracode_tools.tools.workspace import ensure_workspace
 
-from .graph import CHECKPOINTER, GRAPH_RECURSION_LIMIT, build_graph
+from .graph import (
+    CHECKPOINTER,
+    GRAPH_RECURSION_LIMIT,
+    USE_CUSTOM_CHECKPOINTER,
+    build_graph,
+)
 from .logging_utils import configure_logging
 from .messaging import RedisMCPMessaging
 from .profiles import RuntimeProfile, is_autonomous_mode_enabled
@@ -369,6 +374,11 @@ class RuntimeRunner:
             poll_interval: The interval in seconds for polling the message bus.
             batch_size: The maximum number of messages to process in each poll.
         """
+        if not USE_CUSTOM_CHECKPOINTER:
+            raise RuntimeError(
+                "Quadracode runtime requires persistence. Disable QUADRACODE_LOCAL_DEV_MODE "
+                "or run inside Docker before starting runtime services."
+            )
         self._profile = profile
         self._poll_interval = poll_interval
         self._batch_size = batch_size

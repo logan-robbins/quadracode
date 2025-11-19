@@ -31,6 +31,37 @@ from .nodes.tool_node import QuadracodeTools
 from .state import QuadraCodeState, RuntimeState
 
 
+_BOOL_TRUE = {"1", "true", "yes", "on"}
+_BOOL_FALSE = {"0", "false", "no", "off"}
+
+
+def _optional_bool(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized in _BOOL_TRUE:
+        return True
+    if normalized in _BOOL_FALSE:
+        return False
+    return None
+
+
+def _running_inside_container() -> bool:
+    return Path("/.dockerenv").exists() or os.environ.get("QUADRACODE_IN_CONTAINER") == "1"
+
+
+def _is_local_dev_mode() -> bool:
+    override = _optional_bool(os.environ.get("QUADRACODE_LOCAL_DEV_MODE"))
+    if override is not None:
+        return override
+    return not _running_inside_container()
+
+
+USE_CUSTOM_CHECKPOINTER = not _is_local_dev_mode()
+
+
 def _default_checkpoint_path() -> Path:
     """
     Determines the default path for the SQLite checkpoint database.
@@ -65,6 +96,8 @@ def _build_checkpointer():
     Builds the checkpointer for the graph, using SQLite if available, otherwise 
     falling back to an in-memory checkpointer.
     """
+    if not USE_CUSTOM_CHECKPOINTER:
+        return MemorySaver()
     if SqliteSaver is None:
         return MemorySaver()
 
@@ -143,4 +176,5 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         )
         workflow.add_edge("tools", "driver")
 
-    return workflow.compile(checkpointer=CHECKPOINTER)
+    checkpointer = CHECKPOINTER if USE_CUSTOM_CHECKPOINTER else None
+    return workflow.compile(checkpointer=checkpointer)
