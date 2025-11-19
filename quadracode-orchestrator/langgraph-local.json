@@ -3,7 +3,7 @@
         "pyproject.toml"
     ],
     "graphs": {
-        "orchestrator": "./src/quadracode_orchestrator/graph.py:graph"
+        "orchestrator": "./quadracode-orchestrator/src/quadracode_orchestrator/graph.py:graph"
     },
-    "env": "../.env"
+    "env": "./.env"
 }

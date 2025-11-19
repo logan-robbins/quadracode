@@ -3,7 +3,7 @@
         "pyproject.toml"
     ],
     "graphs": {
-        "agent": "./src/quadracode_agent/graph.py:graph"
+        "agent": "./quadracode-agent/src/quadracode_agent/graph.py:graph"
     },
-    "env": "../.env"
+    "env": "./.env"
 }

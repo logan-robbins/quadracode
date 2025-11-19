@@ -14,6 +14,14 @@ dependencies = [
   "watchdog>=6.0.0",
   "python-dotenv>=1.0.0",
   "pytest>=8.2",
+  "langgraph>=0.6.11",
+  "langgraph-api>=0.5.16",
+  "langgraph-cli>=0.4.7",
+  "langgraph-checkpoint>=3.0.1",
+  "langgraph-checkpoint-sqlite>=2.0.10",
+  "langgraph-prebuilt>=0.6.5",
+  "langgraph-runtime-inmem>=0.18.0",
+  "langgraph-sdk>=0.2.9",
 ]
 
 [tool.uv.sources]
