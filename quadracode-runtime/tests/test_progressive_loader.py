@@ -15,6 +15,14 @@ def _make_message(content: str):
     return DummyMessage(content)
 
 
+def _make_structured_message(chunks):
+    class DummyMessage:
+        def __init__(self, data):
+            self.content = data
+
+    return DummyMessage(chunks)
+
+
 def test_loader_identifies_needs_from_intent() -> None:
     config = ContextEngineConfig()
     loader = ProgressiveContextLoader(config)
@@ -76,3 +84,24 @@ def test_loader_generates_search_segment() -> None:
     search_segments = [segment for segment in result["context_segments"] if segment["type"] == "code_search_results"]
     assert search_segments, "Expected code search results segment"
     assert "ProgressiveContextLoader" in search_segments[0]["content"]
+
+
+def test_loader_handles_structured_message_chunks() -> None:
+    config = ContextEngineConfig()
+    loader = ProgressiveContextLoader(config)
+
+    rich_message = _make_structured_message(
+        [
+            {"type": "text", "text": "Refactor the failing code module"},
+            {"type": "text", "text": "Also expand tests to cover regressions."},
+            {"type": "metadata", "data": {"severity": "high"}},
+        ]
+    )
+    state = make_initial_context_engine_state(context_window_max=config.context_window_max)
+    state["messages"] = [rich_message]
+
+    result = asyncio.run(loader.prepare_context(state))
+
+    types = {segment["type"] for segment in result["context_segments"]}
+    assert "code_context" in types
+    assert "test_suite" in types

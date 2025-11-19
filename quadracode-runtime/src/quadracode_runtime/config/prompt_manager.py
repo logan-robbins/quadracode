@@ -5,6 +5,7 @@ This module provides utilities for managing prompt templates across the runtime,
 including loading from files, environment variables, Redis, and runtime updates.
 """
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -91,22 +92,43 @@ class PromptManager:
         return Path.home() / ".quadracode" / "prompt_templates.json"
     
     def _init_redis(self) -> None:
-        """Initialize Redis connection if available."""
+        """Initialize Redis connection if available, avoiding event-loop blocking."""
+        allow_blocking = str(os.environ.get("QUADRACODE_PROMPT_ALLOW_BLOCKING", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        loop_running = False
+        try:
+            asyncio.get_running_loop()
+            loop_running = True
+        except RuntimeError:
+            loop_running = False
+
+        if loop_running and not allow_blocking:
+            LOGGER.info(
+                "Active event loop detected; skipping Redis prompt configuration to avoid blocking. "
+                "Set QUADRACODE_PROMPT_ALLOW_BLOCKING=1 to force Redis usage."
+            )
+            self._redis_client = None
+            return
+
         try:
             redis_host = os.environ.get("REDIS_HOST", "redis")
             redis_port = int(os.environ.get("REDIS_PORT", "6379"))
-            
+
             self._redis_client = redis.Redis(
-                host=redis_host, 
-                port=redis_port, 
+                host=redis_host,
+                port=redis_port,
                 decode_responses=True,
-                socket_connect_timeout=2
+                socket_connect_timeout=2,
             )
-            
+
             # Test connection
             self._redis_client.ping()
             LOGGER.info(f"Connected to Redis at {redis_host}:{redis_port}")
-            
+
         except Exception as e:
             LOGGER.warning(f"Redis not available: {e}. Using file-based configuration only.")
             self._redis_client = None

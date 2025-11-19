@@ -227,7 +227,7 @@ class ProgressiveContextLoader:
 
     async def _extract_intent(self, message: Any) -> Set[str]:
         """Extracts the user's intent from a message."""
-        content = "".join(message.content) if hasattr(message, "content") else str(message)
+        content = self._message_to_text(message)
         lowered = content.lower()
         intent_markers = {
             "code": {"implement", "function", "refactor", "code", "module"},
@@ -738,7 +738,7 @@ class ProgressiveContextLoader:
         if not state.get("messages"):
             return set()
         last_message = state["messages"][-1]
-        content = "".join(last_message.content) if hasattr(last_message, "content") else str(last_message)
+        content = self._message_to_text(last_message)
         stop_words = {
             "please",
             "could",
@@ -758,6 +758,35 @@ class ProgressiveContextLoader:
             if len(terms) >= 8:
                 break
         return terms
+
+    def _message_to_text(self, message: Any) -> str:
+        """Coerces a LangChain/LangGraph message into plain text."""
+        raw = getattr(message, "content", message)
+        return self._coerce_content(raw).strip()
+
+    def _coerce_content(self, raw: Any) -> str:
+        if raw is None:
+            return ""
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, list):
+            fragments = [self._coerce_content(item) for item in raw]
+            return "\n".join(fragment for fragment in fragments if fragment)
+        if isinstance(raw, dict):
+            for key in ("text", "content", "message"):
+                value = raw.get(key)
+                if isinstance(value, str):
+                    return value
+            data = raw.get("data")
+            if isinstance(data, (str, list, dict)):
+                coerced = self._coerce_content(data)
+                if coerced:
+                    return coerced
+            try:
+                return json.dumps(raw, ensure_ascii=False)
+            except Exception:
+                return str(raw)
+        return str(raw)
 
     def _build_segment(
         self,
