@@ -13,6 +13,7 @@ most appropriate operation for each one.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections import deque
@@ -288,7 +289,7 @@ class ContextCurator:
         self, segment: ContextSegment, state: ContextEngineState
     ) -> Tuple[ContextSegment, Dict[str, str]]:
         """Handler for the EXTERNALIZE operation."""
-        pointer, reference = self._externalize_segment(segment)
+        pointer, reference = await asyncio.to_thread(self._externalize_segment, segment)
         return pointer, reference
 
     async def _handle_isolate(

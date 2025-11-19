@@ -25,7 +25,9 @@ recorder instance, making it easy to integrate logging throughout the runtime.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import logging
 import os
 import threading
 from datetime import datetime, timezone
@@ -111,6 +113,9 @@ def _cycle_id_from_state(state: MutableMapping[str, Any]) -> str:
     return f"cycle-{cycle_number}"
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class TimeTravelRecorder:
     """
     An append-only recorder for runtime events, designed for observability and deterministic replay.
@@ -138,9 +143,9 @@ class TimeTravelRecorder:
     ) -> None:
         raw_dir = base_dir or os.environ.get("QUADRACODE_TIME_TRAVEL_DIR", "./time_travel_logs")
         self.base_dir = Path(raw_dir).expanduser().resolve()
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.retention = retention
         self._locks: Dict[Path, threading.Lock] = {}
+        self._pending_writes: List[asyncio.Task] = []
 
     def log_stage(
         self,
@@ -261,6 +266,10 @@ class TimeTravelRecorder:
         This internal method constructs the final log entry dictionary, appends it
         to the in-memory `time_travel_log` within the state, and writes it as a
         JSON line to the appropriate thread-specific log file.
+        
+        The file I/O is performed asynchronously when possible to avoid blocking
+        the event loop. When called from a sync context, it schedules the write
+        as a background task.
 
         Args:
             state: The runtime state.
@@ -285,7 +294,38 @@ class TimeTravelRecorder:
             log.append(entry)
             if self.retention and len(log) > self.retention:
                 del log[0 : len(log) - self.retention]
-        self._write_entry(entry, self._log_path(metadata["thread_id"]))
+        
+        # Schedule the blocking file I/O without awaiting
+        self._schedule_write(entry, self._log_path(metadata["thread_id"]))
+    
+    def _schedule_write(self, entry: Dict[str, Any], path: Path) -> None:
+        """
+        Schedules a write operation, executing it asynchronously if in an async context,
+        or synchronously as a fallback.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running event loop - we're in a sync context.
+            self._write_entry_sync(entry, path)
+            return
+
+        task = loop.create_task(asyncio.to_thread(self._write_entry_sync, entry, path))
+        self._track_pending_write(task)
+
+    def _track_pending_write(self, task: asyncio.Task) -> None:
+        """Keeps pending writes alive and surfaces background failures."""
+        self._pending_writes.append(task)
+
+        def _cleanup(completed: asyncio.Task) -> None:
+            try:
+                completed.result()
+            except Exception:
+                LOGGER.exception("Time-travel log write failed")
+            finally:
+                self._pending_writes = [t for t in self._pending_writes if not t.done()]
+
+        task.add_done_callback(_cleanup)
 
     def _metadata(self, state: MutableMapping[str, Any]) -> Dict[str, Any]:
         thread_id = str(state.get("thread_id") or "global")
@@ -304,7 +344,9 @@ class TimeTravelRecorder:
         sanitized = thread_id.replace("/", "_")
         return self.base_dir / f"{sanitized}.jsonl"
 
-    def _write_entry(self, entry: Dict[str, Any], path: Path) -> None:
+    def _write_entry_sync(self, entry: Dict[str, Any], path: Path) -> None:
+        """Synchronous file write with thread-safe locking."""
+        path.parent.mkdir(parents=True, exist_ok=True)
         lock = self._locks.setdefault(path, threading.Lock())
         with lock, path.open("a", encoding="utf-8") as handle:
             handle.write(_safe_json_dump(entry))

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -52,7 +53,7 @@ def test_prp_trigger_check_converts_message_to_tool_event() -> None:
     message = HumanMessage(content=json.dumps(_make_trigger_payload()))
     state["messages"].append(message)
 
-    updated = prp_trigger_check(state)
+    updated = asyncio.run(prp_trigger_check(state))
 
     assert updated["prp_state"] == PRPState.HYPOTHESIZE
     assert updated["exhaustion_mode"] == ExhaustionMode.TEST_FAILURE

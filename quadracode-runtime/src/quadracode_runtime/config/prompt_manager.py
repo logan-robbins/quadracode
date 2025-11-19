@@ -87,10 +87,8 @@ class PromptManager:
             if path.exists():
                 return path
         
-        # Default to user config directory
-        default_path = Path.home() / ".quadracode" / "prompt_templates.json"
-        default_path.parent.mkdir(parents=True, exist_ok=True)
-        return default_path
+        # Default to user config directory (lazy creation to avoid blocking event loop)
+        return Path.home() / ".quadracode" / "prompt_templates.json"
     
     def _init_redis(self) -> None:
         """Initialize Redis connection if available."""

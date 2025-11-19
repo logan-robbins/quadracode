@@ -448,9 +448,11 @@ uv sync
 
 ### Run LangGraph Dev Servers
 
+These commands start the LangGraph Dev UI locally for debugging, using `.env` (with `QUADRACODE_LOCAL_DEV_MODE=1`) so no custom checkpointer is passed.
+
 ```bash
-# Terminal 1: Orchestrator
-uv run langgraph dev orchestrator --config quadracode-orchestrator/langgraph-local.json
+# Terminal 1: Orchestrator (LangGraph Dev UI on port 8123)
+uv run langgraph dev --config quadracode-orchestrator/langgraph-local.json --port 8123
 
 # Terminal 2: Agent
 uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
@@ -654,6 +656,7 @@ Environment variables control runtime behavior:
 - `AGENT_REGISTRY_URL` — FastAPI registry endpoint
 - `REDIS_HOST`, `REDIS_PORT` — Redis connection
 - `SHARED_PATH` — shared volume for MCP transport
+- `QUADRACODE_LOCAL_DEV_MODE` — when `1`, treat the host as local dev: `langgraph dev` runs without a custom checkpointer and `SHARED_PATH` is resolved to a writable host directory; containers set this to `0` so runtime services use persistent checkpointing.
 
 ### Diagnostics & Logging
 - `QUADRACODE_LOG_LEVEL` — root log level for all runtimes (default `INFO`)
@@ -666,8 +669,8 @@ Environment variables control runtime behavior:
 - `QUADRACODE_NAMESPACE` — Kubernetes namespace for spawned pods (default: `default`)
 
 ### Files
-- `.env` — local development environment variables
-- `.env.docker` — Docker Compose service overrides (Redis hostnames, MCP endpoints, API keys)
+- `.env` — local development environment variables (used by `uv run langgraph dev ...`, defaults `QUADRACODE_LOCAL_DEV_MODE=1` on the host)
+- `.env.docker` — Docker Compose service overrides (Redis hostnames, MCP endpoints, API keys; forces `QUADRACODE_LOCAL_DEV_MODE=0` so orchestrator/agents run with persistence)
 
 ## Observability & Operations
 
@@ -929,7 +932,7 @@ export QUADRACODE_REDUCER_MODEL=heuristic
 - Run package-specific tests: `uv run pytest` (from within a package directory)
 - Run smoke tests: `uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v`
 - Run comprehensive E2E tests: `uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO`
-- Launch local LangGraph dev server: `uv run langgraph dev agent --config quadracode-agent/langgraph-local.json` (swap `agent` with `orchestrator` as needed)
+- Launch local LangGraph dev server (Dev UI): `uv run langgraph dev --config quadracode-orchestrator/langgraph-local.json --port 8123`
 
 ## Docker Stack
 

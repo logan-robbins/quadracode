@@ -1,5 +1,8 @@
+import asyncio
 import json
 from pathlib import Path
+
+import pytest
 
 from quadracode_runtime.state import PRPState, make_initial_context_engine_state
 from quadracode_runtime.time_travel import (
@@ -7,6 +10,11 @@ from quadracode_runtime.time_travel import (
     diff_cycles,
     replay_cycle,
 )
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def _read_entries(path: Path) -> list[dict]:
@@ -26,6 +34,24 @@ def test_time_travel_recorder_logs_stage_events(tmp_path):
     assert entries and entries[0]["event"] == "stage.pre_process"
     replayed = replay_cycle(log_file, entries[0]["cycle_id"])
     assert replayed, "replay should return recorded events"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_time_travel_recorder_async_schedule(tmp_path):
+    recorder = TimeTravelRecorder(base_dir=tmp_path)
+    state = make_initial_context_engine_state(context_window_max=1000)
+    state["thread_id"] = "async-thread"
+    state["prp_state"] = PRPState.HYPOTHESIZE
+
+    recorder.log_stage(state, stage="pre_process", payload={"quality": 0.9})
+    if recorder._pending_writes:
+        await asyncio.gather(*recorder._pending_writes)
+
+    log_file = tmp_path / "async-thread.jsonl"
+    assert log_file.exists()
+    entries = _read_entries(log_file)
+    assert entries and entries[0]["event"] == "stage.pre_process"
+    assert not recorder._pending_writes
 
 
 def test_time_travel_diff_cycles(tmp_path):

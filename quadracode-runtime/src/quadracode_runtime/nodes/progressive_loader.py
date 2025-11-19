@@ -12,6 +12,7 @@ unnecessary overhead.
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
 import re
@@ -440,7 +441,7 @@ class ProgressiveContextLoader:
         )
 
     async def _load_code_search(self, terms: Set[str]) -> Optional[ContextSegment]:
-        matches = self._perform_code_search(terms)
+        matches = await asyncio.to_thread(self._perform_code_search, terms)
         if not matches:
             return None
         lines = ["Code search results:"]

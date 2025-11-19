@@ -594,7 +594,7 @@ class RuntimeRunner:
         elif "autonomous_mode" not in state:
             state["autonomous_mode"] = False
 
-        result = await asyncio.to_thread(self._graph.invoke, state, config)
+        result = await self._graph.ainvoke(state, config)
         result.pop("_last_envelope_sender", None)
         output_messages = result.get("messages", [])
         output_serialized = messages_to_dict(output_messages)

@@ -15,6 +15,7 @@ driving the next cycle of refinement.
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -109,7 +110,7 @@ def _apply_trigger_to_state(
     )
 
 
-def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
+async def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
     """
     Intercepts and processes responses from the HumanClone.
 
@@ -180,7 +181,8 @@ def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
     else:
         exhaustion_mode = None
 
-    capture_workspace_snapshot(
+    await asyncio.to_thread(
+        capture_workspace_snapshot,
         updated_state,
         reason="human_clone_rejection",
         stage="human_clone_review",
