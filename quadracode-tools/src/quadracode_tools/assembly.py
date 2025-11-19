@@ -36,6 +36,7 @@ from .tools.workspace import (
     workspace_info,
 )
 from .tools.test_suite import run_full_test_suite
+from .tools.context_engine import inspect_context_engine
 
 
 def get_tools() -> List[BaseTool]:
@@ -78,4 +79,5 @@ def get_tools() -> List[BaseTool]:
         run_full_test_suite,
         generate_property_tests,
         manage_refinement_ledger,
+        inspect_context_engine,
     ]

@@ -23,6 +23,7 @@ from typing import Any, Deque, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from ..config import ContextEngineConfig
+from ..context_engine_logging import log_context_compression
 from ..state import ContextEngineState, ContextSegment
 from .context_operations import ContextOperation
 
@@ -271,18 +272,56 @@ class ContextCurator:
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
         """Handler for the COMPRESS operation."""
+        before_tokens = max(int(segment.get("token_count", 0) or 0), 0)
+        before_content = segment.get("content", "")
         compressed = self._compress_segment(segment)
         compressed["compression_eligible"] = False
+        log_context_compression(
+            state,
+            action="compress",
+            stage="context_curator.optimize",
+            reason="curator_compress",
+            segment_id=segment.get("id"),
+            segment_type=segment.get("type"),
+            before_tokens=before_tokens,
+            after_tokens=compressed.get("token_count", before_tokens),
+            before_content=before_content,
+            after_content=compressed.get("content", ""),
+            metadata={
+                "operation": "compress",
+                "priority": segment.get("priority"),
+                "compression_eligible": segment.get("compression_eligible", True),
+            },
+        )
         return compressed
 
     async def _handle_summarize(
         self, segment: ContextSegment, state: ContextEngineState
     ) -> ContextSegment:
         """Handler for the SUMMARIZE operation."""
+        before_tokens = max(int(segment.get("token_count", 0) or 0), 0)
+        before_content = segment.get("content", "")
         summary = self._summarize_segment(segment)
         summary["restorable_reference"] = segment.get("id")
         summary["compression_eligible"] = False
         summary["type"] = f"summary:{segment['type']}"
+        log_context_compression(
+            state,
+            action="summarize",
+            stage="context_curator.optimize",
+            reason="curator_summarize",
+            segment_id=segment.get("id"),
+            segment_type=segment.get("type"),
+            before_tokens=before_tokens,
+            after_tokens=summary.get("token_count", before_tokens),
+            before_content=before_content,
+            after_content=summary.get("content", ""),
+            metadata={
+                "operation": "summarize",
+                "priority": segment.get("priority"),
+                "compression_eligible": segment.get("compression_eligible", True),
+            },
+        )
         return summary
 
     async def _handle_externalize(

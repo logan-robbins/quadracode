@@ -11,6 +11,7 @@ The runtime is designed as a modular and extensible framework. Its key architect
 - **Autonomous Operation**: The runtime has first-class support for autonomous operation, with a detailed set of protocols and components for managing long-running, multi-step tasks without human intervention.
 - **Pluggable Tools**: The runtime includes a flexible tool loading system that can aggregate tools from local definitions, shared packages, and remote MCP servers.
 - **Observability**: The runtime is instrumented with a comprehensive metrics and observability system, which provides detailed telemetry on the internal workings of the system.
+  This includes a time-travel logger that records JSONL event streams for replay and diffing, using non-blocking background writes to remain safe under LangGraph’s ASGI-based dev server.
 
 ## Core Components
 
@@ -19,7 +20,7 @@ The runtime is designed as a modular and extensible framework. Its key architect
 The `ContextEngine` is the heart of the runtime's context management system. It is a collection of nodes that work together to maintain a high-quality, relevant, and size-constrained context. Its key components include:
 
 - **`ContextEngine`**: The high-level coordinator that orchestrates the entire context engineering lifecycle.
-- **`ContextCurator`**: An implementation of the MemAct framework that applies a set of operations (e.g., retain, compress, summarize) to the context segments to keep the context size within a target limit.
+- **`ContextCurator`**: An implementation of the MemAct framework that applies a set of operations (e.g., retain, compress, summarize, externalize, isolate) to the context segments to keep the context size within a target limit while safely offloading archival content to external storage when enabled.
 - **`ContextScorer`**: An implementation of the ACE framework that evaluates the quality of the context based on a set of heuristics.
 - **`ProgressiveContextLoader`**: A component that loads context artifacts on demand, based on the current needs of the task.
 - **`ContextReducer`**: A utility for summarizing and condensing large context segments.

@@ -38,10 +38,11 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
   - Core implementation lives in `quadracode_runtime/nodes/context_engine.py` as the `ContextEngine` class.
   - Configuration is defined in `quadracode_runtime/config/context_engine.py` via the `ContextEngineConfig` dataclass, constructed from `ContextEngineConfig.from_environment()`.
   - The orchestrator graph wires this into the LangGraph in `quadracode_runtime/graph.py`, which adds the following nodes:
-    - `context_pre` → `ContextEngine.pre_process_sync`
-    - `context_governor` → `ContextEngine.govern_context_sync`
-    - `context_post` → `ContextEngine.post_process_sync`
-    - `context_tool` → `ContextEngine.handle_tool_response_sync`
+    - `context_pre` → `ContextEngine.pre_process`
+    - `context_governor` → `ContextEngine.govern_context`
+    - `context_post` → `ContextEngine.post_process`
+    - `context_tool` → `ContextEngine.handle_tool_response`
+  - These are asynchronous `ContextEngine` methods executed by LangGraph’s async runtime; thin `*_sync` wrappers remain available for non-LangGraph entry points.
   - These nodes sit between the orchestrator `driver` node and the `tools` node, so every turn flows through the context engine both before and after tool/driver execution.
 
 - **State Contract (`QuadraCodeState`)**
@@ -95,6 +96,7 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
       - Append validation state and snapshot metadata into `workspace_validation`, `workspace_snapshots`, and `metrics_log`.
     - To remain safe under ASGI and LangGraph Dev UI, these filesystem-intensive operations are executed via `asyncio.to_thread(...)`, ensuring they do **not** block the orchestrator’s event loop while still providing strong integrity guarantees.
   - Independently, the PRP trigger node (`quadracode_runtime/nodes/prp_trigger.py`) also captures snapshots on HumanClone-driven rejections; those snapshot calls are likewise dispatched through `asyncio.to_thread` to avoid blocking.
+  - Externalization of large context segments (when `externalize_write_enabled` is set) and time-travel logging both use background threads (`asyncio.to_thread(...)` around synchronous file writes), so context curation and observability remain non-blocking even under heavy I/O.
 
 - **Observability & Time-Travel**
   - The context engine is tightly integrated with observability facilities:

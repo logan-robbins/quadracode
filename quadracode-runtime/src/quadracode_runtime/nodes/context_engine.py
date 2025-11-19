@@ -32,6 +32,7 @@ from ..autonomous import process_autonomous_tool_response
 from ..ledger import process_manage_refinement_ledger_tool_response
 from ..exhaustion_predictor import ExhaustionPredictor
 from ..deliberative import DeliberativePlanner, DeliberativePlanArtifacts
+from ..context_engine_logging import log_context_compression
 from ..state import (
     ContextSegment,
     ExhaustionMode,
@@ -441,11 +442,39 @@ class ContextEngine:
         )
 
         if needs_reduction:
+            prior_content = segment.get("content", "")
+            prior_tokens = int(segment.get("token_count", len(prior_content.split())) or 0)
+            reduction_reason = (
+                f"operation::{operation.value}"
+                if operation in {ContextOperation.SUMMARIZE, ContextOperation.COMPRESS}
+                else "tool_payload_limit"
+            )
             reduced = await self.reducer.reduce(
                 segment["content"], focus=segment.get("type")
             )
             segment["content"] = reduced.content
             segment["token_count"] = reduced.token_count
+            log_context_compression(
+                state,
+                action="tool_payload_reduction",
+                stage="context_engine.handle_tool_response",
+                reason=reduction_reason,
+                segment_id=segment.get("id"),
+                segment_type=segment.get("type"),
+                before_tokens=prior_tokens,
+                after_tokens=reduced.token_count,
+                before_content=prior_content,
+                after_content=reduced.content,
+                metadata={
+                    "operation": operation.value,
+                    "tool_name": getattr(tool_response, "name", None)
+                    if isinstance(tool_response, ToolMessage)
+                    else None,
+                    "tool_call_id": getattr(tool_response, "tool_call_id", None)
+                    if isinstance(tool_response, ToolMessage)
+                    else None,
+                },
+            )
             segment["restorable_reference"] = segment.get("restorable_reference") or segment["id"]
 
         state["context_segments"].append(segment)
