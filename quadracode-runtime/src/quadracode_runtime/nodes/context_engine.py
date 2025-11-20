@@ -180,18 +180,23 @@ class ContextEngine:
         quality_score = await self.scorer.evaluate(state)
         state["context_quality_score"] = quality_score
         
-        # Calculate available dynamic space
-        optimal_tokens = self.config.optimal_context_size
-        available_dynamic_space = optimal_tokens - self.system_prompt_tokens
+        # Compute context usage BEFORE checking for compression
+        state = self._recompute_context_usage(state)
         
-        # Get current dynamic token usage
+        # Get current dynamic token usage (messages + segments only, NOT system prompt)
         breakdown = state.get("_context_breakdown", {})
         message_tokens = breakdown.get("message_tokens", 0)
         segment_tokens = breakdown.get("segment_tokens", 0)
         current_dynamic_tokens = message_tokens + segment_tokens
-
-        if current_dynamic_tokens > available_dynamic_space:
-            # Context is overgrown, decide what to compress
+        
+        # Check if dynamic content exceeds optimal size (system prompt doesn't count)
+        optimal_tokens = self.config.optimal_context_size
+        
+        if current_dynamic_tokens > optimal_tokens:
+            # Dynamic content exceeds optimal - compress to fit within optimal_tokens
+            available_dynamic_space = optimal_tokens
+            
+            # Compress conversation history and segments to fit
             history_updates = await self._manage_conversation_history(state, available_dynamic_space)
             if history_updates:
                 # Apply message updates and re-calculate usage
@@ -204,10 +209,10 @@ class ContextEngine:
             current_segment_tokens = state.get("_context_breakdown", {}).get("segment_tokens", 0)
             segment_budget = available_dynamic_space * (1 - self.config.message_budget_ratio)
             if current_segment_tokens > segment_budget:
-                 state = await self.curator.optimize(state, int(segment_budget))
-                 state = self._recompute_context_usage(state)
-                 await self._emit_curation_metrics(state, reason="overflow_control")
-                 await self._emit_externalization_metrics(state)
+                state = await self.curator.optimize(state, int(segment_budget))
+                state = self._recompute_context_usage(state)
+                await self._emit_curation_metrics(state, reason="overflow_control")
+                await self._emit_externalization_metrics(state)
 
         state = await self.loader.prepare_context(state)
         state = self._recompute_context_usage(state)
@@ -241,11 +246,9 @@ class ContextEngine:
         )
         self._record_stage_observability(state, "pre_process")
         
-        # IMPORTANT: Remove messages to prevent duplication via add_messages reducer
-        # BUT we must include history_updates["messages"] if they exist (RemoveMessages)
-        state.pop("messages", None)
-        if history_updates and "messages" in history_updates:
-            state["messages"] = history_updates["messages"]
+        # IMPORTANT: Don't clear messages here - LangGraph's add_messages reducer 
+        # will handle the RemoveMessage objects we added to the list.
+        # The reducer will remove messages with matching IDs and keep the rest.
             
         return state
 
@@ -513,7 +516,7 @@ class ContextEngine:
             )
             segment["content"] = reduced.content
             segment["token_count"] = reduced.token_count
-            log_context_compression(
+            await log_context_compression(
                 state,
                 action="tool_payload_reduction",
                 stage="context_engine.handle_tool_response",
@@ -1183,13 +1186,20 @@ class ContextEngine:
         if not messages:
             return {}
 
+        # Always keep at least the most recent message (current user input)
+        # to ensure the LLM has something to respond to
+        if len(messages) <= 1:
+            # Can't compress if we only have one message
+            return {}
+        
         # Summarize just enough to get back under budget
         tokens_to_remove = message_tokens - message_budget
         
-        # Find oldest messages to summarize
+        # Find oldest messages to summarize, but keep at least the last message
         summarization_candidates: list[BaseMessage] = []
         removed_tokens = 0
-        for msg in messages:
+        # Leave at least the last message untouched
+        for msg in messages[:-1]:
             msg_tokens = self._estimate_tokens(str(msg.content))
             if removed_tokens < tokens_to_remove:
                 summarization_candidates.append(msg)
@@ -1236,7 +1246,7 @@ class ContextEngine:
         state["context_segments"] = existing_segments
         
         # Log the summarization event
-        log_context_compression(
+        await log_context_compression(
             state,
             action="summarize_history",
             stage="context_engine.manage_history",
@@ -1306,7 +1316,8 @@ class ContextEngine:
                             content += str(block)
             total_chars += len(content)
         
-        return self._estimate_tokens(total_chars)
+        # Estimate tokens as 1 token per 4 characters
+        return int(total_chars / 4)
 
     def _normalize_refinement_ledger(self, state: QuadraCodeState) -> QuadraCodeState:
         ledger_entries: List[RefinementLedgerEntry] = []

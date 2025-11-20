@@ -51,7 +51,7 @@ def test_update_exhaustion_mode_detects_context_saturation():
     config = ContextEngineConfig()
     config.metrics_enabled = False
     config.context_window_max = 100
-    config.target_context_size = 80
+    config.optimal_context_size = 80
     engine = ContextEngine(config)
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
     state["context_window_used"] = 95

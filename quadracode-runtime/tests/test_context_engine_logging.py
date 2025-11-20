@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 
@@ -19,7 +20,7 @@ def test_log_context_compression_writes_entry(tmp_path, monkeypatch) -> None:
     before_text = "a" * 600
     after_text = "b" * 100
 
-    context_engine_logging.log_context_compression(
+    asyncio.run(context_engine_logging.log_context_compression(
         state,
         action="compress",
         stage="context_curator.optimize",
@@ -31,7 +32,7 @@ def test_log_context_compression_writes_entry(tmp_path, monkeypatch) -> None:
         before_content=before_text,
         after_content=after_text,
         metadata={"source": "test"},
-    )
+    ))
 
     log_path = tmp_path / "chat-demo.jsonl"
     assert log_path.exists()

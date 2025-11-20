@@ -284,7 +284,7 @@ class ContextCurator:
         compressed["compression_eligible"] = False
         after_tokens = compressed.get("token_count", before_tokens)
         
-        log_context_compression(
+        await log_context_compression(
             state,
             action="compress",
             stage="context_curator.optimize",
@@ -339,7 +339,7 @@ class ContextCurator:
         summary["type"] = f"summary:{segment['type']}"
         after_tokens = summary.get("token_count", before_tokens)
         
-        log_context_compression(
+        await log_context_compression(
             state,
             action="summarize",
             stage="context_curator.optimize",

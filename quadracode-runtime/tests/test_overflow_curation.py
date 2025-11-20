@@ -25,7 +25,7 @@ def test_overflow_triggers_curation_even_with_high_quality() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
         context_window_max=500,
-        target_context_size=400,
+        optimal_context_size=400,
     )
     engine = ContextEngine(config)
 
@@ -49,6 +49,6 @@ def test_overflow_triggers_curation_even_with_high_quality() -> None:
     result = asyncio.run(engine.pre_process(state))
 
     total_tokens = sum(segment["token_count"] for segment in result["context_segments"])
-    assert total_tokens <= config.target_context_size
+    assert total_tokens <= config.optimal_context_size
     assert result["context_window_used"] == total_tokens
     assert any(seg["type"].startswith("pointer:") for seg in result["context_segments"])

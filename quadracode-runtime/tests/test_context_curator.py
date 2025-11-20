@@ -27,7 +27,7 @@ def _make_segment(**overrides: object) -> ContextSegment:
 
 
 def test_optimize_compresses_low_scoring_segment() -> None:
-    config = ContextEngineConfig(target_context_size=10_000)
+    config = ContextEngineConfig(optimal_context_size=10_000)
     curator = ContextCurator(config)
 
     old_timestamp = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -41,7 +41,7 @@ def test_optimize_compresses_low_scoring_segment() -> None:
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
     state["context_segments"] = [segment]
 
-    result = asyncio.run(curator.optimize(state))
+    result = asyncio.run(curator.optimize(state, config.optimal_context_size))
 
     assert len(result["context_segments"]) == 1
     compressed = result["context_segments"][0]
@@ -51,7 +51,7 @@ def test_optimize_compresses_low_scoring_segment() -> None:
 
 
 def test_optimize_externalizes_when_over_target() -> None:
-    config = ContextEngineConfig(target_context_size=150)
+    config = ContextEngineConfig(optimal_context_size=150)
     curator = ContextCurator(config)
 
     high_priority = _make_segment(
@@ -71,7 +71,7 @@ def test_optimize_externalizes_when_over_target() -> None:
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
     state["context_segments"] = [high_priority, medium_priority]
 
-    result = asyncio.run(curator.optimize(state))
+    result = asyncio.run(curator.optimize(state, config.optimal_context_size))
 
     # The high priority segment should be externalized to stay within the target window
     pointer = next(seg for seg in result["context_segments"] if seg["id"] == "seg-important")
@@ -88,7 +88,7 @@ def test_optimize_externalizes_when_over_target() -> None:
 
 def test_externalize_segment_persists_file(tmp_path) -> None:
     config = ContextEngineConfig(
-        target_context_size=100,
+        optimal_context_size=100,
         external_memory_path=str(tmp_path),
         externalize_write_enabled=True,
     )
@@ -116,7 +116,7 @@ def test_externalize_segment_persists_file(tmp_path) -> None:
 
 
 def test_optimize_discards_low_priority_when_over_target() -> None:
-    config = ContextEngineConfig(target_context_size=50)
+    config = ContextEngineConfig(optimal_context_size=50)
     curator = ContextCurator(config)
 
     important = _make_segment(id="seg-keep", priority=7, token_count=40)
@@ -130,7 +130,7 @@ def test_optimize_discards_low_priority_when_over_target() -> None:
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
     state["context_segments"] = [important, expendable]
 
-    result = asyncio.run(curator.optimize(state))
+    result = asyncio.run(curator.optimize(state, config.optimal_context_size))
 
     ids = [segment["id"] for segment in result["context_segments"]]
     assert "seg-keep" in ids
@@ -151,7 +151,7 @@ def test_post_decision_curation_prunes_stale_segments() -> None:
     state["context_segments"] = [stale, fresh]
     state["context_quality_score"] = 0.6
 
-    optimized = asyncio.run(curator.optimize(state))
+    optimized = asyncio.run(curator.optimize(state, config.optimal_context_size))
     post = asyncio.run(curator.post_decision_curation(optimized))
 
     ids = [segment["id"] for segment in post["context_segments"]]

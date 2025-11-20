@@ -56,36 +56,27 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
   - The engine is designed as a pure(ish) transformation over `QuadraCodeState`: each stage (`pre_process`, `govern_context`, `post_process`, `handle_tool_response`) takes a state dict and returns a new state dict, which is then threaded through the LangGraph edges.
 
 - **Configuration & Environment Overrides**
-  - `ContextEngineConfig` provides strongly-typed defaults for token limits, quality thresholds, compression, skills discovery, and observability:
-    - Token/window controls: `context_window_max`, `target_context_size`, `progressive_batch_size`, `prefetch_depth`.
-    - Quality/selection: `quality_threshold`, `min_segment_priority`, `scoring_weights`.
-    - Reducer: `reducer_model`, `reducer_chunk_tokens`, `reducer_target_tokens`.
-    - Governor: `governor_model`, `governor_max_segments`.
-    - Externalization / MemAct: `external_memory_path`, `max_checkpoints`, `checkpoint_frequency`, `externalize_write_enabled`.
-    - Metrics: `metrics_enabled`, `metrics_stream_key`, `metrics_redis_url`, `metrics_emit_mode`, `autonomous_metrics_stream_key`.
-  - `ContextEngineConfig.from_environment()` applies overrides via env vars, for example:
-    - `QUADRACODE_CONTEXT_WINDOW_MAX`, `QUADRACODE_TARGET_CONTEXT_SIZE`, `QUADRACODE_MAX_TOOL_PAYLOAD_CHARS`.
-    - `QUADRACODE_QUALITY_THRESHOLD`, `QUADRACODE_GOVERNOR_MAX_SEGMENTS`.
-    - `QUADRACODE_REDUCER_MODEL`, `QUADRACODE_GOVERNOR_MODEL`.
-    - `QUADRACODE_METRICS_ENABLED`, `QUADRACODE_METRICS_EMIT_MODE`, `QUADRACODE_METRICS_REDIS_URL`, `QUADRACODE_METRICS_STREAM_KEY`.
-    - `QUADRACODE_AUTONOMOUS_STREAM_KEY` for routing autonomous events into Redis.
-    - `QUADRACODE_MESSAGE_BUDGET_RATIO`, `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS`, `QUADRACODE_MESSAGE_RETENTION_COUNT` for conversation history management.
-  - For AI coding agents, this means **behavioral tuning for the orchestrator’s context layer is centralized in `ContextEngineConfig` and corresponding env vars**, not in the orchestrator package itself.
+  - `ContextEngineConfig` provides strongly-typed defaults for token limits, quality thresholds, and compression, now centered around a token-driven budget model.
+  - **Key Controls**:
+    - `QUADRACODE_CONTEXT_WINDOW_MAX`: The absolute maximum token limit of the model.
+    - `QUADRACODE_OPTIMAL_CONTEXT_SIZE`: The target "healthy" size for the entire context (static prompt + dynamic messages/segments). Compression is triggered when this is exceeded.
+    - `QUADRACODE_MESSAGE_BUDGET_RATIO`: The percentage of the *optimal dynamic space* to allocate for conversation history.
+  - `ContextEngineConfig.from_environment()` applies overrides for these and other settings (e.g., `QUADRACODE_REDUCER_MODEL`, `QUADRACODE_GOVERNOR_MODEL`), making the engine's behavior highly tunable via environment variables.
 
-- **Dual-Layer Context Management**
-  - The context engine employs a dual-layer strategy to manage the context window effectively, separating conversation history from engineered context segments.
-  - **1. Conversation History**: Managed directly within the `pre_process` stage. When the number of message tokens exceeds the budget defined by `QUADRACODE_MESSAGE_BUDGET_RATIO`, the engine triggers a "summarize and trim" operation. It retains the most recent messages (controlled by `QUADRACODE_MESSAGE_RETENTION_COUNT`), summarizes the older messages into a `conversation_summary` segment, and injects `RemoveMessage` operations into the graph to prune the history. This process is governed by its own configurable prompts and ensures that long conversations do not lead to uncontrolled context growth.
-  - **2. Engineered Context Segments**: This includes tool outputs, code search results, documentation, etc. These segments are managed by the `ContextCurator`, which uses a scoring and ranking system to decide whether to retain, compress, summarize, or externalize each segment based on relevance, priority, and token size. This curation happens independently of message summarization but is triggered by the same overflow conditions.
+- **Architectural Model: Static vs. Dynamic Context**
+  - The engine is now aware of the large, static `system_prompt` and its token cost.
+  - It actively manages the **dynamic context** (growing conversation history and engineered segments) to fit within the `available_dynamic_space` (`OPTIMAL_CONTEXT_SIZE` - `system_prompt_size`).
+  - This ensures that compression is triggered correctly from the very first turn and that the context budget is managed intelligently.
 
 - **Execution Flow & Responsibilities**
   - **`pre_process` stage**:
-    - Ensures state defaults, enforces hotpath residency against the Agent Registry (`AGENT_REGISTRY_URL`), and computes `context_quality_score` via `ContextScorer`.
-    - If quality is below `quality_threshold` or the window overflows `target_context_size`, it invokes `ContextCurator` to prune/reshape segments and recomputes usage.
-    - Delegates to `ProgressiveContextLoader` to pull in new segments from skills/docs/code (driven by `ContextEngineConfig.skills_paths`, `project_root`, and `documentation_paths`).
-    - Enforces token limits and emits structured metrics via `ContextMetricsEmitter`, then records a time-travel snapshot and observability hooks.
+    - Calculates the total dynamic token usage (messages + segments).
+    - If `total_dynamic_tokens > available_dynamic_space`, it triggers compression:
+      - First, it summarizes the conversation history if it exceeds its budget (`available_dynamic_space * message_budget_ratio`).
+      - Then, if still over budget, it invokes the `ContextCurator` to prune engineered segments to fit their remaining budget.
+    - It continues to perform progressive loading and other setup tasks.
   - **`govern_context` stage**:
-    - Applies a governor policy (`governor_model`) over the current context + PRP state to decide whether to keep curating, to externalize memory, or to adjust strategy.
-    - Uses `ExhaustionPredictor` to update `exhaustion_mode`/`exhaustion_probability` and may trigger exhaustion events that are logged into time-travel and metrics streams.
+    - Applies a governor policy (`governor_model`) over the now-balanced context to plan the next step.
   - **`post_process` stage**:
     - Reflects on the driver’s decision (via `_reflect_on_decision`) and appends a dense `reflection_log` entry with issues, recommendations, focus metric, and quality score.
     - Evolves the playbook (`_evolve_playbook`), runs post-decision curation, and optionally writes external memory checkpoints when `_should_checkpoint` returns true.

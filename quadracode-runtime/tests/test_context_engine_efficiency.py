@@ -38,7 +38,7 @@ def _make_message(text: str):
 def test_pre_process_compresses_overflow_context() -> None:
     config = ContextEngineConfig(
         context_window_max=2000,
-        target_context_size=1500,
+        optimal_context_size=1500,
         quality_threshold=0.8,
         metrics_enabled=False,
     )
@@ -57,7 +57,7 @@ def test_pre_process_compresses_overflow_context() -> None:
     result = asyncio.run(engine.pre_process(state))
 
     compressed_total = sum(seg["token_count"] for seg in result["context_segments"])
-    assert compressed_total <= config.target_context_size
+    assert compressed_total <= config.optimal_context_size
     assert result["context_window_used"] <= config.context_window_max
 
     pointer_segments = [seg for seg in result["context_segments"] if seg["type"].startswith("pointer:")]

@@ -55,7 +55,7 @@ def test_governor_plan_override_applies_actions_and_updates_outline() -> None:
         metrics_enabled=False,
         governor_model=None,
         context_window_max=800,
-        target_context_size=600,
+        optimal_context_size=600,
     )
     engine = ContextEngine(config)
 

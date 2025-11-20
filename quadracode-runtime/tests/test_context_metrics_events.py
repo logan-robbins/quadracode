@@ -24,7 +24,7 @@ def test_pre_process_emits_curation_and_load_metrics() -> None:
         metrics_enabled=False,
         quality_threshold=0.99,
         context_window_max=5000,
-        target_context_size=160,
+        optimal_context_size=160,
     )
     engine = ContextEngine(config)
 

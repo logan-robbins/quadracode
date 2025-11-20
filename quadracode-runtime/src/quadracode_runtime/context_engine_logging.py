@@ -102,7 +102,7 @@ def get_context_engine_logger() -> ContextEngineCompressionLogger:
     return _COMPRESSION_LOGGER
 
 
-def log_context_compression(
+async def log_context_compression(
     state: QuadraCodeState | Mapping[str, Any] | None,
     *,
     action: str,
@@ -120,44 +120,47 @@ def log_context_compression(
     Records a compression or summarization event for later inspection.
     """
 
-    logger = get_context_engine_logger()
-    thread_id = _resolve_thread_id(state)
-    cycle_id = _resolve_cycle_id(state)
-    before = max(int(before_tokens or 0), 0)
-    after = max(int(after_tokens or 0), 0)
-    tokens_saved = before - after
-    ratio = float(after / before) if before else 0.0
-    context_used = None
-    context_max = None
-    prp_state = None
-    exhaustion_mode = None
+    def _blocking_log():
+        logger = get_context_engine_logger()
+        thread_id = _resolve_thread_id(state)
+        cycle_id = _resolve_cycle_id(state)
+        before = max(int(before_tokens or 0), 0)
+        after = max(int(after_tokens or 0), 0)
+        tokens_saved = before - after
+        ratio = float(after / before) if before else 0.0
+        context_used = None
+        context_max = None
+        prp_state = None
+        exhaustion_mode = None
 
-    if isinstance(state, Mapping):
-        context_used = int(state.get("context_window_used", 0) or 0)
-        context_max = int(state.get("context_window_max", 0) or 0) or None
-        prp_state = getattr(state.get("prp_state"), "value", state.get("prp_state"))
-        exhaustion_mode = getattr(state.get("exhaustion_mode"), "value", state.get("exhaustion_mode"))
+        if isinstance(state, Mapping):
+            context_used = int(state.get("context_window_used", 0) or 0)
+            context_max = int(state.get("context_window_max", 0) or 0) or None
+            prp_state = getattr(state.get("prp_state"), "value", state.get("prp_state"))
+            exhaustion_mode = getattr(state.get("exhaustion_mode"), "value", state.get("exhaustion_mode"))
 
-    entry = {
-        "timestamp": _utc_iso(),
-        "thread_id": thread_id,
-        "cycle_id": cycle_id,
-        "stage": stage,
-        "action": action,
-        "reason": reason,
-        "segment_id": segment_id,
-        "segment_type": segment_type,
-        "before_tokens": before,
-        "after_tokens": after,
-        "tokens_saved": tokens_saved,
-        "compression_ratio": ratio,
-        "context_window_used": context_used,
-        "context_window_max": context_max,
-        "prp_state": prp_state,
-        "exhaustion_mode": exhaustion_mode,
-        "before_preview": _preview(before_content),
-        "after_preview": _preview(after_content),
-        "metadata": dict(metadata or {}),
-    }
-    logger.record(thread_id, entry)
+        entry = {
+            "timestamp": _utc_iso(),
+            "thread_id": thread_id,
+            "cycle_id": cycle_id,
+            "stage": stage,
+            "action": action,
+            "reason": reason,
+            "segment_id": segment_id,
+            "segment_type": segment_type,
+            "before_tokens": before,
+            "after_tokens": after,
+            "tokens_saved": tokens_saved,
+            "compression_ratio": ratio,
+            "context_window_used": context_used,
+            "context_window_max": context_max,
+            "prp_state": prp_state,
+            "exhaustion_mode": exhaustion_mode,
+            "before_preview": _preview(before_content),
+            "after_preview": _preview(after_content),
+            "metadata": dict(metadata or {}),
+        }
+        logger.record(thread_id, entry)
+
+    await asyncio.to_thread(_blocking_log)
 
