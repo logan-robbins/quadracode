@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional, Sequence
 import httpx
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, RemoveMessage, BaseMessage
+from langchain_core.messages.utils import get_buffer_string
 
 from ..config import ContextEngineConfig
 from ..autonomous import process_autonomous_tool_response
@@ -191,6 +192,18 @@ class ContextEngine:
         state = await self._update_exhaustion_mode(state, stage="pre_process")
         # Invariant: at least one context update per cycle
         mark_context_updated(state)
+        
+        # Manage conversation history (trimming/summarization)
+        history_updates = await self._manage_conversation_history(state)
+        if history_updates:
+            # Apply updates to current state copy for immediate visibility
+            if "conversation_summary" in history_updates:
+                state["conversation_summary"] = history_updates["conversation_summary"]
+            # Note: We don't strictly need to apply RemoveMessages to local 'state' copy 
+            # if we return them, but for recompute_usage it would help.
+            # Recomputing usage after this would be ideal.
+            state = self._recompute_context_usage(state)
+
         await self.metrics.emit(
             state,
             "pre_process",
@@ -216,7 +229,11 @@ class ContextEngine:
         self._record_stage_observability(state, "pre_process")
         
         # IMPORTANT: Remove messages to prevent duplication via add_messages reducer
+        # BUT we must include history_updates["messages"] if they exist (RemoveMessages)
         state.pop("messages", None)
+        if history_updates and "messages" in history_updates:
+            state["messages"] = history_updates["messages"]
+            
         return state
 
     async def post_process(self, state: QuadraCodeState) -> Dict[str, Any]:
@@ -371,41 +388,70 @@ class ContextEngine:
         """
         state = state.copy()
         state = self._ensure_state_defaults(state)
-        
-        # Remove messages initially to prevent duplication
-        state.pop("messages", None)
-        
-        if tool_response is None:
-            tool_response = self._extract_tool_messages(state)
 
-        if not tool_response:
+        incoming = tool_response
+        if incoming is None:
+            incoming = self._extract_tool_messages(state)
+
+        # Remove legacy messages to prevent duplication via add_messages reducer
+        state.pop("messages", None)
+
+        if not incoming:
             return state
 
-        # Track new messages separately for the reducer
-        new_messages = []
+        payloads = incoming if isinstance(incoming, list) else [incoming]
+        new_messages: List[ToolMessage] = []
+        operations_summary: Dict[str, int] = {}
+        last_payload: Any = None
 
-        # The tool_response is a list of ToolMessage objects from the ToolNode
-        if isinstance(tool_response, list):
-            for message in tool_response:
-                if isinstance(message, ToolMessage):
-                    new_messages.append(message)
-                    # process_autonomous_tool_response and others might read state but we pass the copy
-                    # if they rely on state['messages'] having the *latest* tool message, they might fail
-                    # but usually they process the message *passed* to them.
-                    state, _ = process_autonomous_tool_response(state, message)
-                    state, _ = process_manage_refinement_ledger_tool_response(state, message)
-                    
-                    # Also process context updates for each tool
-                    relevance = 1.0 # default assumption for now, could be scored
-                    operation = await self._decide_operation(relevance, state)
-                    state = await self._apply_operation(state, message, operation)
-                    self._capture_testing_outputs(state, message)
-                    self._maybe_issue_skepticism_challenge(state, message)
+        for payload in payloads:
+            last_payload = payload
+            if isinstance(payload, ToolMessage):
+                new_messages.append(payload)
+                state, _ = process_autonomous_tool_response(state, payload)
+                state, _ = process_manage_refinement_ledger_tool_response(state, payload)
+                operation = await self._decide_operation(1.0, state)
+                state = await self._apply_operation(state, payload, operation)
+                self._capture_testing_outputs(state, payload)
+                self._maybe_issue_skepticism_challenge(state, payload)
+            else:
+                operation = await self._decide_operation(1.0, state)
+                state = await self._apply_operation(state, payload, operation)
+            operations_summary[operation.value] = operations_summary.get(operation.value, 0) + 1
 
-        # Update the state with ONLY the new messages, which LangGraph will append
         if new_messages:
             state["messages"] = new_messages
-        
+
+        current_prp = state.get("prp_state", PRPState.HYPOTHESIZE)
+        if not isinstance(current_prp, PRPState):
+            try:
+                current_prp = PRPState(str(current_prp))
+            except ValueError:
+                current_prp = PRPState.HYPOTHESIZE
+        prp_transition_map = {
+            PRPState.HYPOTHESIZE: PRPState.EXECUTE,
+            PRPState.EXECUTE: PRPState.TEST,
+            PRPState.TEST: PRPState.CONCLUDE,
+            PRPState.CONCLUDE: PRPState.PROPOSE,
+        }
+        next_prp = prp_transition_map.get(current_prp)
+        if next_prp is not None:
+            self._apply_prp_transition(state, next_prp)
+        await self._flush_prp_metrics(state)
+        await self.metrics.emit(
+            state,
+            "tool_response",
+            {
+                "count": len(payloads),
+                "operations": operations_summary,
+                "context_window_used": state.get("context_window_used", 0),
+            },
+        )
+        state = await self._update_exhaustion_mode(
+            state,
+            stage="handle_tool_response",
+            tool_response=last_payload,
+        )
         return state
 
     async def _decide_operation(
@@ -1087,12 +1133,180 @@ class ContextEngine:
     def _recompute_context_usage(
         self, state: QuadraCodeState
     ) -> QuadraCodeState:
-        total = sum(
+        # Count tokens from context segments
+        segment_tokens = sum(
             max(segment.get("token_count", 0), 0)
             for segment in state.get("context_segments", [])
         )
+        
+        # Count tokens from messages
+        message_tokens = self._count_message_tokens(state)
+        
+        # Total context window usage includes both segments and messages
+        total = segment_tokens + message_tokens
         state["context_window_used"] = int(total)
+        
+        # Store breakdown for observability
+        state.setdefault("_context_breakdown", {})
+        state["_context_breakdown"]["segment_tokens"] = int(segment_tokens)
+        state["_context_breakdown"]["message_tokens"] = int(message_tokens)
+        
         return state
+
+    async def _manage_conversation_history(self, state: QuadraCodeState) -> Dict[str, Any]:
+        """
+        Manages conversation history by summarizing and trimming messages when they exceed limits.
+        
+        Returns:
+            A dict of state updates (e.g. new messages, summary update).
+        """
+        max_tokens = state.get("context_window_max", self.config.context_window_max)
+        # Budget for messages
+        message_budget = int(max_tokens * self.config.message_budget_ratio)
+        
+        current_tokens = self._count_message_tokens(state)
+        if current_tokens <= message_budget:
+            return {}
+            
+        messages = state.get("messages", [])
+        if not messages:
+            return {}
+
+        # Identify messages to summarize
+        min_count = self.config.min_message_count_to_compress
+        if len(messages) < min_count:
+            return {}
+            
+        # Keep last N messages raw
+        retention = self.config.message_retention_count
+        to_keep_count = max(1, retention)
+        
+        if len(messages) <= to_keep_count:
+            return {}
+
+        to_summarize = messages[:-to_keep_count]
+        to_keep = messages[-to_keep_count:]
+        
+        if not to_summarize:
+            return {}
+            
+        # Generate summary
+        summary_text = get_buffer_string(to_summarize)
+        existing_summary = state.get("conversation_summary", "")
+        
+        # Use configured prompt template
+        prompt = self.config.prompt_templates.get_prompt(
+            "conversation_summarization_prompt",
+            existing_summary=existing_summary or "None",
+            new_lines=summary_text
+        )
+        
+        reduction = await self.reducer.reduce(prompt, focus="conversation_summary")
+        new_summary = reduction.content
+        
+        # Construct updates
+        updates: Dict[str, Any] = {
+            "conversation_summary": new_summary,
+            "messages": []
+        }
+        
+        # Remove summarized messages
+        for msg in to_summarize:
+            if msg.id:
+                updates["messages"].append(RemoveMessage(id=msg.id))
+                
+        # Add summary as context segment
+        segment = {
+            "id": "conversation-summary",
+            "content": new_summary,
+            "type": "conversation_summary",
+            "priority": 10,  # High priority
+            "token_count": reduction.token_count,
+            "timestamp": _utc_now().isoformat(),
+            "compression_eligible": False,
+        }
+        
+        existing_segments = [s for s in state.get("context_segments", []) if s["id"] != "conversation-summary"]
+        existing_segments.insert(0, segment) # Put at top
+        state["context_segments"] = existing_segments
+        
+        # Log compression
+        log_context_compression(
+            state,
+            action="summarize_history",
+            stage="context_engine.manage_history",
+            reason="message_budget_exceeded",
+            segment_id="conversation_history",
+            segment_type="messages",
+            before_tokens=current_tokens,
+            after_tokens=self._count_message_tokens(state) - len(to_summarize) + reduction.token_count, 
+            before_content=summary_text[:200] + "...",
+            after_content=new_summary,
+            metadata={
+                "removed_messages": len(to_summarize),
+                "kept_messages": len(to_keep),
+                "budget_ratio": self.config.message_budget_ratio,
+                "retention_count": retention
+            }
+        )
+        
+        # Update state tracking for UI
+        state["last_compression_event"] = {
+             "timestamp": _utc_now().isoformat(),
+             "action": "summarize_history",
+             "before_tokens": current_tokens,
+             "tokens_saved": current_tokens, # Rough estimate
+             "summary": new_summary[:100] + "..."
+        }
+        
+        return updates
+
+    def _count_message_tokens(self, state: QuadraCodeState) -> int:
+        """
+        Counts tokens in the conversation messages.
+        
+        Uses usage_metadata from the most recent AI message if available,
+        otherwise estimates based on message content length.
+        
+        Args:
+            state: The current state containing messages
+            
+        Returns:
+            Estimated total token count for all messages
+        """
+        messages = state.get("messages", [])
+        if not messages:
+            return 0
+        
+        # Try to get actual token count from the most recent AI message's usage_metadata
+        for msg in reversed(messages):
+            if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                # usage_metadata contains input_tokens and output_tokens
+                # input_tokens includes all previous messages + context
+                # So we return just the input_tokens as it represents the full conversation window
+                return int(msg.usage_metadata.get("input_tokens", 0))
+        
+        # Fallback: rough estimate based on character count
+        # Approximation: 1 token ≈ 4 characters
+        total_chars = 0
+        for msg in messages:
+            content = ""
+            if hasattr(msg, "content"):
+                if isinstance(msg.content, str):
+                    content = msg.content
+                elif isinstance(msg.content, list):
+                    # Handle content blocks (text, tool calls, etc.)
+                    for block in msg.content:
+                        if isinstance(block, dict):
+                            content += str(block.get("text", ""))
+                        elif isinstance(block, str):
+                            content += block
+                        else:
+                            content += str(block)
+            total_chars += len(content)
+        
+        # Rough estimation: 4 chars per token
+        return int(total_chars / 4)
 
     def _normalize_refinement_ledger(self, state: QuadraCodeState) -> QuadraCodeState:
         ledger_entries: List[RefinementLedgerEntry] = []

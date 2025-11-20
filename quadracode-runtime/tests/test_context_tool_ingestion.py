@@ -6,7 +6,7 @@ from quadracode_runtime.state import make_initial_context_engine_state
 
 
 def test_context_tool_captures_tool_message_output() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)

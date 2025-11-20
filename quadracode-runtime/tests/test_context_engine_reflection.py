@@ -11,7 +11,7 @@ def _now_iso() -> str:
 
 
 def test_post_process_updates_playbook_and_rules() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
@@ -61,7 +61,7 @@ def test_post_process_updates_playbook_and_rules() -> None:
 
 
 def test_reflection_deduplicates_recommendations() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
@@ -84,7 +84,7 @@ def test_reflection_deduplicates_recommendations() -> None:
 
 
 def test_metrics_emit_for_tool_responses() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)

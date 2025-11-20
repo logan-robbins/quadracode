@@ -61,6 +61,17 @@ class PromptTemplates:
         "Preserve key facts and actions. Use bullet points when helpful.\n\n{combined}"
     ))
     
+    # ========== Conversation Management Prompts ==========
+
+    conversation_summarization_prompt: str = field(default=(
+        "Update the running conversation summary with the new messages.\n"
+        "Existing Summary:\n{existing_summary}\n\n"
+        "New Lines:\n{new_lines}\n\n"
+        "Provide a concise, updated summary of the conversation history, merging the new information "
+        "into the existing narrative. Focus on key decisions, tool outputs, and the evolving goal. "
+        "Discard transient chit-chat."
+    ))
+    
     # ========== Context Curator Prompts (for future LLM-based curation) ==========
     
     curator_system_prompt: str = field(default=(

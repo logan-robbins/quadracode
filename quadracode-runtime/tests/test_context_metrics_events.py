@@ -22,7 +22,6 @@ def _make_segment(segment_id: str, *, tokens: int, priority: int, segment_type: 
 def test_pre_process_emits_curation_and_load_metrics() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
-        reducer_model="heuristic",
         quality_threshold=0.99,
         context_window_max=5000,
         target_context_size=160,

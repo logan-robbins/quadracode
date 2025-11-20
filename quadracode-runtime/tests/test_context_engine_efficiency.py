@@ -65,7 +65,7 @@ def test_pre_process_compresses_overflow_context() -> None:
 
 
 def test_tool_response_truncates_large_payloads() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, max_tool_payload_chars=1200, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False, max_tool_payload_chars=1200)
     engine = ContextEngine(config)
 
     state = _make_state(config)
@@ -80,7 +80,7 @@ def test_tool_response_truncates_large_payloads() -> None:
 
 
 def test_prefetch_queue_tracks_unloaded_needs() -> None:
-    config = ContextEngineConfig(context_window_max=1000, metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(context_window_max=1000, metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = _make_state(config)
@@ -95,7 +95,6 @@ def test_prefetch_queue_tracks_unloaded_needs() -> None:
 def test_summarize_operation_invokes_reducer() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
-        reducer_model="heuristic",
         reducer_target_tokens=40,
         max_tool_payload_chars=2000,
     )

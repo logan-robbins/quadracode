@@ -22,7 +22,7 @@ def _make_segment(segment_id: str, tokens: int) -> ContextSegment:
 
 
 def test_pre_process_recomputes_usage_after_curation_and_loader() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)
@@ -39,7 +39,7 @@ def test_pre_process_recomputes_usage_after_curation_and_loader() -> None:
 
 
 def test_tool_response_updates_context_window_used() -> None:
-    config = ContextEngineConfig(metrics_enabled=False, reducer_model="heuristic")
+    config = ContextEngineConfig(metrics_enabled=False)
     engine = ContextEngine(config)
 
     state = make_initial_context_engine_state(context_window_max=config.context_window_max)

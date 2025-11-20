@@ -53,7 +53,6 @@ def _ledger_entry(
 def test_governor_plan_override_applies_actions_and_updates_outline() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
-        reducer_model="heuristic",
         governor_model=None,
         context_window_max=800,
         target_context_size=600,
@@ -115,7 +114,6 @@ def test_governor_plan_override_applies_actions_and_updates_outline() -> None:
 def test_govern_context_populates_deliberative_plan_fields() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
-        reducer_model="heuristic",
         governor_model=None,
         context_window_max=1024,
     )

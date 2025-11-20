@@ -276,6 +276,8 @@ class ContextCurator:
         before_content = segment.get("content", "")
         compressed = self._compress_segment(segment)
         compressed["compression_eligible"] = False
+        after_tokens = compressed.get("token_count", before_tokens)
+        
         log_context_compression(
             state,
             action="compress",
@@ -284,7 +286,7 @@ class ContextCurator:
             segment_id=segment.get("id"),
             segment_type=segment.get("type"),
             before_tokens=before_tokens,
-            after_tokens=compressed.get("token_count", before_tokens),
+            after_tokens=after_tokens,
             before_content=before_content,
             after_content=compressed.get("content", ""),
             metadata={
@@ -293,6 +295,30 @@ class ContextCurator:
                 "compression_eligible": segment.get("compression_eligible", True),
             },
         )
+        
+        # Update state with compression event for UI visibility
+        compression_event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "segment_id": segment.get("id"),
+            "segment_type": segment.get("type"),
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "tokens_saved": before_tokens - after_tokens,
+            "compression_ratio": float(after_tokens / before_tokens) if before_tokens > 0 else 1.0,
+            "action": "compress",
+            "stage": "context_curator.optimize",
+        }
+        
+        # Add to recent compressions list (keep last 10)
+        if "recent_compressions" not in state:
+            state["recent_compressions"] = []
+        state["recent_compressions"].append(compression_event)
+        if len(state["recent_compressions"]) > 10:
+            state["recent_compressions"] = state["recent_compressions"][-10:]
+        
+        # Update latest compression event
+        state["last_compression_event"] = compression_event
+        
         return compressed
 
     async def _handle_summarize(
@@ -305,6 +331,8 @@ class ContextCurator:
         summary["restorable_reference"] = segment.get("id")
         summary["compression_eligible"] = False
         summary["type"] = f"summary:{segment['type']}"
+        after_tokens = summary.get("token_count", before_tokens)
+        
         log_context_compression(
             state,
             action="summarize",
@@ -313,7 +341,7 @@ class ContextCurator:
             segment_id=segment.get("id"),
             segment_type=segment.get("type"),
             before_tokens=before_tokens,
-            after_tokens=summary.get("token_count", before_tokens),
+            after_tokens=after_tokens,
             before_content=before_content,
             after_content=summary.get("content", ""),
             metadata={
@@ -322,6 +350,30 @@ class ContextCurator:
                 "compression_eligible": segment.get("compression_eligible", True),
             },
         )
+        
+        # Update state with compression event for UI visibility
+        compression_event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "segment_id": segment.get("id"),
+            "segment_type": segment.get("type"),
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "tokens_saved": before_tokens - after_tokens,
+            "compression_ratio": float(after_tokens / before_tokens) if before_tokens > 0 else 1.0,
+            "action": "summarize",
+            "stage": "context_curator.optimize",
+        }
+        
+        # Add to recent compressions list (keep last 10)
+        if "recent_compressions" not in state:
+            state["recent_compressions"] = []
+        state["recent_compressions"].append(compression_event)
+        if len(state["recent_compressions"]) > 10:
+            state["recent_compressions"] = state["recent_compressions"][-10:]
+        
+        # Update latest compression event
+        state["last_compression_event"] = compression_event
+        
         return summary
 
     async def _handle_externalize(

@@ -700,6 +700,9 @@ class ContextEngineState(RuntimeState):
     last_curation_summary: Dict[str, Any]
     recent_loads: List[Dict[str, Any]]
     recent_externalizations: List[Dict[str, Any]]
+    recent_compressions: List[Dict[str, Any]]
+    last_compression_event: Dict[str, Any]
+    conversation_summary: str
 
 
 class QuadraCodeState(ContextEngineState, total=False):
@@ -832,6 +835,9 @@ def make_initial_context_engine_state(
             "last_curation_summary": {},
             "recent_loads": [],
             "recent_externalizations": [],
+            "recent_compressions": [],
+            "last_compression_event": {},
+            "conversation_summary": "",
             "is_in_prp": False,
             "prp_cycle_count": 0,
             "prp_state": PRP_STATE_MACHINE.initial_state,

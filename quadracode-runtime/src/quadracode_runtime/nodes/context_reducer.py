@@ -1,21 +1,17 @@
 """
 This module provides the `ContextReducer`, a utility for summarizing and 
-condensing large context segments.
+condensing large context segments exclusively via LLM compression.
 
 The `ContextReducer` is a key component of the context engine's optimization 
 process. It is designed to reduce the token count of verbose context segments 
-while preserving their essential information. It can operate in two modes: a 
-fast, heuristic-based mode that uses simple truncation and keyword focusing, and 
-a more powerful, LLM-based mode that can generate more nuanced summaries. This 
-dual-mode capability allows for a flexible trade-off between speed and quality.
+while preserving their essential information. Unlike earlier versions that 
+allowed heuristic fallbacks, the reducer now always routes through a configured 
+LLM to ensure consistent, high-quality reductions and observability.
 """
 
 from __future__ import annotations
 
 import asyncio
-import math
-import re
-from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -40,16 +36,16 @@ class ReducerResult:
 
 class ContextReducer:
     """
-    Reduces the size of long context segments using either heuristics or an LLM.
+    Reduces the size of long context segments using an LLM summarization pass.
 
     This class provides the `reduce` method, which is the main entry point for 
-    the reduction process. It automatically selects the appropriate reduction 
-    strategy (heuristic or LLM) based on the configuration and then executes 
-    the summarization.
+    the reduction process. It chunkifies input, prompts the configured LLM, and
+    stitches the resulting summaries into a final payload sized for the context
+    window.
 
     Attributes:
         config: The configuration for the context engine.
-        model_name: The name of the LLM to use for reduction, or "heuristic".
+        model_name: The name of the LLM to use for reduction.
         ... and other configuration parameters.
     """
 
@@ -62,6 +58,15 @@ class ContextReducer:
         """
         self.config = config
         self.model_name = config.reducer_model
+        if not self.model_name:
+            raise ValueError(
+                "ContextReducer requires `config.reducer_model` to reference a valid LLM."
+            )
+        if self.model_name.strip().lower() == "heuristic":
+            raise ValueError(
+                "Heuristic compression has been removed. "
+                "Set QUADRACODE_REDUCER_MODEL to an LLM identifier."
+            )
         self.chunk_tokens = max(50, config.reducer_chunk_tokens)
         self.target_tokens = max(20, config.reducer_target_tokens)
         self._llm = None
@@ -86,46 +91,8 @@ class ContextReducer:
         if not content.strip():
             return ReducerResult(content="", token_count=0)
 
-        if not self.model_name or self.model_name.lower() == "heuristic":
-            summary = self._heuristic_reduce(content, focus=focus)
-            return ReducerResult(content=summary, token_count=self._estimate_tokens(summary))
-
         summary = await self._reduce_with_llm(content, focus=focus)
         return ReducerResult(content=summary, token_count=self._estimate_tokens(summary))
-
-    def _heuristic_reduce(self, content: str, *, focus: str | None = None) -> str:
-        """
-        Performs a fast, heuristic-based reduction of the content.
-
-        This method uses simple truncation and keyword-based scoring to produce a 
-        summary. It is much faster than the LLM-based approach but may be less 
-        accurate.
-        """
-        tokens = content.split()
-        if len(tokens) <= self.target_tokens:
-            return content
-        focus_tokens = set()
-        if focus:
-            for token in re.findall(r"\b\w+\b", focus.lower()):
-                if len(token) > 3:
-                    focus_tokens.add(token)
-        if focus_tokens:
-            weighted: list[tuple[int, str]] = []
-            window = max(5, self.target_tokens * 2)
-            for i in range(0, len(tokens), window):
-                chunk = tokens[i : i + window]
-                score = sum(1 for token in chunk if token.lower() in focus_tokens)
-                weighted.append((score, " ".join(chunk)))
-            weighted.sort(key=lambda item: item[0], reverse=True)
-            selected_words: list[str] = []
-            for _, chunk in weighted:
-                for word in chunk.split():
-                    selected_words.append(word)
-                    if len(selected_words) >= self.target_tokens:
-                        summary = " ".join(selected_words) + " …"
-                        return summary
-        summary_words = tokens[: self.target_tokens]
-        return " ".join(summary_words) + " …"
 
     async def _reduce_with_llm(self, content: str, *, focus: str | None = None) -> str:
         """

@@ -31,7 +31,6 @@ Step-by-step instructions:
         documentation_paths=[],
         skills_paths=["skills"],
         metrics_enabled=False,
-        reducer_model="heuristic",
     )
     loader = ProgressiveContextLoader(config)
 

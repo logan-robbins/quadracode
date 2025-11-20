@@ -69,7 +69,13 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
     - `QUADRACODE_REDUCER_MODEL`, `QUADRACODE_GOVERNOR_MODEL`.
     - `QUADRACODE_METRICS_ENABLED`, `QUADRACODE_METRICS_EMIT_MODE`, `QUADRACODE_METRICS_REDIS_URL`, `QUADRACODE_METRICS_STREAM_KEY`.
     - `QUADRACODE_AUTONOMOUS_STREAM_KEY` for routing autonomous events into Redis.
+    - `QUADRACODE_MESSAGE_BUDGET_RATIO`, `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS`, `QUADRACODE_MESSAGE_RETENTION_COUNT` for conversation history management.
   - For AI coding agents, this means **behavioral tuning for the orchestrator’s context layer is centralized in `ContextEngineConfig` and corresponding env vars**, not in the orchestrator package itself.
+
+- **Dual-Layer Context Management**
+  - The context engine employs a dual-layer strategy to manage the context window effectively, separating conversation history from engineered context segments.
+  - **1. Conversation History**: Managed directly within the `pre_process` stage. When the number of message tokens exceeds the budget defined by `QUADRACODE_MESSAGE_BUDGET_RATIO`, the engine triggers a "summarize and trim" operation. It retains the most recent messages (controlled by `QUADRACODE_MESSAGE_RETENTION_COUNT`), summarizes the older messages into a `conversation_summary` segment, and injects `RemoveMessage` operations into the graph to prune the history. This process is governed by its own configurable prompts and ensures that long conversations do not lead to uncontrolled context growth.
+  - **2. Engineered Context Segments**: This includes tool outputs, code search results, documentation, etc. These segments are managed by the `ContextCurator`, which uses a scoring and ranking system to decide whether to retain, compress, summarize, or externalize each segment based on relevance, priority, and token size. This curation happens independently of message summarization but is triggered by the same overflow conditions.
 
 - **Execution Flow & Responsibilities**
   - **`pre_process` stage**:

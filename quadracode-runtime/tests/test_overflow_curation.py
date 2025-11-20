@@ -24,7 +24,6 @@ def _make_segment(segment_id: str, priority: int, tokens: int):
 def test_overflow_triggers_curation_even_with_high_quality() -> None:
     config = ContextEngineConfig(
         metrics_enabled=False,
-        reducer_model="heuristic",
         context_window_max=500,
         target_context_size=400,
     )

@@ -158,13 +158,14 @@ Every message is a simple envelope: `timestamp`, `sender`, `recipient`, `message
 
 ### Context Engineering Node
 
-Every orchestrator turn traverses an opt-in context engineering pipeline:
+Every orchestrator turn traverses an opt-in context engineering pipeline that uses a **dual-layer strategy** to manage both conversation history and engineered context segments separately.
 
-1. **`context_pre`** scores the active state, runs the MemAct curator when quality dips or the window overflows, and pushes just-in-time context via the progressive loader.
-2. **`context_governor`** (LLM-backed) reviews the latest state, plans retain/compress/summarize/externalize/discard operations, and hands the driver a goal-aware prompt outline.
+1.  **`context_pre`** scores the active state and manages both context layers:
+    - **Conversation History**: If message tokens exceed their configured budget (`QUADRACODE_MESSAGE_BUDGET_RATIO`), it triggers a "summarize and trim" operation, retaining the last `QUADRACODE_MESSAGE_RETENTION_COUNT` messages and compressing the rest into a summary.
+    - **Engineered Segments**: If quality dips or the window overflows, it runs the `ContextCurator` to prune, compress, or externalize segments like tool outputs and search results.
+    - It also pushes just-in-time context via the progressive loader.
+2. **`context_governor`** (LLM-backed) reviews the latest state, plans retain/compress/summarize/externalize/discard operations for engineered segments, and hands the driver a goal-aware prompt outline.
 3. **`driver` / tools** execute with the trimmed, skill-aware context; tool responses flow back into the working set automatically.
-4. **`context_post`** reflects on the turn, updates the evolving playbook, appends curation rules, and checkpoints if needed.
-5. **`context_tool`** captures each tool output, evaluates relevance, and—when payloads are large—invokes the reducer to summarise them.
 
 The reducer uses Anthropic’s Claude Haiku by default (configurable via `ContextEngineConfig.reducer_model`) to map/reduce long blobs into concise summaries while embedding a `restorable_reference`. The progressive loader now includes a **skills catalog** that stages SKILL.md metadata, loads full skill content on demand, and queues linked references for future turns. Tool outputs are captured automatically, externalized segments can be persisted to disk via `externalize_write_enabled`, and each stage emits structured metrics that feed the Streamlit dashboard and the e2e logs.
 
@@ -882,9 +883,6 @@ This workflow ensures repeatable builds and full E2E test coverage with real LLM
 - **[IMPLEMENTATION.md](IMPLEMENTATION.md)** - Detailed implementation notes for each component
 - **[TECHNICAL_IMPLEMENTATION.md](TECHNICAL_IMPLEMENTATION.md)** - Technical architecture and design decisions
 
-## License
-
-[Add your license here]
 
 ## Learn More
 
@@ -902,7 +900,7 @@ You can tune the context engine at runtime using environment variables (all opti
 - `QUADRACODE_CONTEXT_WINDOW_MAX` (int, tokens)
 - `QUADRACODE_TARGET_CONTEXT_SIZE` (int, tokens) — default 10,000
 - `QUADRACODE_MAX_TOOL_PAYLOAD_CHARS` (int, characters)
-- `QUADRACODE_REDUCER_MODEL` (string, e.g., `heuristic` to avoid live LLM)
+- `QUADRACODE_REDUCER_MODEL` (string, e.g., `anthropic:claude-haiku-4-5-20251001`; must be an LLM identifier)
 - `QUADRACODE_REDUCER_CHUNK_TOKENS` (int, tokens)
 - `QUADRACODE_REDUCER_TARGET_TOKENS` (int, tokens)
 - `QUADRACODE_GOVERNOR_MODEL` (string, e.g., `heuristic`)
@@ -913,6 +911,9 @@ You can tune the context engine at runtime using environment variables (all opti
 - `QUADRACODE_METRICS_STREAM_KEY` (string)
 - `QUADRACODE_EXTERNALIZE_WRITE_ENABLED` (bool)
 - `QUADRACODE_QUALITY_THRESHOLD` (float 0..1)
+- `QUADRACODE_MESSAGE_BUGET_RATIO` (float 0..1) - Max % of context window for messages
+- `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS` (int) - Only compress if > N messages
+- `QUADRACODE_MESSAGE_RETENTION_COUNT` (int) - Keep last N messages raw
 
 Units
 - “Context window” and “target size” are measured in approximate tokens (whitespace-delimited). The context engine tracks per-segment `token_count` and sums to compute `context_window_used`.
@@ -923,7 +924,7 @@ Example (force compression/externalization during tests):
 ```bash
 export QUADRACODE_MAX_TOOL_PAYLOAD_CHARS=10
 export QUADRACODE_TARGET_CONTEXT_SIZE=10
-export QUADRACODE_REDUCER_MODEL=heuristic
+export QUADRACODE_REDUCER_MODEL=anthropic:claude-haiku-4-5-20251001
 ```
 
 ## Local Development & Testing
