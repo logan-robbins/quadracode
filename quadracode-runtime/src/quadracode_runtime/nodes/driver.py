@@ -208,6 +208,36 @@ def make_driver(system_prompt: str, tools: list) -> callable:
             system_sections.append("Memory guidance:\n" + "\n".join(guidance_lines))
 
         combined_system_prompt = "\n\n".join(section for section in system_sections if section)
+        
+        # Inject context segments into the conversation
+        context_segments = state.get("context_segments", []) if isinstance(state, dict) else []
+        if context_segments:
+            # Build context injection from segments marked in governor's ordered_segments
+            ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
+            context_blocks = []
+            
+            # First add segments that are in the ordered list
+            for segment_id in ordered_segments:
+                for segment in context_segments:
+                    if segment.get("id") == segment_id:
+                        content = segment.get("content", "")
+                        seg_type = segment.get("type", "context")
+                        if content:
+                            context_blocks.append(f"[{seg_type}: {segment_id}]\n{content}")
+            
+            # Add any high-priority segments not in ordered list (priority >= 8)
+            for segment in context_segments:
+                seg_id = segment.get("id")
+                if seg_id not in ordered_segments and segment.get("priority", 0) >= 8:
+                    content = segment.get("content", "")
+                    seg_type = segment.get("type", "context")
+                    if content:
+                        context_blocks.append(f"[{seg_type}: {seg_id}]\n{content}")
+            
+            if context_blocks:
+                # Add context as a system message right after the main system prompt
+                context_injection = "# Active Context\n\n" + "\n\n".join(context_blocks)
+                combined_system_prompt = combined_system_prompt + "\n\n" + context_injection
 
         if not msgs or not isinstance(msgs[0], SystemMessage):
             msgs = [SystemMessage(content=combined_system_prompt), *msgs]
