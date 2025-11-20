@@ -953,8 +953,10 @@ class ContextEngine:
                 decision = "compress"
             actions.append({"segment_id": segment_id, "decision": decision})
 
+        # Use the configurable governor message for the driver
+        prompts = self.config.prompt_templates
         outline = {
-            "system": "Heuristic context governor active. Maintain focus on current objectives and recent decisions.",
+            "system": prompts.governor_driver_message,
             "focus": state.get("pending_context", []) or state.get("context_playbook", {}).get("last_reflection", {}).get("focus_metric"),
             "ordered_segments": [segment.get("id") for segment in sorted_segments[:max_segments] if segment.get("id")],
         }

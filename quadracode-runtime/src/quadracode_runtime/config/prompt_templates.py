@@ -25,105 +25,206 @@ class PromptTemplates:
     # ========== Context Governor Prompts ==========
     
     governor_system_prompt: str = field(default=(
-        "You are the context governor for a long-running AI agent. "
-        "Your job is to keep the context window focused, concise, and free of conflicts."
+        "You are the Context Governor for an AI orchestration system.\n\n"
+        "Your role is to manage the context window to ensure the AI maintains awareness "
+        "of the full conversation while staying within token limits. You decide which "
+        "context segments to retain, compress, or discard based on their relevance, "
+        "recency, and importance to the current task.\n\n"
+        "Key principles:\n"
+        "- User identity and preferences must ALWAYS be preserved\n"
+        "- Recent messages and current task context have highest priority\n"
+        "- Historical context should be compressed into summaries\n"
+        "- Technical details can be externalized if not immediately needed"
     ))
     
     governor_instructions: str = field(default=(
-        "Review the provided JSON summary. Produce a strict JSON object with keys "
-        "'actions' and 'prompt_outline'. Each action must include 'segment_id' and 'decision' "
-        "(retain, compress, summarize, isolate, externalize, discard). Optionally include "
-        "'priority' or 'focus'. The prompt_outline should contain optional 'system', 'focus', "
-        "and 'ordered_segments'. Do not include any additional prose."
+        "Analyze the context segments and create a management plan.\n\n"
+        "For each segment, decide one of:\n"
+        "- 'retain': Keep as-is (for critical/recent content)\n"
+        "- 'compress': Reduce size while keeping key facts\n"
+        "- 'summarize': Create brief summary of main points\n"
+        "- 'externalize': Store externally, keep reference only\n"
+        "- 'discard': Remove if no longer relevant\n\n"
+        "Return a JSON object with:\n"
+        "- 'actions': Array of {segment_id, decision, priority}\n"
+        "- 'prompt_outline': {system, focus, ordered_segments}\n\n"
+        "Prioritize preserving user context and current task information."
     ))
     
     governor_input_format: str = field(default=(
-        "{instructions}\n\nINPUT:\n```json\n{payload}\n```"
+        "{instructions}\n\nCONTEXT STATE:\n```json\n{payload}\n```\n\n"
+        "OUTPUT (JSON only):"
+    ))
+    
+    # Message that gets added to the main orchestrator's prompt when context management is active
+    governor_driver_message: str = field(default=(
+        "📝 Context Management Active:\n"
+        "- Older conversation has been compressed into a summary to fit token limits\n"
+        "- The summary preserves user information, key decisions, and task context\n"
+        "- Recent messages are kept in full for immediate context\n"
+        "- Use both the summary and recent messages to maintain conversation continuity\n"
+        "- If the user references earlier conversation, check the summary first"
     ))
     
     # ========== Context Reducer Prompts ==========
     
     reducer_system_prompt: str = field(default=(
-        "You condense technical context. Use structured bullet points. Keep critical details."
+        "You are a Context Compression Specialist for an AI system.\n\n"
+        "Your role is to intelligently compress context while preserving ALL critical information:\n"
+        "- User identity, names, preferences, and personal information\n"
+        "- Key decisions and agreements made\n"
+        "- Current task objectives and requirements\n"
+        "- Important tool outputs and results\n"
+        "- Error states and unresolved issues\n\n"
+        "Use structured formats (bullets, sections) for clarity.\n"
+        "NEVER lose user-specific information or current task context."
     ))
     
     reducer_chunk_prompt: str = field(default=(
-        "Summarize the following context into concise bullet points.{focus_clause} "
-        "Limit to approximately {target_tokens} tokens.\n\n```\n{chunk}\n```"
+        "Compress the following content to approximately {target_tokens} tokens.{focus_clause}\n\n"
+        "MUST PRESERVE:\n"
+        "- Any user names, identities, or personal information\n"
+        "- Current task or question being addressed\n"
+        "- Key decisions, results, or errors\n\n"
+        "Content to compress:\n```\n{chunk}\n```\n\n"
+        "Compressed version:"
     ))
     
     reducer_focus_clause: str = field(default=(
-        " Focus on {focus}."
+        "\n\nSpecial focus: {focus}"
     ))
     
     reducer_combine_prompt: str = field(default=(
-        "Combine the following partial summaries into a single concise summary. "
-        "Preserve key facts and actions. Use bullet points when helpful.\n\n{combined}"
+        "Merge these partial summaries into a unified, coherent summary.\n\n"
+        "Requirements:\n"
+        "- Eliminate redundancy while keeping all unique information\n"
+        "- Maintain chronological flow where relevant\n"
+        "- Preserve ALL user-specific details\n"
+        "- Keep critical decisions and outcomes\n\n"
+        "Partial summaries to merge:\n{combined}\n\n"
+        "Unified summary:"
     ))
     
     # ========== Conversation Management Prompts ==========
 
     conversation_summarization_prompt: str = field(default=(
-        "Update the running conversation summary with the new messages.\n"
+        "Create an updated conversation summary that will serve as the AI's memory.\n\n"
+        "CRITICAL PRESERVATION REQUIREMENTS:\n"
+        "1. **User Identity**: ALWAYS preserve names, roles, and any personal information\n"
+        "2. **User Preferences**: Keep all stated preferences, requirements, or constraints\n"
+        "3. **Current Context**: What the user is currently trying to accomplish\n"
+        "4. **Key History**: Important decisions, agreements, or results from earlier\n\n"
         "Existing Summary:\n{existing_summary}\n\n"
-        "New Lines:\n{new_lines}\n\n"
-        "Provide a concise, updated summary of the conversation history, merging the new information "
-        "into the existing narrative. Focus on key decisions, tool outputs, and the evolving goal. "
-        "Discard transient chit-chat."
+        "New Messages to Incorporate:\n{new_lines}\n\n"
+        "Instructions:\n"
+        "- Merge new information with existing summary\n"
+        "- Use clear sections (e.g., 'User Information:', 'Current Task:', 'History:')\n"
+        "- Be concise but NEVER lose critical user details\n"
+        "- Include specific names, numbers, and decisions\n"
+        "- Note any unresolved questions or pending tasks\n\n"
+        "Updated Summary:"
     ))
     
     # ========== Context Curator Prompts (for future LLM-based curation) ==========
     
     curator_system_prompt: str = field(default=(
-        "You are a context curator optimizing the working memory of an AI agent. "
-        "Your decisions should maximize relevance while minimizing token usage."
+        "You are the Context Curator, responsible for optimizing the AI's working memory.\n\n"
+        "Your decisions directly impact the AI's ability to:\n"
+        "- Remember user information and conversation history\n"
+        "- Access relevant technical context\n"
+        "- Complete tasks effectively\n\n"
+        "Prioritize user context and current task relevance above all else."
     ))
     
     curator_operation_prompt: str = field(default=(
-        "Evaluate the following context segment and recommend an operation "
-        "(retain, compress, summarize, externalize, discard). Consider the current "
-        "task focus and context pressure.\n\nSegment: {segment}\n\nFocus: {focus}\n\n"
-        "Context usage: {usage_ratio}%"
+        "Evaluate this context segment and recommend the best operation.\n\n"
+        "Segment ID: {segment}\n"
+        "Current Focus: {focus}\n"
+        "Context Usage: {usage_ratio}% of available space\n\n"
+        "Options:\n"
+        "- 'retain': Keep unchanged (for critical/active content)\n"
+        "- 'compress': Reduce size but keep main points\n"
+        "- 'summarize': Create brief summary only\n"
+        "- 'externalize': Move to storage, keep reference\n"
+        "- 'discard': Remove entirely (only if truly irrelevant)\n\n"
+        "Recommendation (with brief reason):"
     ))
     
     # ========== Context Scorer Prompts (for LLM-based scoring) ==========
     
     scorer_system_prompt: str = field(default=(
-        "You evaluate context quality across multiple dimensions: relevance, coherence, "
-        "completeness, freshness, diversity, and efficiency."
+        "You are the Context Quality Scorer.\n\n"
+        "Evaluate context across six dimensions:\n"
+        "- **Relevance**: Does context relate to current task?\n"
+        "- **Coherence**: Is context well-organized and clear?\n"
+        "- **Completeness**: Do we have all needed information?\n"
+        "- **Freshness**: Is context up-to-date?\n"
+        "- **Diversity**: Do we have different types of useful context?\n"
+        "- **Efficiency**: Are we using token space wisely?\n\n"
+        "Score each from 0.0 (poor) to 1.0 (excellent)."
     ))
     
     scorer_evaluation_prompt: str = field(default=(
-        "Evaluate the following context segments and provide quality scores (0-1) for each "
-        "dimension. Return a JSON object with scores for: relevance, coherence, completeness, "
-        "freshness, diversity, efficiency.\n\nContext:\n{context}"
+        "Score the quality of this context for helping the AI respond effectively.\n\n"
+        "Context to evaluate:\n{context}\n\n"
+        "Scoring criteria:\n"
+        "- Relevance (0-1): How well does this support the current task?\n"
+        "- Coherence (0-1): How well organized and clear is it?\n"
+        "- Completeness (0-1): Do we have all critical information?\n"
+        "- Freshness (0-1): How current is this information?\n"
+        "- Diversity (0-1): Do we have good variety of context types?\n"
+        "- Efficiency (0-1): How well are we using available space?\n\n"
+        "Return JSON with scores:\n"
+        '{"relevance": 0.X, "coherence": 0.X, "completeness": 0.X, "freshness": 0.X, "diversity": 0.X, "efficiency": 0.X}'
     ))
     
     # ========== Progressive Loader Prompts ==========
     
     loader_system_prompt: str = field(default=(
-        "You determine what additional context is needed for the current task. "
-        "Recommend specific types of information to load."
+        "You are the Context Loader, responsible for identifying gaps in the AI's knowledge.\n\n"
+        "Your job is to determine what additional context would help the AI:\n"
+        "- Answer the user's current question\n"
+        "- Complete the active task\n"
+        "- Maintain conversation continuity\n\n"
+        "Be strategic about what to load given limited token space."
     ))
     
     loader_request_prompt: str = field(default=(
-        "Based on the current context and pending tasks, what additional information "
-        "should be loaded? Current context types: {current_types}\n\n"
-        "Pending tasks: {pending_tasks}\n\nRecommend up to {max_recommendations} "
-        "context types to load, in priority order."
+        "Identify what additional context would be most helpful.\n\n"
+        "Currently Loaded: {current_types}\n"
+        "Pending Tasks: {pending_tasks}\n"
+        "Available Space: Limited to {max_recommendations} new segments\n\n"
+        "What specific information should we load? Priority order:\n"
+        "1. Information directly needed for the current question/task\n"
+        "2. Recent context that provides continuity\n"
+        "3. Background knowledge if space allows\n\n"
+        "Recommendations (most important first):"
     ))
     
     # ========== Reflection Prompts ==========
     
     reflection_system_prompt: str = field(default=(
-        "You analyze the agent's decision-making process and context management. "
-        "Identify issues and recommend improvements."
+        "You are the Context Quality Analyst.\n\n"
+        "Your role is to ensure the AI maintains high-quality context that:\n"
+        "- Preserves critical user information\n"
+        "- Supports effective task completion\n"
+        "- Stays within token limits\n"
+        "- Remains coherent and relevant\n\n"
+        "Identify problems early and recommend specific fixes."
     ))
     
     reflection_analysis_prompt: str = field(default=(
-        "Analyze the recent decision and context state. Quality score: {quality_score}. "
-        "Components: {components}. Identify any issues with: {focus_areas}. "
-        "Provide specific, actionable recommendations."
+        "Analyze the current context quality and identify improvements needed.\n\n"
+        "Current Metrics:\n"
+        "- Overall Quality Score: {quality_score}\n"
+        "- Component Scores: {components}\n"
+        "- Focus Areas: {focus_areas}\n\n"
+        "Evaluate:\n"
+        "1. Is user context being preserved properly?\n"
+        "2. Is current task context clear and complete?\n"
+        "3. Are we within token budget efficiently?\n"
+        "4. What critical information might be missing?\n\n"
+        "Provide 3-5 specific, actionable recommendations:"
     ))
     
     # ========== Compression Profiles ==========
