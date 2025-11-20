@@ -46,6 +46,10 @@ from ..state import (
     record_skepticism_challenge,
     record_property_test_result,
     record_test_suite_result,
+    get_segment,
+    get_segment_content,
+    upsert_segment,
+    remove_segment,
 )
 from ..long_term_memory import update_memory_guidance
 from ..metrics import ContextMetricsEmitter
@@ -200,8 +204,6 @@ class ContextEngine:
             history_updates = await self._manage_conversation_history(state, available_dynamic_space)
             if history_updates:
                 # Apply message updates and re-calculate usage
-                if "conversation_summary" in history_updates:
-                    state["conversation_summary"] = history_updates["conversation_summary"]
                 state["messages"].extend(history_updates.get("messages", []))
                 state = self._recompute_context_usage(state)
 
@@ -540,7 +542,6 @@ class ContextEngine:
             segment["restorable_reference"] = segment.get("restorable_reference") or segment["id"]
 
         state["context_segments"].append(segment)
-        state["working_memory"][segment["id"]] = segment
         state = self._recompute_context_usage(state)
         return state
 
@@ -884,7 +885,6 @@ class ContextEngine:
             )
 
         state["context_segments"] = updated_segments
-        state["working_memory"] = {segment["id"]: segment for segment in updated_segments}
         state["governor_plan"] = plan
         state["governor_prompt_outline"] = outline
         state = self._recompute_context_usage(state)
@@ -1174,47 +1174,69 @@ class ContextEngine:
     async def _manage_conversation_history(self, state: QuadraCodeState, available_dynamic_space: int) -> Dict[str, Any]:
         """
         Manages conversation history by summarizing and trimming messages when they exceed their budget.
+        
+        CRITICAL: This method must respect message_retention_count to keep the last N messages
+        intact BEFORE any summarization happens. The working memory summary must be created
+        from the full message history, not from already-trimmed messages.
         """
+        messages: list[BaseMessage] = state.get("messages", [])
+        if not messages:
+            return {}
+        
         # Calculate message budget based on available dynamic space
         message_budget = int(available_dynamic_space * self.config.message_budget_ratio)
         
         breakdown = state.get("_context_breakdown", {})
         message_tokens = breakdown.get("message_tokens", 0)
 
-        if message_tokens <= message_budget:
-            return {}
-            
-        messages: list[BaseMessage] = state.get("messages", [])
-        if not messages:
-            return {}
-
-        # Always keep at least the most recent message (current user input)
-        # to ensure the LLM has something to respond to
-        if len(messages) <= 1:
-            # Can't compress if we only have one message
+        # Compress if EITHER condition is met:
+        # 1. We have more than min_message_count_to_compress messages
+        # 2. OR tokens exceed budget
+        should_compress = (
+            len(messages) > self.config.min_message_count_to_compress
+            or message_tokens > message_budget
+        )
+        
+        if not should_compress:
             return {}
         
-        # Summarize just enough to get back under budget
-        tokens_to_remove = message_tokens - message_budget
+        # Determine how many recent messages to keep intact
+        # MUST keep at least message_retention_count messages for the LLM to see recent context
+        retention_count = max(1, self.config.message_retention_count)
         
-        # Find oldest messages to summarize, but keep at least the last message
+        # Ensure we have enough messages to actually compress
+        if len(messages) <= retention_count:
+            return {}
+        
+        # Calculate tokens in messages we want to keep
+        messages_to_keep = messages[-retention_count:]
+        kept_message_tokens = sum(
+            self._estimate_tokens(str(msg.content)) for msg in messages_to_keep
+        )
+        
+        # If the messages we want to keep already exceed budget, we can't help
+        # (this should trigger other context management strategies)
+        if kept_message_tokens >= message_budget:
+            return {}
+        
+        # Find oldest messages to summarize (everything before the retention window)
+        # Summarize enough to fit within budget
+        available_for_old = message_budget - kept_message_tokens
         summarization_candidates: list[BaseMessage] = []
         removed_tokens = 0
-        # Leave at least the last message untouched
-        for msg in messages[:-1]:
+        
+        # Process messages from oldest to newest, stopping before retention window
+        for msg in messages[:-retention_count]:
             msg_tokens = self._estimate_tokens(str(msg.content))
-            if removed_tokens < tokens_to_remove:
-                summarization_candidates.append(msg)
-                removed_tokens += msg_tokens
-            else:
-                break
+            summarization_candidates.append(msg)
+            removed_tokens += msg_tokens
         
         if not summarization_candidates:
             return {}
             
         # Generate summary
         summary_text = get_buffer_string(summarization_candidates)
-        existing_summary = state.get("conversation_summary", "")
+        existing_summary = get_segment_content(state, "conversation-summary")
         
         prompt = self.config.prompt_templates.get_prompt(
             "conversation_summarization_prompt",
@@ -1227,12 +1249,11 @@ class ContextEngine:
         
         # Construct updates to be returned
         updates: Dict[str, Any] = {
-            "conversation_summary": new_summary,
             "messages": [RemoveMessage(id=msg.id) for msg in summarization_candidates if msg.id]
         }
         
         # Create a new context segment for the summary
-        segment = {
+        segment: ContextSegment = {
             "id": "conversation-summary",
             "content": new_summary,
             "type": "conversation_summary",
@@ -1240,12 +1261,12 @@ class ContextEngine:
             "token_count": reduction.token_count,
             "timestamp": _utc_now().isoformat(),
             "compression_eligible": False,
+            "decay_rate": 0.0,
+            "restorable_reference": None,
         }
         
-        # Replace or add the summary segment
-        existing_segments = [s for s in state.get("context_segments", []) if s["id"] != "conversation-summary"]
-        existing_segments.insert(0, segment)
-        state["context_segments"] = existing_segments
+        # Upsert the summary segment
+        upsert_segment(state, segment)
         
         # Log the summarization event
         await log_context_compression(
@@ -1537,8 +1558,7 @@ class ContextEngine:
         elif recent_failures >= 2 and stage == "govern_context":
             candidates.append((3, ExhaustionMode.RETRY_DEPLETION))
 
-        working_memory = state.get("working_memory", {})
-        if isinstance(working_memory, dict) and working_memory.get("llm_stop"):
+        if state.get("llm_stop_detected", False):
             candidates.append((1, ExhaustionMode.LLM_STOP))
 
         if self._tool_indicates_llm_stop(tool_response):
@@ -1633,9 +1653,7 @@ class ContextEngine:
             self._apply_prp_transition(state, PRPState.HYPOTHESIZE)
             action_taken = "hypothesis_refinement"
         elif mode is ExhaustionMode.LLM_STOP:
-            working_memory = state.setdefault("working_memory", {})
-            if isinstance(working_memory, dict):
-                working_memory["llm_resume_hint"] = True
+            state["llm_resume_hint"] = True
             action_taken = "llm_resume_hint"
         elif mode is ExhaustionMode.PREDICTED_EXHAUSTION:
             self._apply_prp_transition(state, PRPState.HYPOTHESIZE)

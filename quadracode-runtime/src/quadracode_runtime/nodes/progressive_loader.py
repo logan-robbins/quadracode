@@ -168,7 +168,6 @@ class ProgressiveContextLoader:
         else:
             state["context_segments"].append(segment)
 
-        state["working_memory"][segment["id"]] = segment
         state["context_hierarchy"][segment["type"]] = self._need_priority(segment["type"])
         state["context_window_used"] += segment.get("token_count", 0)
         load_event = {

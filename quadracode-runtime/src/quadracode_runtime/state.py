@@ -180,6 +180,82 @@ class ContextSegment(TypedDict):
     restorable_reference: Optional[str]
 
 
+# ============================================================================
+# Context Segment Helper Functions
+# ============================================================================
+
+def get_segment(state: "QuadraCodeState", segment_id: str) -> Optional[ContextSegment]:
+    """
+    Retrieve a context segment by its ID.
+    
+    Args:
+        state: The current QuadraCodeState.
+        segment_id: The unique identifier of the segment to retrieve.
+    
+    Returns:
+        The ContextSegment if found, otherwise None.
+    """
+    segments = state.get("context_segments", [])
+    return next((s for s in segments if s.get("id") == segment_id), None)
+
+
+def get_segment_content(state: "QuadraCodeState", segment_id: str) -> str:
+    """
+    Retrieve the content of a context segment by its ID.
+    
+    Args:
+        state: The current QuadraCodeState.
+        segment_id: The unique identifier of the segment.
+    
+    Returns:
+        The segment's content string, or empty string if not found.
+    """
+    segment = get_segment(state, segment_id)
+    return segment.get("content", "") if segment else ""
+
+
+def upsert_segment(state: "QuadraCodeState", segment: ContextSegment) -> None:
+    """
+    Insert or update a context segment in the state.
+    
+    If a segment with the same ID exists, it is replaced. Otherwise, the segment
+    is appended to the context_segments list.
+    
+    Args:
+        state: The current QuadraCodeState.
+        segment: The ContextSegment to insert or update.
+    """
+    segments = state.get("context_segments", [])
+    existing_idx = next(
+        (idx for idx, s in enumerate(segments) if s.get("id") == segment["id"]),
+        None
+    )
+    
+    if existing_idx is not None:
+        segments[existing_idx] = segment
+    else:
+        segments.append(segment)
+    
+    state["context_segments"] = segments
+
+
+def remove_segment(state: "QuadraCodeState", segment_id: str) -> bool:
+    """
+    Remove a context segment from the state by its ID.
+    
+    Args:
+        state: The current QuadraCodeState.
+        segment_id: The unique identifier of the segment to remove.
+    
+    Returns:
+        True if the segment was found and removed, False otherwise.
+    """
+    segments = state.get("context_segments", [])
+    initial_len = len(segments)
+    state["context_segments"] = [s for s in segments if s.get("id") != segment_id]
+    return len(state["context_segments"]) < initial_len
+
+
 class MemoryCheckpoint(TypedDict):
     """
     Represents a persisted, restorable snapshot of the agent's context state.
@@ -638,8 +714,7 @@ class ContextEngineState(RuntimeState):
         context_window_used: The number of tokens currently in the context window.
         context_window_max: The maximum capacity of the context window.
         context_quality_score: A composite score evaluating the relevance and coherence of the current context.
-        working_memory: A dictionary representing fast-access, in-context memory.
-        context_segments: A list of `ContextSegment` objects currently in the context window.
+        context_segments: A list of `ContextSegment` objects - the single source of truth for all in-context data.
         external_memory_index: An index mapping keys to references in external storage (e.g., file system).
         memory_checkpoints: A list of `MemoryCheckpoint` snapshots.
         pending_context: A queue of context items waiting to be loaded.
@@ -661,6 +736,8 @@ class ContextEngineState(RuntimeState):
         last_curation_summary: A summary of the last context curation action.
         recent_loads: A log of recently loaded context segments.
         recent_externalizations: A log of recently externalized context segments.
+        llm_stop_detected: Flag indicating if the LLM has signaled a stop condition (exhaustion).
+        llm_resume_hint: Flag indicating the LLM should be hinted to resume from a stop.
     """
 
     # Context Management
@@ -668,8 +745,7 @@ class ContextEngineState(RuntimeState):
     context_window_max: int
     context_quality_score: float
 
-    # Working Memory (In-Context)
-    working_memory: Dict[str, Any]
+    # Context Segments (Single Source of Truth)
     context_segments: List[ContextSegment]
 
     # External Memory (File System)
@@ -702,7 +778,10 @@ class ContextEngineState(RuntimeState):
     recent_externalizations: List[Dict[str, Any]]
     recent_compressions: List[Dict[str, Any]]
     last_compression_event: Dict[str, Any]
-    conversation_summary: str
+    
+    # LLM Stop/Resume Detection (for exhaustion handling)
+    llm_stop_detected: bool
+    llm_resume_hint: bool
 
 
 class QuadraCodeState(ContextEngineState, total=False):
@@ -812,7 +891,6 @@ def make_initial_context_engine_state(
             "context_window_used": 0,
             "context_window_max": context_window_max,
             "context_quality_score": 0.0,
-            "working_memory": {},
             "context_segments": [],
             "external_memory_index": {},
             "memory_checkpoints": [],
@@ -837,7 +915,8 @@ def make_initial_context_engine_state(
             "recent_externalizations": [],
             "recent_compressions": [],
             "last_compression_event": {},
-            "conversation_summary": "",
+            "llm_stop_detected": False,
+            "llm_resume_hint": False,
             "is_in_prp": False,
             "prp_cycle_count": 0,
             "prp_state": PRP_STATE_MACHINE.initial_state,

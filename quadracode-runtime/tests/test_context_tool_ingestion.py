@@ -2,7 +2,7 @@ from langchain_core.messages import ToolMessage
 
 from quadracode_runtime.config.context_engine import ContextEngineConfig
 from quadracode_runtime.nodes.context_engine import ContextEngine
-from quadracode_runtime.state import make_initial_context_engine_state
+from quadracode_runtime.state import make_initial_context_engine_state, get_segment
 
 
 def test_context_tool_captures_tool_message_output() -> None:
@@ -23,7 +23,10 @@ def test_context_tool_captures_tool_message_output() -> None:
     segment = result["context_segments"][-1]
     assert segment["type"] == "tool_output:agent_registry"
     assert "All agents healthy" in segment["content"]
-    assert segment["id"] in result["working_memory"]
+    # Verify the segment can be retrieved using helper function
+    retrieved_segment = get_segment(result, segment["id"])
+    assert retrieved_segment is not None
+    assert retrieved_segment["id"] == segment["id"]
     assert segment["restorable_reference"] == "registry-call-1"
     assert result["metrics_log"], "tool ingestion should log metrics"
     assert result["metrics_log"][-1]["event"] == "tool_response"
