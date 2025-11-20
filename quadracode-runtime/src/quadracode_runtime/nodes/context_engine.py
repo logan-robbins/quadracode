@@ -96,14 +96,17 @@ class ContextEngine:
         ... and other sub-components.
     """
 
-    def __init__(self, config: ContextEngineConfig):
+    def __init__(self, config: ContextEngineConfig, system_prompt: str = ""):
         """
         Initializes the `ContextEngine`.
 
         Args:
             config: The configuration for the context engine.
+            system_prompt: The static system prompt for the agent.
         """
         self.config = config
+        self.system_prompt = system_prompt
+        self.system_prompt_tokens = self._estimate_tokens(system_prompt)
         self.curator = ContextCurator(config)
         self.scorer = ContextScorer(config)
         self.loader = ProgressiveContextLoader(config)
@@ -125,6 +128,12 @@ class ContextEngine:
             os.environ.get("QUADRACODE_HOTPATH_PROBE_TIMEOUT", "3")
         )
         self.deliberative_planner = DeliberativePlanner()
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Roughly estimates token count as 1 token per 4 characters."""
+        if not text:
+            return 0
+        return int(len(text) / 4)
 
     def pre_process_sync(self, state: QuadraCodeState) -> Dict[str, Any]:
         """Synchronous wrapper for the `pre_process` method."""
@@ -164,30 +173,38 @@ class ContextEngine:
         # though shallow copy means mutable values are still shared, which is generally fine
         # for "replace" reducers, but we must be careful with "add_messages".
         state = state.copy()
+        history_updates: dict[str, Any] = {}
         
         state = self._ensure_state_defaults(state)
         await self._enforce_hotpath_residency(state)
         quality_score = await self.scorer.evaluate(state)
         state["context_quality_score"] = quality_score
         
-        # Unified compression trigger
-        total_tokens = state["context_window_used"]
+        # Calculate available dynamic space
         optimal_tokens = self.config.optimal_context_size
+        available_dynamic_space = optimal_tokens - self.system_prompt_tokens
         
-        if total_tokens > optimal_tokens:
+        # Get current dynamic token usage
+        breakdown = state.get("_context_breakdown", {})
+        message_tokens = breakdown.get("message_tokens", 0)
+        segment_tokens = breakdown.get("segment_tokens", 0)
+        current_dynamic_tokens = message_tokens + segment_tokens
+
+        if current_dynamic_tokens > available_dynamic_space:
             # Context is overgrown, decide what to compress
-            history_updates = await self._manage_conversation_history(state)
+            history_updates = await self._manage_conversation_history(state, available_dynamic_space)
             if history_updates:
                 # Apply message updates and re-calculate usage
                 if "conversation_summary" in history_updates:
                     state["conversation_summary"] = history_updates["conversation_summary"]
-                # The 'messages' key will contain RemoveMessage objects
                 state["messages"].extend(history_updates.get("messages", []))
                 state = self._recompute_context_usage(state)
 
             # After message compression, check if segment compression is still needed
-            if state["context_window_used"] > optimal_tokens:
-                 state = await self.curator.optimize(state, optimal_tokens)
+            current_segment_tokens = state.get("_context_breakdown", {}).get("segment_tokens", 0)
+            segment_budget = available_dynamic_space * (1 - self.config.message_budget_ratio)
+            if current_segment_tokens > segment_budget:
+                 state = await self.curator.optimize(state, int(segment_budget))
                  state = self._recompute_context_usage(state)
                  await self._emit_curation_metrics(state, reason="overflow_control")
                  await self._emit_externalization_metrics(state)
@@ -1138,8 +1155,8 @@ class ContextEngine:
         # Count tokens from messages
         message_tokens = self._count_message_tokens(state)
         
-        # Total context window usage includes both segments and messages
-        total = segment_tokens + message_tokens
+        # Total context window usage includes static prompt, segments and messages
+        total = self.system_prompt_tokens + segment_tokens + message_tokens
         state["context_window_used"] = int(total)
         
         # Store breakdown for observability
@@ -1149,13 +1166,12 @@ class ContextEngine:
         
         return state
 
-    async def _manage_conversation_history(self, state: QuadraCodeState) -> Dict[str, Any]:
+    async def _manage_conversation_history(self, state: QuadraCodeState, available_dynamic_space: int) -> Dict[str, Any]:
         """
         Manages conversation history by summarizing and trimming messages when they exceed their budget.
         """
-        # Calculate message budget based on optimal context size
-        optimal_tokens = self.config.optimal_context_size
-        message_budget = int(optimal_tokens * self.config.message_budget_ratio)
+        # Calculate message budget based on available dynamic space
+        message_budget = int(available_dynamic_space * self.config.message_budget_ratio)
         
         breakdown = state.get("_context_breakdown", {})
         message_tokens = breakdown.get("message_tokens", 0)
@@ -1174,9 +1190,7 @@ class ContextEngine:
         summarization_candidates: list[BaseMessage] = []
         removed_tokens = 0
         for msg in messages:
-            # A simple heuristic: remove messages until we've met the token reduction goal
-            # A more advanced approach would use a token counter on each message
-            msg_tokens = len(str(msg.content)) / 4  # Rough estimate
+            msg_tokens = self._estimate_tokens(str(msg.content))
             if removed_tokens < tokens_to_remove:
                 summarization_candidates.append(msg)
                 removed_tokens += msg_tokens
@@ -1275,7 +1289,6 @@ class ContextEngine:
                 return int(msg.usage_metadata.get("input_tokens", 0))
         
         # Fallback: rough estimate based on character count
-        # Approximation: 1 token ≈ 4 characters
         total_chars = 0
         for msg in messages:
             content = ""
@@ -1293,8 +1306,7 @@ class ContextEngine:
                             content += str(block)
             total_chars += len(content)
         
-        # Rough estimation: 4 chars per token
-        return int(total_chars / 4)
+        return self._estimate_tokens(total_chars)
 
     def _normalize_refinement_ledger(self, state: QuadraCodeState) -> QuadraCodeState:
         ledger_entries: List[RefinementLedgerEntry] = []

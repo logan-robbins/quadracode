@@ -137,7 +137,7 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
             config = ContextEngineConfig.from_environment()  # type: ignore[attr-defined]
         except AttributeError:
             config = ContextEngineConfig()
-        context_engine = ContextEngine(config)
+        context_engine = ContextEngine(config, system_prompt=system_prompt)
         workflow = StateGraph(QuadraCodeState)
 
         # Add nodes
