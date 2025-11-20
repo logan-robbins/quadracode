@@ -195,9 +195,15 @@ class ContextEngine:
         
         # Check if dynamic content exceeds optimal size (system prompt doesn't count)
         optimal_tokens = self.config.optimal_context_size
+        message_count = len(state.get("messages", []))
         
-        if current_dynamic_tokens > optimal_tokens:
-            # Dynamic content exceeds optimal - compress to fit within optimal_tokens
+        should_manage_context = (
+            current_dynamic_tokens > optimal_tokens
+            or message_count > self.config.min_message_count_to_compress
+        )
+        
+        if should_manage_context:
+            # Dynamic content exceeds optimal or message count limit - manage context
             available_dynamic_space = optimal_tokens
             
             # Compress conversation history and segments to fit
