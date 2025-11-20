@@ -12,12 +12,16 @@ logic.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 
 from ..state import RuntimeState
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _coerce_text(content) -> str:
@@ -216,6 +220,8 @@ def make_driver(system_prompt: str, tools: list) -> callable:
             ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
             context_blocks = []
             
+            LOGGER.info(f"Driver context injection: {len(context_segments)} total segments, {len(ordered_segments)} ordered")
+            
             # First add segments that are in the ordered list
             for segment_id in ordered_segments:
                 for segment in context_segments:
@@ -224,6 +230,7 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                         seg_type = segment.get("type", "context")
                         if content:
                             context_blocks.append(f"[{seg_type}: {segment_id}]\n{content}")
+                            LOGGER.info(f"  Added ordered segment: {segment_id} ({len(content)} chars)")
             
             # Add any high-priority segments not in ordered list (priority >= 8)
             for segment in context_segments:
@@ -233,16 +240,26 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                     seg_type = segment.get("type", "context")
                     if content:
                         context_blocks.append(f"[{seg_type}: {seg_id}]\n{content}")
+                        LOGGER.info(f"  Added high-priority segment: {seg_id} ({len(content)} chars)")
             
             if context_blocks:
                 # Add context as a system message right after the main system prompt
                 context_injection = "# Active Context\n\n" + "\n\n".join(context_blocks)
                 combined_system_prompt = combined_system_prompt + "\n\n" + context_injection
+                LOGGER.info(f"  Context injection complete: {len(context_blocks)} blocks, {len(context_injection)} chars total")
+            else:
+                LOGGER.warning(f"  No context blocks generated despite having {len(context_segments)} segments and {len(ordered_segments)} ordered!")
 
         if not msgs or not isinstance(msgs[0], SystemMessage):
             msgs = [SystemMessage(content=combined_system_prompt), *msgs]
         else:
             msgs = [SystemMessage(content=combined_system_prompt), *msgs[1:]]
+
+        # Debug: log a snippet of the system prompt to verify context injection
+        if "# Active Context" in combined_system_prompt:
+            LOGGER.info(f"✓ Active Context section present in system prompt ({len(combined_system_prompt)} chars total)")
+        else:
+            LOGGER.warning(f"✗ Active Context section NOT present in system prompt (segments={len(context_segments)}, ordered={len(ordered_segments) if isinstance(outline, dict) and 'ordered_segments' in outline else 0})")
 
         llm_with_tools = llm.bind_tools(tools)
         ai_msg = llm_with_tools.invoke(msgs)

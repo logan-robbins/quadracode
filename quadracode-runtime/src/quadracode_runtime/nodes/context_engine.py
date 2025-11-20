@@ -251,7 +251,8 @@ class ContextEngine:
         # IMPORTANT: Don't clear messages here - LangGraph's add_messages reducer 
         # will handle the RemoveMessage objects we added to the list.
         # The reducer will remove messages with matching IDs and keep the rest.
-            
+        
+        LOGGER.info(f"pre_process returning: {len(state.get('context_segments', []))} context_segments")
         return state
 
     async def post_process(self, state: QuadraCodeState) -> Dict[str, Any]:
@@ -330,7 +331,7 @@ class ContextEngine:
         state.pop("messages", None)
         return state
 
-    async def govern_context(self, state: QuadraCodeState) -> Dict[str, Any]:
+    async def govern_context(self, state: QuadraCodeState) -> QuadraCodeState:
         """
         Executes the context governance stage of the pipeline.
 
@@ -382,8 +383,12 @@ class ContextEngine:
         )
         self._record_stage_observability(state, "govern_context")
         
-        # IMPORTANT: Remove messages to prevent duplication via add_messages reducer
-        state.pop("messages", None)
+        # CRITICAL: Don't pop messages here - return full state so context_segments flow through
+        # LangGraph's add_messages reducer will handle message deduplication automatically
+        segments = state.get('context_segments', [])
+        LOGGER.info(f"govern_context returning: {len(segments)} context_segments")
+        for seg in segments:
+            LOGGER.info(f"  - {seg.get('id')}: {seg.get('type')}")
         return state
 
     async def handle_tool_response(

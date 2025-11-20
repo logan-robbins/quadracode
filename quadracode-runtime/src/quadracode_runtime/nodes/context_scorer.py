@@ -163,18 +163,33 @@ class ContextScorer:
         response_text = str(response.content)
         
         try:
-            # Try to extract JSON from response
-            json_match = re.search(r'\{[^}]+\}', response_text)
+            # Try to extract JSON from response - look for JSON block more robustly
+            json_match = re.search(r'\{[^\{\}]*"relevance"[^\{\}]*\}', response_text, re.IGNORECASE)
+            if not json_match:
+                # Try simpler pattern
+                json_match = re.search(r'\{.+?\}', response_text, re.DOTALL)
+            
             if json_match:
                 scores_dict = json.loads(json_match.group(0))
                 
+                # Handle both regular keys and potentially quoted keys
+                def get_score(key):
+                    """Try multiple key variations to handle different JSON formats."""
+                    for k in [key, f'"{key}"', key.capitalize(), key.lower()]:
+                        if k in scores_dict:
+                            try:
+                                return float(scores_dict[k])
+                            except (ValueError, TypeError):
+                                pass
+                    return 0.5  # Default fallback
+                
                 breakdown = ScoreBreakdown(
-                    relevance=float(scores_dict.get("relevance", 0.5)),
-                    coherence=float(scores_dict.get("coherence", 0.5)),
-                    completeness=float(scores_dict.get("completeness", 0.5)),
-                    freshness=float(scores_dict.get("freshness", 0.5)),
-                    diversity=float(scores_dict.get("diversity", 0.5)),
-                    efficiency=float(scores_dict.get("efficiency", 0.5)),
+                    relevance=get_score("relevance"),
+                    coherence=get_score("coherence"),
+                    completeness=get_score("completeness"),
+                    freshness=get_score("freshness"),
+                    diversity=get_score("diversity"),
+                    efficiency=get_score("efficiency"),
                 )
             else:
                 # Fallback to heuristic if JSON parsing fails
@@ -182,6 +197,7 @@ class ContextScorer:
                 return await self._evaluate_heuristic(state)
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             LOGGER.warning(f"Error parsing LLM scorer response: {e}, falling back to heuristic")
+            LOGGER.warning(f"Response was: {response_text[:500]}")
             return await self._evaluate_heuristic(state)
         
         state["context_quality_components"] = asdict(breakdown)

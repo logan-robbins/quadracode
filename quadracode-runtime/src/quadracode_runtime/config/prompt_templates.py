@@ -175,7 +175,7 @@ class PromptTemplates:
         "- Diversity (0-1): Do we have good variety of context types?\n"
         "- Efficiency (0-1): How well are we using available space?\n\n"
         "Return JSON with scores:\n"
-        '{"relevance": 0.X, "coherence": 0.X, "completeness": 0.X, "freshness": 0.X, "diversity": 0.X, "efficiency": 0.X}'
+        '{{"relevance": 0.X, "coherence": 0.X, "completeness": 0.X, "freshness": 0.X, "diversity": 0.X, "efficiency": 0.X}}'
     ))
     
     # ========== Progressive Loader Prompts ==========
