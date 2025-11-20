@@ -253,7 +253,7 @@ class ContextEngine:
         # The reducer will remove messages with matching IDs and keep the rest.
         
         LOGGER.info(f"pre_process returning: {len(state.get('context_segments', []))} context_segments")
-        return state
+        return {"context_segments": state.get("context_segments", [])}
 
     async def post_process(self, state: QuadraCodeState) -> Dict[str, Any]:
         """
@@ -329,7 +329,7 @@ class ContextEngine:
         
         # IMPORTANT: Remove messages to prevent duplication via add_messages reducer
         state.pop("messages", None)
-        return state
+        return {"context_segments": state.get("context_segments", [])}
 
     async def govern_context(self, state: QuadraCodeState) -> QuadraCodeState:
         """
@@ -383,8 +383,7 @@ class ContextEngine:
         )
         self._record_stage_observability(state, "govern_context")
         
-        # CRITICAL: Don't pop messages here - return full state so context_segments flow through
-        # LangGraph's add_messages reducer will handle message deduplication automatically
+        # Return the full state to ensure all updates are preserved
         segments = state.get('context_segments', [])
         LOGGER.info(f"govern_context returning: {len(segments)} context_segments")
         for seg in segments:
@@ -475,7 +474,7 @@ class ContextEngine:
             stage="handle_tool_response",
             tool_response=last_payload,
         )
-        return state
+        return {"context_segments": state.get("context_segments", [])}
 
     async def _decide_operation(
         self, relevance: float, state: QuadraCodeState

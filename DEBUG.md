@@ -66,7 +66,7 @@ curl -s http://127.0.0.1:8123/ok
 **Purpose:** Comprehensive test that:
 1. Creates a thread
 2. Establishes user identity ("Logan Robbins")
-3. Adds 16 messages to trigger compression
+3. Adds 4 messages to trigger compression
 4. Verifies `conversation-summary` segment exists and contains user name
 5. Asks "What is my full name?" (critical test)
 6. Validates standardization (no `working_memory`, no `conversation_summary` string)
@@ -219,7 +219,7 @@ EOF
 
 ### Environment Variables
 - `.env`
-  - `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS=15`
+  - `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS=4`
   - `QUADRACODE_MESSAGE_RETENTION_COUNT=10`
   - `QUADRACODE_CURATOR_MODEL=heuristic` (temporarily, should be LLM)
   - `QUADRACODE_SCORER_MODEL=heuristic` (temporarily, should be LLM)
@@ -320,7 +320,7 @@ The `QuadraCodeState` type extends `ContextEngineState` which extends `RuntimeSt
 QUADRACODE_CONTEXT_WINDOW_MAX=100000
 QUADRACODE_OPTIMAL_CONTEXT_SIZE=10000
 QUADRACODE_MESSAGE_BUDGET_RATIO=0.6
-QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS=15
+QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS=4
 QUADRACODE_MESSAGE_RETENTION_COUNT=10
 
 # Temporarily heuristic for debugging (should be LLM)
@@ -349,7 +349,7 @@ When the fix is implemented, verify:
 - [ ] `conversation-summary` exists as a segment in `context_segments`
 
 ### ✅ Compression & Retention
-- [ ] Compression triggers when message count > 15 OR tokens > budget
+- [ ] Compression triggers when message count > 4 OR tokens > budget
 - [ ] Last 10 messages are always retained (not summarized)
 - [ ] Summary segment contains user name "Logan Robbins"
 - [ ] Summary has priority=10 and `compression_eligible=False`

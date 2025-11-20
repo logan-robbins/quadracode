@@ -18,7 +18,7 @@ import os
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 
-from ..state import RuntimeState
+from ..state import QuadraCodeState
 
 
 LOGGER = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ def make_driver(system_prompt: str, tools: list) -> callable:
 
     llm = init_chat_model("anthropic:claude-sonnet-4-20250514")
 
-    def driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
+    def driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
         """
         An LLM-based driver that uses a language model to make decisions.
 
@@ -215,11 +215,14 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         
         # Inject context segments into the conversation
         context_segments = state.get("context_segments", []) if isinstance(state, dict) else []
+        LOGGER.info(f"DEBUG: Driver received state with {len(context_segments)} context_segments")
+        for seg in context_segments:
+            LOGGER.info(f"DEBUG: Segment: {seg.get('id')} - {seg.get('type')}")
         if context_segments:
             # Build context injection from segments marked in governor's ordered_segments
             ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
             context_blocks = []
-            
+
             LOGGER.info(f"Driver context injection: {len(context_segments)} total segments, {len(ordered_segments)} ordered")
             
             # First add segments that are in the ordered list

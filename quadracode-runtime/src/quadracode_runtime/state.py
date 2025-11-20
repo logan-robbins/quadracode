@@ -700,6 +700,54 @@ DEFAULT_PRP_TRANSITIONS: List[PRPTransition] = [
 PRP_STATE_MACHINE = PRPStateMachine(DEFAULT_PRP_TRANSITIONS)
 
 
+def add_context_segments(
+    left: Optional[List[ContextSegment]], right: Optional[List[ContextSegment]]
+) -> List[ContextSegment]:
+    """
+    Reducer that merges context segments by ID while preserving stable order.
+
+    LangGraph applies reducers to combine partial state updates emitted by nodes.
+    Without a reducer, list fields are overwritten wholesale, which causes data
+    loss when upstream nodes emit only partial updates. This reducer ensures that
+    new segments replace prior ones with the same ID, while segments with new IDs
+    are appended in the order they are introduced.
+    """
+    # Ensure left is a list
+    current = list(left) if left else []
+    
+    # If no update, return current state
+    if not right:
+        return current
+
+    # Create index of existing items
+    index = {item["id"]: i for i, item in enumerate(current)}
+    
+    for segment in right:
+        segment_id = segment.get("id")
+        if not segment_id:
+            continue
+            
+        if segment_id in index:
+            # Update existing
+            current[index[segment_id]] = segment
+        else:
+            # Append new
+            index[segment_id] = len(current)
+            current.append(segment)
+
+    return current
+
+
+def set_context_segments(
+    left: Optional[List[ContextSegment]], right: Optional[List[ContextSegment]]
+) -> List[ContextSegment]:
+    """
+    Reducer that replaces the context_segments list with the new value if provided,
+    to ensure full list updates from nodes override the previous state.
+    """
+    return right if right is not None else (left or [])
+
+
 class ContextEngineState(RuntimeState):
     """
     Extends `RuntimeState` with detailed tracking for advanced context management.
@@ -746,7 +794,7 @@ class ContextEngineState(RuntimeState):
     context_quality_score: float
 
     # Context Segments (Single Source of Truth)
-    context_segments: List[ContextSegment]
+    context_segments: Annotated[List[ContextSegment], add_context_segments]
 
     # External Memory (File System)
     external_memory_index: Dict[str, str]
@@ -829,6 +877,9 @@ class QuadraCodeState(ContextEngineState, total=False):
         memory_consolidation_log: A log of operations that consolidate episodic into semantic memory.
         memory_guidance: Directives for how memory should be utilized in the current context.
     """
+
+    # Explicitly re-declare with annotation to ensure visibility in subclass
+    context_segments: Annotated[List[ContextSegment], add_context_segments]
 
     is_in_prp: bool
     prp_cycle_count: int
