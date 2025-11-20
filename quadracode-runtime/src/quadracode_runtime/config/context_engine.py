@@ -103,6 +103,12 @@ class ContextEngineConfig:
     # Governor / planning
     governor_model: Optional[str] = "heuristic"
     governor_max_segments: int = 12
+    
+    # Curator / operation selection
+    curator_model: Optional[str] = "anthropic:claude-haiku-4-5-20251001"
+    
+    # Scorer / quality evaluation  
+    scorer_model: Optional[str] = "anthropic:claude-haiku-4-5-20251001"
 
     # Skills / progressive disclosure
     skills_paths: List[str] = field(
@@ -221,6 +227,8 @@ class ContextEngineConfig:
         # String overrides
         base.reducer_model = os.environ.get("QUADRACODE_REDUCER_MODEL", base.reducer_model)
         base.governor_model = os.environ.get("QUADRACODE_GOVERNOR_MODEL", base.governor_model)
+        base.curator_model = os.environ.get("QUADRACODE_CURATOR_MODEL", base.curator_model)
+        base.scorer_model = os.environ.get("QUADRACODE_SCORER_MODEL", base.scorer_model)
         base.metrics_emit_mode = os.environ.get("QUADRACODE_METRICS_EMIT_MODE", base.metrics_emit_mode)
         base.metrics_redis_url = os.environ.get("QUADRACODE_METRICS_REDIS_URL", base.metrics_redis_url)
         base.metrics_stream_key = os.environ.get("QUADRACODE_METRICS_STREAM_KEY", base.metrics_stream_key)

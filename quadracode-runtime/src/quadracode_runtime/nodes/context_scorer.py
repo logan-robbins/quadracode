@@ -13,17 +13,24 @@ predefined threshold.
 
 from __future__ import annotations
 
-from __future__ import annotations
-
+import asyncio
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 import math
 import re
 from typing import Dict, Iterable, List
 
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from ..config import ContextEngineConfig
 from ..state import ContextEngineState, ContextSegment
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -62,6 +69,8 @@ class ContextScorer:
             config: The configuration for the context engine.
         """
         self.config = config
+        self._llm = None
+        self._llm_lock = asyncio.Lock()
 
     async def evaluate(self, state: ContextEngineState) -> float:
         """
@@ -77,6 +86,13 @@ class ContextScorer:
         Returns:
             A quality score between 0.0 and 1.0.
         """
+        if self.config.scorer_model in {"heuristic", "", None}:
+            return await self._evaluate_heuristic(state)
+        else:
+            return await self._evaluate_llm(state)
+
+    async def _evaluate_heuristic(self, state: ContextEngineState) -> float:
+        """Evaluate context quality using heuristic-based metrics."""
         segments = state.get("context_segments", [])
 
         breakdown = ScoreBreakdown(
@@ -102,6 +118,86 @@ class ContextScorer:
             + breakdown.efficiency * weights["efficiency"]
         ) / total_weight
 
+        return max(0.0, min(total_score, 1.0))
+
+    async def _ensure_llm(self):
+        """Lazy-load LLM for scoring operations."""
+        if self._llm is None:
+            async with self._llm_lock:
+                if self._llm is None:
+                    self._llm = init_chat_model(self.config.scorer_model)
+        return self._llm
+
+    async def _evaluate_llm(self, state: ContextEngineState) -> float:
+        """Evaluate context quality using LLM-based analysis."""
+        llm = await self._ensure_llm()
+        prompts = self.config.prompt_templates
+        
+        segments = state.get("context_segments", [])
+        
+        # Build context summary for LLM evaluation
+        context_summary = []
+        for seg in segments[:10]:  # Limit to first 10 segments to avoid token overflow
+            context_summary.append(
+                f"[{seg['type']}] {seg['id']} (priority={seg.get('priority', 5)}, "
+                f"tokens={seg.get('token_count', 0)})\n"
+                f"Preview: {seg.get('content', '')[:150]}...\n"
+            )
+        
+        context_text = "\n".join(context_summary)
+        
+        prompt = prompts.get_prompt(
+            "scorer_evaluation_prompt",
+            context=context_text
+        )
+        
+        response = await asyncio.to_thread(
+            llm.invoke,
+            [
+                SystemMessage(content=prompts.scorer_system_prompt),
+                HumanMessage(content=prompt)
+            ]
+        )
+        
+        # Parse JSON response with scores
+        response_text = str(response.content)
+        
+        try:
+            # Try to extract JSON from response
+            json_match = re.search(r'\{[^}]+\}', response_text)
+            if json_match:
+                scores_dict = json.loads(json_match.group(0))
+                
+                breakdown = ScoreBreakdown(
+                    relevance=float(scores_dict.get("relevance", 0.5)),
+                    coherence=float(scores_dict.get("coherence", 0.5)),
+                    completeness=float(scores_dict.get("completeness", 0.5)),
+                    freshness=float(scores_dict.get("freshness", 0.5)),
+                    diversity=float(scores_dict.get("diversity", 0.5)),
+                    efficiency=float(scores_dict.get("efficiency", 0.5)),
+                )
+            else:
+                # Fallback to heuristic if JSON parsing fails
+                LOGGER.warning("Could not parse LLM scorer response, falling back to heuristic")
+                return await self._evaluate_heuristic(state)
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            LOGGER.warning(f"Error parsing LLM scorer response: {e}, falling back to heuristic")
+            return await self._evaluate_heuristic(state)
+        
+        state["context_quality_components"] = asdict(breakdown)
+        
+        weights = self._get_phase_weights(state)
+        total_weight = sum(weights.values()) or 1.0
+        
+        total_score = (
+            breakdown.relevance * weights["relevance"]
+            + breakdown.coherence * weights["coherence"]
+            + breakdown.completeness * weights["completeness"]
+            + breakdown.freshness * weights["freshness"]
+            + breakdown.diversity * weights["diversity"]
+            + breakdown.efficiency * weights["efficiency"]
+        ) / total_weight
+        
         return max(0.0, min(total_score, 1.0))
 
     async def score_tool_output(self, tool_output: object) -> float:

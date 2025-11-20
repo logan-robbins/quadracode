@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any, Deque, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from ..config import ContextEngineConfig
 from ..context_engine_logging import log_context_compression
 from ..state import ContextEngineState, ContextSegment
@@ -69,6 +72,8 @@ class ContextCurator:
             ContextOperation.EVOLVE: 0.5,
             ContextOperation.FETCH: 0.5,
         }
+        self._llm = None
+        self._llm_lock = asyncio.Lock()
 
     async def optimize(self, state: ContextEngineState, target_tokens: int) -> ContextEngineState:
         """
@@ -94,7 +99,10 @@ class ContextCurator:
         scores = await self._score_segments(segments)
         
         # Determine the best operation for each segment
-        decisions = await self._determine_operations(segments, scores, state, target_tokens)
+        if self.config.curator_model in {"heuristic", "", None}:
+            decisions = await self._determine_operations_heuristic(segments, scores, state, target_tokens)
+        else:
+            decisions = await self._determine_operations_llm(segments, scores, state, target_tokens)
 
         new_segments: List[ContextSegment] = []
         external_refs: List[Dict[str, str]] = []
@@ -189,7 +197,15 @@ class ContextCurator:
 
         return scores
 
-    async def _determine_operations(
+    async def _ensure_llm(self):
+        """Lazy-load LLM for curator operations."""
+        if self._llm is None:
+            async with self._llm_lock:
+                if self._llm is None:
+                    self._llm = init_chat_model(self.config.curator_model)
+        return self._llm
+
+    async def _determine_operations_heuristic(
         self,
         segments: List[ContextSegment],
         scores: List[float],
@@ -197,7 +213,7 @@ class ContextCurator:
         target_tokens: int,
     ) -> List[Tuple[ContextSegment, ContextOperation]]:
         """
-        Determines the most appropriate context operation for each segment.
+        Determines the most appropriate context operation for each segment using heuristics.
 
         This method uses the segment scores, the current token count, and the 
         target context size to decide which operation to apply to each segment. 
@@ -244,6 +260,93 @@ class ContextCurator:
             decisions.append((segment, op))
             self.operation_history.append(op.value)
 
+        return decisions
+
+    async def _determine_operations_llm(
+        self,
+        segments: List[ContextSegment],
+        scores: List[float],
+        state: ContextEngineState,
+        target_tokens: int,
+    ) -> List[Tuple[ContextSegment, ContextOperation]]:
+        """
+        Determines the most appropriate context operation for each segment using LLM.
+
+        This method asks the LLM to evaluate each segment and recommend the best
+        operation based on current context, focus, and usage patterns.
+
+        Args:
+            segments: The list of context segments.
+            scores: The corresponding scores for each segment.
+            state: The current state of the context engine.
+            target_tokens: The target token count for the segments.
+
+        Returns:
+            A list of tuples, each containing a segment and the chosen operation.
+        """
+        llm = await self._ensure_llm()
+        prompts = self.config.prompt_templates
+        
+        current_tokens = sum(max(s.get("token_count", 0), 0) for s in segments)
+        usage_ratio = (current_tokens / target_tokens) * 100 if target_tokens > 0 else 100
+        
+        focus = state.get("context_playbook", {}).get("last_reflection", {}).get("focus_metric", "quality")
+        
+        decisions: List[Tuple[ContextSegment, ContextOperation]] = []
+        
+        # Evaluate segments in batches to reduce LLM calls
+        for segment, score in zip(segments, scores):
+            segment_info = (
+                f"ID: {segment['id']}\n"
+                f"Type: {segment['type']}\n"
+                f"Priority: {segment.get('priority', 5)}\n"
+                f"Tokens: {segment.get('token_count', 0)}\n"
+                f"Score: {score:.2f}\n"
+                f"Content preview: {segment.get('content', '')[:200]}..."
+            )
+            
+            prompt = prompts.get_prompt(
+                "curator_operation_prompt",
+                segment=segment_info,
+                focus=focus,
+                usage_ratio=f"{usage_ratio:.1f}"
+            )
+            
+            response = await asyncio.to_thread(
+                llm.invoke,
+                [
+                    SystemMessage(content=prompts.curator_system_prompt),
+                    HumanMessage(content=prompt)
+                ]
+            )
+            
+            # Parse LLM response for operation recommendation
+            response_text = str(response.content).lower()
+            
+            # Extract operation from response
+            if "retain" in response_text and "retain" in response_text[:100]:
+                op = ContextOperation.RETAIN
+            elif "compress" in response_text and "compress" in response_text[:100]:
+                op = ContextOperation.COMPRESS
+            elif "summarize" in response_text and "summarize" in response_text[:100]:
+                op = ContextOperation.SUMMARIZE
+            elif "externalize" in response_text and "externalize" in response_text[:100]:
+                op = ContextOperation.EXTERNALIZE
+            elif "discard" in response_text and "discard" in response_text[:100]:
+                op = ContextOperation.DISCARD
+            else:
+                # Fallback to heuristic if LLM response is unclear
+                LOGGER.warning(f"Unclear curator LLM response for segment {segment['id']}, using heuristic")
+                if score > 0.7:
+                    op = ContextOperation.RETAIN
+                elif score < 0.3:
+                    op = ContextOperation.DISCARD
+                else:
+                    op = ContextOperation.COMPRESS
+            
+            decisions.append((segment, op))
+            self.operation_history.append(op.value)
+        
         return decisions
 
     def _operation_handler(self, operation: ContextOperation):

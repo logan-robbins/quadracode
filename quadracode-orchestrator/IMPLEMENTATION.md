@@ -47,12 +47,18 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
 
 - **State Contract (`QuadraCodeState`)**
   - The context engine operates over the shared `QuadraCodeState` type in `quadracode_runtime/state.py`.
-  - Key fields it reads/writes include:
-    - `messages` (LangChain message list), `context_segments`, `context_window_used`, `context_window_max`.
-    - `context_quality_score` and `context_quality_components` (scorer output).
-    - `exhaustion_mode`, `exhaustion_probability` (exhaustion predictor output).
-    - `refinement_ledger`, `hypothesis_cycle_metrics`, `metrics_log` (PRP / metrics coupling).
-    - `workspace` and `workspace_snapshots` (used for workspace integrity).
+  - **Key fields it reads/writes include:**
+    - `messages` (LangChain message list) - conversation history with intelligent retention
+    - `context_segments` - **single source of truth** for all in-context data (segments include conversation summaries, tool outputs, code search results, etc.)
+    - `context_window_used`, `context_window_max` - token budget tracking
+    - `context_quality_score` and `context_quality_components` - LLM or heuristic-based quality evaluation
+    - `exhaustion_mode`, `exhaustion_probability` - exhaustion predictor output
+    - `refinement_ledger`, `hypothesis_cycle_metrics`, `metrics_log` - PRP / metrics coupling
+    - `workspace` and `workspace_snapshots` - workspace integrity tracking
+    - `llm_stop_detected`, `llm_resume_hint` - top-level flags for exhaustion handling (moved from working_memory)
+  - **Deprecated/Removed fields:**
+    - `working_memory` dict - eliminated as redundant (use helper functions: `get_segment()`, `get_segment_content()`, `upsert_segment()`, `remove_segment()`)
+    - `conversation_summary` string - eliminated as redundant (now stored as `context_segments` entry with id `"conversation-summary"`)
   - The engine is designed as a pure(ish) transformation over `QuadraCodeState`: each stage (`pre_process`, `govern_context`, `post_process`, `handle_tool_response`) takes a state dict and returns a new state dict, which is then threaded through the LangGraph edges.
 
 - **Configuration & Environment Overrides**
@@ -61,7 +67,14 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
     - `QUADRACODE_CONTEXT_WINDOW_MAX`: The absolute maximum token limit of the model.
     - `QUADRACODE_OPTIMAL_CONTEXT_SIZE`: The target "healthy" size for the entire context (static prompt + dynamic messages/segments). Compression is triggered when this is exceeded.
     - `QUADRACODE_MESSAGE_BUDGET_RATIO`: The percentage of the *optimal dynamic space* to allocate for conversation history.
-  - `ContextEngineConfig.from_environment()` applies overrides for these and other settings (e.g., `QUADRACODE_REDUCER_MODEL`, `QUADRACODE_GOVERNOR_MODEL`), making the engine's behavior highly tunable via environment variables.
+    - `QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS`: Compress history if message count > this **OR** tokens exceed budget (defaults to 15).
+    - `QUADRACODE_MESSAGE_RETENTION_COUNT`: Always keep the last N messages intact (not summarized) so LLM can see recent context (defaults to 10).
+  - **LLM-Driven Context Management** (new):
+    - `QUADRACODE_CURATOR_MODEL`: Model for intelligent operation selection (retain/compress/summarize/externalize/discard). Defaults to `anthropic:claude-haiku-4-5-20251001`. Set to `"heuristic"` for fast local decisions.
+    - `QUADRACODE_SCORER_MODEL`: Model for 6-dimension context quality evaluation. Defaults to `anthropic:claude-haiku-4-5-20251001`. Set to `"heuristic"` for fast local scoring.
+    - `QUADRACODE_REDUCER_MODEL`: Model for content summarization (defaults to `claude-haiku`).
+    - `QUADRACODE_GOVERNOR_MODEL`: Model for context segment planning (defaults to `"heuristic"`).
+  - `ContextEngineConfig.from_environment()` applies overrides for all settings, making the engine's behavior highly tunable via environment variables.
 
 - **Architectural Model: Static vs. Dynamic Context**
   - The engine is now aware of the large, static `system_prompt` and its token cost.
@@ -71,14 +84,20 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
 - **Execution Flow & Responsibilities**
   - **`pre_process` stage**:
     - Calculates the total dynamic token usage (messages + segments).
-    - If `total_dynamic_tokens > available_dynamic_space`, it triggers compression:
-      - First, it summarizes the conversation history if it exceeds its budget (`available_dynamic_space * message_budget_ratio`).
-      - Then, if still over budget, it invokes the `ContextCurator` to prune engineered segments to fit their remaining budget.
-    - It continues to perform progressive loading and other setup tasks.
+    - **Intelligent Message Management**:
+      - Compression triggers if **EITHER** message count > `min_message_count_to_compress` **OR** tokens exceed budget.
+      - Summarizes oldest messages while keeping last N (`message_retention_count`) intact for LLM visibility.
+      - Creates/updates `conversation-summary` segment (not a top-level string field).
+      - Working memory (summary) is injected into driver's system prompt before all messages.
+    - If segment tokens exceed budget after message compression, invokes the `ContextCurator` to optimize segments.
+    - **LLM-Driven Curation**: Curator uses LLM (default: claude-haiku) to intelligently decide which operation to apply to each segment based on current focus, context pressure, and content relevance.
+    - Performs progressive loading and other setup tasks.
   - **`govern_context` stage**:
     - Applies a governor policy (`governor_model`) over the now-balanced context to plan the next step.
+    - Governor can use heuristics (default) or LLM to determine segment ordering and retention.
   - **`post_process` stage**:
-    - Reflects on the driver’s decision (via `_reflect_on_decision`) and appends a dense `reflection_log` entry with issues, recommendations, focus metric, and quality score.
+    - **LLM-Driven Quality Scoring**: Uses LLM (default: claude-haiku) to evaluate context across 6 dimensions (relevance, coherence, completeness, freshness, diversity, efficiency).
+    - Reflects on the driver's decision (via `_reflect_on_decision`) and appends a dense `reflection_log` entry with issues, recommendations, focus metric, and quality score.
     - Evolves the playbook (`_evolve_playbook`), runs post-decision curation, and optionally writes external memory checkpoints when `_should_checkpoint` returns true.
     - Emits post-process metrics and additional time-travel snapshots for replay/debugging.
   - **`handle_tool_response` stage**:
@@ -102,6 +121,19 @@ Although the context engine is implemented in the shared `quadracode-runtime` pa
     - Streams snapshots and transitions into the time-travel logger (`get_time_travel_recorder()`), which writes JSONL logs under `./time_travel_logs` for replay and diff tooling.
   - From the orchestrator’s perspective, **all of the above is encapsulated inside the context engine nodes** — the orchestrator graph simply wires those nodes in and passes `QuadraCodeState` through them each cycle.
 
+## Recent Enhancements
+
+### Context Standardization (November 2025)
+- **Eliminated redundancy**: Removed `working_memory` dict and `conversation_summary` string in favor of `context_segments` as the single source of truth.
+- **Helper functions**: Added `get_segment()`, `get_segment_content()`, `upsert_segment()`, `remove_segment()` for clean segment access patterns.
+- **Improved retention**: Messages are now intelligently retained with configurable "keep last N" logic to ensure LLM always has recent context.
+- **Compression trigger**: Uses OR logic (message count > threshold OR tokens > budget) for more flexible compression.
+
+### LLM-Driven Context Management (November 2025)
+- **ContextCurator**: Now uses LLM by default (claude-haiku) to make intelligent operation decisions (retain/compress/summarize/externalize/discard) based on segment content, priority, current focus, and context pressure. Heuristic mode available as fast fallback.
+- **ContextScorer**: Now uses LLM by default (claude-haiku) to evaluate context quality across 6 dimensions, providing more accurate quality signals than pure heuristics. Heuristic mode available as fast fallback.
+- **Configurable**: Both curator and scorer can be switched between LLM and heuristic modes via environment variables for flexibility and cost optimization.
+
 ## Conclusion
 
-The `quadracode-orchestrator` is a sophisticated and highly configurable component that is central to the operation of the Quadracode system. Its ability to dynamically switch between human-supervised and fully autonomous modes, combined with its powerful agent and workspace management capabilities, makes it a flexible and robust solution for coordinating complex, multi-agent workflows.
+The `quadracode-orchestrator` is a sophisticated and highly configurable component that is central to the operation of the Quadracode system. Its ability to dynamically switch between human-supervised and fully autonomous modes, combined with its powerful agent and workspace management capabilities, makes it a flexible and robust solution for coordinating complex, multi-agent workflows. The recent integration of LLM-driven context management ensures that the orchestrator maintains high-quality, relevant context while never exhausting available token budgets, providing best-in-class detail retention for complex reasoning tasks.
