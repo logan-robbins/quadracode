@@ -39,7 +39,7 @@ class ContextEngineConfig:
 
     # Token limits
     context_window_max: int = 128_000
-    target_context_size: int = 10_000
+    optimal_context_size: int = 10_000
     message_budget_ratio: float = 0.6  # Max % of context window for messages
     min_message_count_to_compress: int = 15  # Only compress if > N messages
     message_retention_count: int = 10  # Keep last N messages raw
@@ -208,7 +208,7 @@ class ContextEngineConfig:
 
         # Numeric overrides
         base.context_window_max = _int("QUADRACODE_CONTEXT_WINDOW_MAX", base.context_window_max)
-        base.target_context_size = _int("QUADRACODE_TARGET_CONTEXT_SIZE", base.target_context_size)
+        base.optimal_context_size = _int("QUADRACODE_OPTIMAL_CONTEXT_SIZE", base.optimal_context_size)
         base.message_budget_ratio = _float("QUADRACODE_MESSAGE_BUDGET_RATIO", base.message_budget_ratio)
         base.min_message_count_to_compress = _int("QUADRACODE_MIN_MESSAGE_COUNT_TO_COMPRESS", base.min_message_count_to_compress)
         base.message_retention_count = _int("QUADRACODE_MESSAGE_RETENTION_COUNT", base.message_retention_count)

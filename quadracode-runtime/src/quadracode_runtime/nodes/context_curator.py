@@ -70,9 +70,9 @@ class ContextCurator:
             ContextOperation.FETCH: 0.5,
         }
 
-    async def optimize(self, state: ContextEngineState) -> ContextEngineState:
+    async def optimize(self, state: ContextEngineState, target_tokens: int) -> ContextEngineState:
         """
-        Runs the main context optimization routine.
+        Runs the main context optimization routine for engineered segments.
 
         This method is executed before the driver makes a decision. It orchestrates 
         the entire curation process, from scoring the segments to applying the 
@@ -80,6 +80,7 @@ class ContextCurator:
 
         Args:
             state: The current state of the context engine.
+            target_tokens: The target token count for the segments.
 
         Returns:
             The updated state with the optimized context segments.
@@ -93,7 +94,7 @@ class ContextCurator:
         scores = await self._score_segments(segments)
         
         # Determine the best operation for each segment
-        decisions = await self._determine_operations(segments, scores, state)
+        decisions = await self._determine_operations(segments, scores, state, target_tokens)
 
         new_segments: List[ContextSegment] = []
         external_refs: List[Dict[str, str]] = []
@@ -193,6 +194,7 @@ class ContextCurator:
         segments: List[ContextSegment],
         scores: List[float],
         state: ContextEngineState,
+        target_tokens: int,
     ) -> List[Tuple[ContextSegment, ContextOperation]]:
         """
         Determines the most appropriate context operation for each segment.
@@ -207,23 +209,24 @@ class ContextCurator:
             segments: The list of context segments.
             scores: The corresponding scores for each segment.
             state: The current state of the context engine.
+            target_tokens: The target token count for the segments.
 
         Returns:
             A list of tuples, each containing a segment and the chosen 
             operation.
         """
 
-        target_tokens = self.config.target_context_size
-        current_tokens = 0
+        current_tokens = sum(max(s.get("token_count", 0), 0) for s in segments)
         ranked = sorted(zip(segments, scores), key=lambda item: (item[0]["priority"], item[1]), reverse=True)
 
         decisions: List[Tuple[ContextSegment, ContextOperation]] = []
+        tokens_retained = 0
         for segment, score in ranked:
             op = ContextOperation.RETAIN
             segment_tokens = max(segment.get("token_count", 0), 0)
-            current_tokens += segment_tokens
-
-            if current_tokens > target_tokens:
+            
+            if tokens_retained + segment_tokens > target_tokens:
+                # We are over budget, must take action
                 if segment.get("priority", 1) >= self.config.min_segment_priority:
                     op = ContextOperation.EXTERNALIZE
                 else:
@@ -234,6 +237,9 @@ class ContextCurator:
                 op = ContextOperation.SUMMARIZE
             elif score < 0.25:
                 op = ContextOperation.DISCARD
+            
+            if op == ContextOperation.RETAIN:
+                tokens_retained += segment_tokens
 
             decisions.append((segment, op))
             self.operation_history.append(op.value)

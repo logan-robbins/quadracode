@@ -169,21 +169,28 @@ class ContextEngine:
         await self._enforce_hotpath_residency(state)
         quality_score = await self.scorer.evaluate(state)
         state["context_quality_score"] = quality_score
+        
+        # Unified compression trigger
+        total_tokens = state["context_window_used"]
+        optimal_tokens = self.config.optimal_context_size
+        
+        if total_tokens > optimal_tokens:
+            # Context is overgrown, decide what to compress
+            history_updates = await self._manage_conversation_history(state)
+            if history_updates:
+                # Apply message updates and re-calculate usage
+                if "conversation_summary" in history_updates:
+                    state["conversation_summary"] = history_updates["conversation_summary"]
+                # The 'messages' key will contain RemoveMessage objects
+                state["messages"].extend(history_updates.get("messages", []))
+                state = self._recompute_context_usage(state)
 
-        if quality_score < self.config.quality_threshold:
-            state = await self.curator.optimize(state)
-            state = self._recompute_context_usage(state)
-            await self._emit_curation_metrics(state, reason="quality_recovery")
-            await self._emit_externalization_metrics(state)
-
-        overflow = state["context_window_used"]
-        max_tokens = state.get("context_window_max", self.config.context_window_max)
-
-        if overflow > min(max_tokens, self.config.target_context_size):
-            state = await self.curator.optimize(state)
-            state = self._recompute_context_usage(state)
-            await self._emit_curation_metrics(state, reason="overflow_control")
-            await self._emit_externalization_metrics(state)
+            # After message compression, check if segment compression is still needed
+            if state["context_window_used"] > optimal_tokens:
+                 state = await self.curator.optimize(state, optimal_tokens)
+                 state = self._recompute_context_usage(state)
+                 await self._emit_curation_metrics(state, reason="overflow_control")
+                 await self._emit_externalization_metrics(state)
 
         state = await self.loader.prepare_context(state)
         state = self._recompute_context_usage(state)
@@ -193,17 +200,6 @@ class ContextEngine:
         # Invariant: at least one context update per cycle
         mark_context_updated(state)
         
-        # Manage conversation history (trimming/summarization)
-        history_updates = await self._manage_conversation_history(state)
-        if history_updates:
-            # Apply updates to current state copy for immediate visibility
-            if "conversation_summary" in history_updates:
-                state["conversation_summary"] = history_updates["conversation_summary"]
-            # Note: We don't strictly need to apply RemoveMessages to local 'state' copy 
-            # if we return them, but for recompute_usage it would help.
-            # Recomputing usage after this would be ideal.
-            state = self._recompute_context_usage(state)
-
         await self.metrics.emit(
             state,
             "pre_process",
@@ -1155,46 +1151,45 @@ class ContextEngine:
 
     async def _manage_conversation_history(self, state: QuadraCodeState) -> Dict[str, Any]:
         """
-        Manages conversation history by summarizing and trimming messages when they exceed limits.
-        
-        Returns:
-            A dict of state updates (e.g. new messages, summary update).
+        Manages conversation history by summarizing and trimming messages when they exceed their budget.
         """
-        max_tokens = state.get("context_window_max", self.config.context_window_max)
-        # Budget for messages
-        message_budget = int(max_tokens * self.config.message_budget_ratio)
+        # Calculate message budget based on optimal context size
+        optimal_tokens = self.config.optimal_context_size
+        message_budget = int(optimal_tokens * self.config.message_budget_ratio)
         
-        current_tokens = self._count_message_tokens(state)
-        if current_tokens <= message_budget:
+        breakdown = state.get("_context_breakdown", {})
+        message_tokens = breakdown.get("message_tokens", 0)
+
+        if message_tokens <= message_budget:
             return {}
             
-        messages = state.get("messages", [])
+        messages: list[BaseMessage] = state.get("messages", [])
         if not messages:
             return {}
 
-        # Identify messages to summarize
-        min_count = self.config.min_message_count_to_compress
-        if len(messages) < min_count:
-            return {}
-            
-        # Keep last N messages raw
-        retention = self.config.message_retention_count
-        to_keep_count = max(1, retention)
+        # Summarize just enough to get back under budget
+        tokens_to_remove = message_tokens - message_budget
         
-        if len(messages) <= to_keep_count:
-            return {}
-
-        to_summarize = messages[:-to_keep_count]
-        to_keep = messages[-to_keep_count:]
+        # Find oldest messages to summarize
+        summarization_candidates: list[BaseMessage] = []
+        removed_tokens = 0
+        for msg in messages:
+            # A simple heuristic: remove messages until we've met the token reduction goal
+            # A more advanced approach would use a token counter on each message
+            msg_tokens = len(str(msg.content)) / 4  # Rough estimate
+            if removed_tokens < tokens_to_remove:
+                summarization_candidates.append(msg)
+                removed_tokens += msg_tokens
+            else:
+                break
         
-        if not to_summarize:
+        if not summarization_candidates:
             return {}
             
         # Generate summary
-        summary_text = get_buffer_string(to_summarize)
+        summary_text = get_buffer_string(summarization_candidates)
         existing_summary = state.get("conversation_summary", "")
         
-        # Use configured prompt template
         prompt = self.config.prompt_templates.get_prompt(
             "conversation_summarization_prompt",
             existing_summary=existing_summary or "None",
@@ -1204,18 +1199,13 @@ class ContextEngine:
         reduction = await self.reducer.reduce(prompt, focus="conversation_summary")
         new_summary = reduction.content
         
-        # Construct updates
+        # Construct updates to be returned
         updates: Dict[str, Any] = {
             "conversation_summary": new_summary,
-            "messages": []
+            "messages": [RemoveMessage(id=msg.id) for msg in summarization_candidates if msg.id]
         }
         
-        # Remove summarized messages
-        for msg in to_summarize:
-            if msg.id:
-                updates["messages"].append(RemoveMessage(id=msg.id))
-                
-        # Add summary as context segment
+        # Create a new context segment for the summary
         segment = {
             "id": "conversation-summary",
             "content": new_summary,
@@ -1226,11 +1216,12 @@ class ContextEngine:
             "compression_eligible": False,
         }
         
+        # Replace or add the summary segment
         existing_segments = [s for s in state.get("context_segments", []) if s["id"] != "conversation-summary"]
-        existing_segments.insert(0, segment) # Put at top
+        existing_segments.insert(0, segment)
         state["context_segments"] = existing_segments
         
-        # Log compression
+        # Log the summarization event
         log_context_compression(
             state,
             action="summarize_history",
@@ -1238,24 +1229,21 @@ class ContextEngine:
             reason="message_budget_exceeded",
             segment_id="conversation_history",
             segment_type="messages",
-            before_tokens=current_tokens,
-            after_tokens=self._count_message_tokens(state) - len(to_summarize) + reduction.token_count, 
+            before_tokens=message_tokens,
+            after_tokens=message_tokens - int(removed_tokens), # Approximation
             before_content=summary_text[:200] + "...",
             after_content=new_summary,
             metadata={
-                "removed_messages": len(to_summarize),
-                "kept_messages": len(to_keep),
-                "budget_ratio": self.config.message_budget_ratio,
-                "retention_count": retention
+                "removed_messages": len(summarization_candidates),
+                "budget_ratio": self.config.message_budget_ratio
             }
         )
         
-        # Update state tracking for UI
         state["last_compression_event"] = {
              "timestamp": _utc_now().isoformat(),
              "action": "summarize_history",
-             "before_tokens": current_tokens,
-             "tokens_saved": current_tokens, # Rough estimate
+             "before_tokens": message_tokens,
+             "tokens_saved": int(removed_tokens),
              "summary": new_summary[:100] + "..."
         }
         
