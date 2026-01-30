@@ -34,7 +34,7 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Platform Agnostic**: Runs on Docker Compose or Kubernetes with the same codebase
 - **Production Ready**: Comprehensive E2E tests, structured message contracts, fault-tolerant design
 
-#### HUMAN_OBSOLETE Autonomy Loop
+### HUMAN_OBSOLETE Autonomy Loop
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -167,8 +167,7 @@ Every orchestrator turn traverses an opt-in context engineering pipeline that us
 2. **`context_governor`** (LLM-backed) reviews the latest state, plans retain/compress/summarize/externalize/discard operations for engineered segments, and hands the driver a goal-aware prompt outline.
 3. **`driver` / tools** execute with the trimmed, skill-aware context; tool responses flow back into the working set automatically.
 
-The reducer uses Anthropic’s Claude Haiku by default (configurable via `ContextEngineConfig.reducer_model`) to map/reduce long blobs into concise summaries while embedding a `restorable_reference`. The progressive loader now includes a **skills catalog** that stages SKILL.md metadata, loads full skill content on demand, and queues linked references for future turns. Tool outputs are captured automatically, externalized segments can be persisted to disk via `externalize_write_enabled`, and each stage emits structured metrics that feed the Streamlit dashboard and the e2e logs.
-
+The reducer uses Anthropic's Claude Haiku by default (configurable via `ContextEngineConfig.reducer_model`) to map/reduce long blobs into concise summaries while embedding a `restorable_reference`. The progressive loader now includes a **skills catalog** that stages SKILL.md metadata, loads full skill content on demand, and queues linked references for future turns. Tool outputs are captured automatically, externalized segments can be persisted to disk via `externalize_write_enabled`, and each stage emits structured metrics that feed the Streamlit dashboard and the e2e logs.
 
 ## How It Works
 
@@ -324,42 +323,6 @@ In the Chat page sidebar, enable **Autonomous Mode** to activate HumanClone oper
 
 The orchestrator will operate autonomously within these constraints. Use the emergency stop button if needed to return control to human supervision.
 
-#### HUMAN_OBSOLETE Autonomy Loop
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ Goal Intake                                                       │
-│ - Human seeds task + guardrails via Streamlit sidebar             │
-├──────────────────────────────────────────────────────────────────┤
-│ ┌────────────────────────────┐        ┌────────────────────────┐ │
-│ │ Orchestrator Runtime       │◄──────►│ Context Engine (ACE)   │ │
-│ │ - Autonomous prompt        │        │ - Progressive loading  │ │
-│ │ - Recipient policy         │        │ - Checkpoints &        │ │
-│ │ - Guardrail enforcement    │        │   critiques            │ │
-│ │ - Event emission           │        └────────┬───────────────┘ │
-│ └─────────────┬──────────────┘                 │                 │
-│               │ delegates / spawns             │ emits metrics   │
-│               ▼                                ▼                 │
-│ ┌────────────────────────────┐        ┌────────────────────────┐ │
-│ │ Dynamic Agent Fleet        │        │ Redis Streams          │ │
-│ │ - Specialized workers      │        │ - qc:mailbox/*         │ │
-│ │ - Agent registry health    │        │ - qc:autonomous:events │ │
-│ │ - MCP tool discovery       │        └────────┬───────────────┘ │
-│ └─────────────┬──────────────┘                 │                 │
-│               │                                 │                 │
-│               ▼                                 │                 │
-│ ┌────────────────────────────┐        ┌─────────┴──────────────┐ │
-│ │ UI / Control Plane         │◄──────►│ Observability & Logs   │ │
-│ │ - Chat + autonomous tab    │        │ - Dashboard panels     │ │
-│ │ - Guardrail settings       │        │ - Redis/metrics tail   │ │
-│ │ - Emergency stop control   │        │ - Research exports     │ │
-│ └────────────────────────────┘        └────────────────────────┘ │
-│                                                                  │
-│ Loop: Evaluate → Critique → Plan → Execute → Checkpoint → Emit   │
-│ Escalate only on fatal errors or human-triggered emergency stop. │
-└──────────────────────────────────────────────────────────────────┘
-```
-
 ### Endpoints
 
 After launching the stack, access these services:
@@ -474,6 +437,16 @@ uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 
 All services support `QUADRACODE_MOCK_MODE=true` for standalone testing without external dependencies (Redis, LLM APIs, etc.). This is useful for development, CI/CD pipelines, and debugging.
 
+**What Mock Mode Provides:**
+- `MockRedisStorage` - In-memory Redis stream simulation
+- `MockRedisMCPMessaging` - Drop-in messaging replacement
+- `MockLLMResponse` - Deterministic mock LLM responses
+- `MemorySaver` checkpointer instead of SQLite
+- `fakeredis` for in-memory Redis operations
+- No external network dependencies
+
+**Note:** Mock mode is for testing only. Production deployments should always use real Redis and MCP services.
+
 #### Agent Registry (Standalone)
 
 ```bash
@@ -519,19 +492,16 @@ The runtime services support mock mode for testing without LLM API calls:
 # In any service directory
 QUADRACODE_MOCK_MODE=true uv run python -m quadracode_orchestrator
 QUADRACODE_MOCK_MODE=true uv run python -m quadracode_agent
+
+# Or with Docker
+docker run -e QUADRACODE_MOCK_MODE=true quadracode-runtime
 ```
 
-Mock mode provides:
-- `MockRedisStorage` - In-memory Redis stream simulation
-- `MockRedisMCPMessaging` - Drop-in messaging replacement
-- `MockLLMResponse` - Deterministic mock LLM responses
-- `MemorySaver` checkpointer instead of SQLite
+## Testing
 
-### Testing
+> **IMPORTANT:** All tests require a live Docker stack with real services and API keys. These are integration tests with actual LLM calls, not unit tests.
 
-> **IMPORTANT FOR AI AGENTS:** All tests require a live Docker stack with real services and API keys. These are integration tests with actual LLM calls, not unit tests.
-
-#### Complete Test Execution Steps for AI Agents
+### Complete Test Execution Steps
 
 ```bash
 # STEP 1: Verify prerequisites
@@ -567,7 +537,7 @@ docker compose exec test-runner bash -c "cd /app/tests/e2e_advanced && ./run_ind
 
 Quadracode has two levels of end-to-end testing:
 
-#### Smoke Tests (<5 minutes)
+### Smoke Tests (<5 minutes)
 
 Quick infrastructure validation tests (Docker stack must be running and healthy):
 
@@ -589,7 +559,7 @@ docker compose up -d test-runner
 docker compose exec test-runner uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
 ```
 
-#### Advanced E2E Tests (60-90 minutes)
+### Advanced E2E Tests (60-90 minutes)
 
 Comprehensive, long-running tests that validate the complete system including false-stop detection, PRP cycles, context engineering, autonomous mode, fleet management, workspace integrity, and observability:
 
@@ -631,12 +601,6 @@ cd tests/e2e_advanced
 ./run_individual_tests.sh all --stop-on-fail
 ```
 
-**Prerequisites for Advanced Tests:**
-- `ANTHROPIC_API_KEY` must be set in `.env` and `.env.docker` files (no export needed)
-- Docker stack must be running: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime` and verify health with `docker compose ps --services --filter "status=running"`
-- For PRP tests: `docker compose up -d human-clone-runtime` and set `SUPERVISOR_RECIPIENT=human_clone`
-- For observability tests: Set `QUADRACODE_TIME_TRAVEL_ENABLED=true`
-
 **Test Modules:**
 - `test_foundation_long_run.py` - Sustained message flows (5-10 min)
 - `test_context_engine_stress.py` - Context engineering under load (10-15 min)
@@ -644,6 +608,41 @@ cd tests/e2e_advanced
 - `test_fleet_management.py` - Dynamic agent lifecycle (5-10 min)
 - `test_workspace_integrity.py` - Multi-workspace isolation (10-15 min)
 - `test_observability.py` - Time-travel logs and metrics (10-15 min)
+
+**Prerequisites for Advanced Tests:**
+- `ANTHROPIC_API_KEY` must be set in `.env` and `.env.docker` files (no export needed)
+- Docker stack must be running: `docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime` and verify health with `docker compose ps --services --filter "status=running"`
+- For PRP tests: `docker compose up -d human-clone-runtime` and set `SUPERVISOR_RECIPIENT=human_clone`
+- For observability tests: Set `QUADRACODE_TIME_TRAVEL_ENABLED=true`
+
+### End-to-End Requirements
+
+The e2e suite exercises the full stack (Redis, MCP proxy, registry, orchestrator, agent) against live model/tool backends. To run it reliably:
+
+- **Docker + Compose**: Docker Engine with the v2 compose plugin (runs `docker compose`). Access to `/var/run/docker.sock` (mounted into the orchestrator runtime by compose) so it can spawn and manage agents.
+- **Internet egress**: Outbound HTTPS is required for the LLM driver and any MCP-backed tools used in the flows.
+- **API keys** (set in `.env` and `.env.docker` files - NO export commands needed):
+  - `ANTHROPIC_API_KEY` (default driver/reducer/governor use Claude).
+  - `OPENAI_API_KEY` (optional; only if you switch models or enable prompt caching experiments).
+  - `PERPLEXITY_API_KEY` (optional; used by the Perplexity Ask MCP server if enabled).
+  - Other tool keys are optional and only needed if you enable flows that call them: `FIRECRAWL_API_KEY`, `BRIGHT_DATA_API_KEY`, `SCRAPINGBEE_API_KEY`, `GOOGLE_API_KEY`, `BING_SEARCH_API_KEY`, `GITHUB_TOKEN`.
+- **Ports** (defaults, overridable): Redis `6379`, MCP proxy `8000`, Agent Registry `8090`, Orchestrator dev `8123`, Agent dev `8124`, Streamlit UI `8501` (UI container is optional).
+
+Run the suite after bringing up the stack:
+
+```bash
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
+
+# Quick smoke tests
+uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
+
+# Full comprehensive suite
+uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
+```
+
+Environment for compose is sourced from `.env` and `.env.docker` by default. Ensure those files contain valid keys for your environment.
+
+### Test Reporting
 
 After running tests, generate metrics reports:
 
@@ -664,77 +663,9 @@ uv run python tests/e2e_advanced/scripts/plot_metrics.py \
   --output tests/e2e_advanced/plots/
 ```
 
-> See `TESTS.md` and `tests/e2e_advanced/README.md` for complete testing documentation. All tests are full-stack and require valid API keys.
+> See `TESTS.md` and `tests/e2e_advanced/README.md` for complete testing documentation.
 
-### End‑to‑End Requirements
-
-The e2e suite exercises the full stack (Redis, MCP proxy, registry, orchestrator, agent) against live model/tool backends. To run it reliably:
-
-- Docker + Compose
-  - Docker Engine with the v2 compose plugin (runs `docker compose`).
-  - Access to `/var/run/docker.sock` (mounted into the orchestrator runtime by compose) so it can spawn and manage agents.
-- Internet egress
-  - Outbound HTTPS is required for the LLM driver and any MCP‑backed tools used in the flows.
-- API keys (set in `.env` and `.env.docker` files - NO export commands needed)
-  - `ANTHROPIC_API_KEY` (default driver/reducer/governor use Claude).
-  - `OPENAI_API_KEY` (optional; only if you switch models or enable prompt caching experiments).
-  - `PERPLEXITY_API_KEY` (optional; used by the Perplexity Ask MCP server if enabled).
-  - Other tool keys are optional and only needed if you enable flows that call them: `FIRECRAWL_API_KEY`, `BRIGHT_DATA_API_KEY`, `SCRAPINGBEE_API_KEY`, `GOOGLE_API_KEY`, `BING_SEARCH_API_KEY`, `GITHUB_TOKEN`.
-- Ports (defaults, overridable)
-  - Redis `6379`, MCP proxy `8000`, Agent Registry `8090`, Orchestrator dev `8123`, Agent dev `8124`, Streamlit UI `8501` (UI container is optional).
-
-Run the suite after bringing up the stack:
-
-```bash
-docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime
-
-# Quick smoke tests
-uv run pytest tests/e2e_advanced/test_foundation_smoke.py -v
-
-# Full comprehensive suite
-uv run pytest tests/e2e_advanced -m e2e_advanced -v --log-cli-level=INFO
-```
-
-Environment for compose is sourced from `.env` and `.env.docker` by default. Ensure those files contain valid keys for your environment.
-
-## Repository Layout
-
-```
-quadracode/
-├── quadracode-runtime/        # Shared runtime core, LangGraph builder, Redis messaging
-├── quadracode-orchestrator/   # Orchestrator profile, prompts, CLI entry
-├── quadracode-agent/          # Agent profile and prompts
-├── quadracode-agent-registry/ # FastAPI service for agent registration and health
-├── quadracode-contracts/      # Pydantic envelope contracts and mailbox helpers
-├── quadracode-tools/          # Reusable MCP / LangChain tool wrappers (includes workspace management)
-├── quadracode-ui/             # Streamlit UI (5 pages: Chat, Mailbox Monitor, Workspaces, Dashboard, Prompt Settings)
-├── Dockerfile.workspace       # Workspace container image for sandboxed agent operations
-├── scripts/
-│   ├── agent-management/      # Shell scripts for spawning/deleting agents (Docker + K8s)
-│   └── ...                    # Other operational scripts
-├── tests/e2e_advanced/        # Comprehensive E2E test suite with smoke tests
-└── docker-compose.yml         # Production deployment configuration
-```
-
-### Mock Mode (Testing/Development)
-
-Quadracode supports a mock mode for testing and development without external dependencies:
-
-```bash
-# Run quadracode-runtime in mock mode (no Redis/MCP required)
-QUADRACODE_MOCK_MODE=true python -m quadracode_runtime
-
-# Or using Docker
-docker run -e QUADRACODE_MOCK_MODE=true quadracode-runtime
-```
-
-When `QUADRACODE_MOCK_MODE=true`:
-- Uses `fakeredis` for in-memory Redis operations
-- Uses `MemorySaver` checkpointer instead of SQLite
-- Allows the service to start without external dependencies (Redis, MCP servers)
-- Useful for unit testing, local development, and CI pipelines
-
-**Note:** Mock mode is for testing only. Production deployments should always use real Redis and MCP services.
+## Configuration
 
 ### Context Engine Configuration
 
@@ -754,46 +685,19 @@ You can tune the context engine at runtime using environment variables. These ar
 
 Other advanced settings for metrics, quality thresholds, and externalization are also available. See `quadracode-runtime/src/quadracode_runtime/config/context_engine.py` for a complete list.
 
-## Local Development & Testing
-
-- Sync dependencies: `uv sync`
-- Run package-specific tests: `uv run pytest`
-
-### Mock Mode (Standalone Testing)
-
-All services support `QUADRACODE_MOCK_MODE=true` for standalone testing without external dependencies:
-
-```bash
-# Run agent in mock mode (no Redis/LLM required)
-QUADRACODE_MOCK_MODE=true uv run python -m quadracode_agent
-
-# Run UI in mock mode (no Redis/agent-registry required)
-cd quadracode-ui
-QUADRACODE_MOCK_MODE=true uv run streamlit run src/quadracode_ui/app.py
-
-# Run with Docker
-docker build -f quadracode-agent/Dockerfile -t quadracode-agent .
-docker run -e QUADRACODE_MOCK_MODE=true quadracode-agent
-
-# Run UI with Docker in mock mode
-docker build -f quadracode-ui/Dockerfile -t quadracode-ui .
-docker run -e QUADRACODE_MOCK_MODE=true -p 8501:8501 quadracode-ui
-```
-
-Mock mode provides:
-- In-memory Redis mock (fakeredis) for messaging
-- MemorySaver checkpointer (no SQLite required)
-- Deterministic mock responses for LLM calls
-- Simulated agent registry data for UI dashboards
-- No external network dependencies
-
-### Core Dependencies
+## Core Dependencies (Minimum Versions, No Caps)
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| langgraph | >=1.0,<2.0 | Graph-based agent orchestration (production release) |
-| langchain | >=1.0,<2.0 | LLM abstractions and tool interfaces |
-| langchain-anthropic | >=1.0,<2.0 | Claude integration |
-| langchain-openai | >=1.0,<2.0 | OpenAI integration |
-| langchain-mcp-adapters | >=0.2,<0.3 | MCP tool integration |
-| python-dotenv | >=1.0,<2.0 | Environment configuration |
+| langgraph | >=1.0 | Graph-based agent orchestration (production release) |
+| langchain | >=1.0 | LLM abstractions and tool interfaces |
+| langchain-anthropic | >=1.0 | Claude integration |
+| langchain-openai | >=1.0 | OpenAI integration |
+| langchain-core | >=1.0 | Core LangChain abstractions |
+| langchain-mcp-adapters | >=0.2 | MCP tool integration |
+| langgraph-checkpoint-sqlite | >=3 | SQLite checkpointer |
+| pydantic | >=2.10 | Data validation |
+| fastapi | >=0.115 | Agent Registry API |
+| streamlit | >=1.40 | UI framework |
+| redis | >=5.0 | Redis client |
+| fakeredis | >=2.20 | Mock Redis for testing |
