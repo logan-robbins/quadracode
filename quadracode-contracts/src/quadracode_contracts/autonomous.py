@@ -102,7 +102,7 @@ class AutonomousRoutingDirective(BaseModel):
             A dictionary representation of the directive.
         """
 
-        return self.dict()
+        return self.model_dump()
 
 
 class AutonomousCheckpointRecord(BaseModel):

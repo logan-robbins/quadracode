@@ -8,6 +8,8 @@ unregistration on shutdown. It is designed to be a self-contained, asynchronous
 component that can be easily integrated into the main agent runtime. The 
 integration is configurable via a set of environment variables, allowing for 
 flexible deployment in different environments.
+
+Supports mock mode via QUADRACODE_MOCK_MODE=true for standalone testing.
 """
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ import time
 from typing import Optional
 
 import httpx
+
+from .mock_mode import is_mock_mode
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -115,6 +119,8 @@ class AgentRegistryIntegration:
         environment variables, and it will return `None` if the integration is 
         disabled or if the profile is not an agent profile.
 
+        In mock mode, returns a MockAgentRegistry for standalone testing.
+
         Args:
             profile_name: The name of the runtime profile.
             agent_id: The unique ID of the agent.
@@ -123,6 +129,11 @@ class AgentRegistryIntegration:
             An instance of `AgentRegistryIntegration`, or `None` if the 
             integration is not applicable.
         """
+        # In mock mode, return a mock registry that doesn't make real HTTP calls
+        if is_mock_mode():
+            LOGGER.info("[MOCK] Using mock agent registry for %s", agent_id)
+            return MockAgentRegistry(agent_id)  # type: ignore[return-value]
+        
         if profile_name != "agent":
             return None
         if not _env_flag("QUADRACODE_AGENT_AUTOREGISTER", True):
@@ -295,3 +306,26 @@ class AgentRegistryIntegration:
         except httpx.HTTPError as exc:
             LOGGER.warning("Agent registry %s %s failed: %s", method.upper(), url, exc)
             return False
+
+
+class MockAgentRegistry:
+    """
+    Mock agent registry for standalone testing.
+    
+    This class provides the same interface as AgentRegistryIntegration but
+    doesn't make any real HTTP calls. Useful for testing without the registry service.
+    """
+    
+    def __init__(self, agent_id: str) -> None:
+        self._agent_id = agent_id
+        self._registered = False
+    
+    async def start(self) -> None:
+        """Mock registration - just logs and sets registered flag."""
+        self._registered = True
+        LOGGER.info("[MOCK] Agent %s registered (mock)", self._agent_id)
+    
+    async def shutdown(self) -> None:
+        """Mock shutdown - just logs and clears registered flag."""
+        self._registered = False
+        LOGGER.info("[MOCK] Agent %s unregistered (mock)", self._agent_id)

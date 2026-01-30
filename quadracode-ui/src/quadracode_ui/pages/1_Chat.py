@@ -2,6 +2,7 @@
 Chat interface page for Quadracode UI.
 
 This page provides the main chat interface for interacting with the orchestrator.
+Supports QUADRACODE_MOCK_MODE for standalone testing with fakeredis.
 """
 
 import time
@@ -12,6 +13,7 @@ import streamlit as st
 
 from quadracode_ui.components.message_list import render_message_input, render_message_list
 from quadracode_ui.components.mode_toggle import render_mode_status
+from quadracode_ui.config import MOCK_MODE
 from quadracode_ui.utils.message_utils import (
     active_supervisor,
     send_message,
@@ -38,6 +40,10 @@ success, error = test_redis_connection(client)
 if not success:
     st.error(f"❌ Unable to connect to Redis: {error}")
     st.stop()
+
+# Show mock mode indicator
+if MOCK_MODE:
+    st.info("🧪 **Mock Mode** - Messages are stored in memory. No external orchestrator connected.")
 
 # Initialize session state with persistence
 if "chat_loaded" not in st.session_state:

@@ -366,12 +366,24 @@ class MetaCognitiveObserver:
     def _ensure_client(self):
         """
         Manages the Redis client connection, ensuring it is initialized.
+        
+        When QUADRACODE_MOCK_MODE is enabled, uses fakeredis instead of
+        connecting to a real Redis server.
         """
         if self._client is not None:
             return self._client
         if self._client_factory:
             self._client = self._client_factory()
             return self._client
+        
+        # Check for mock mode
+        from .mock import is_mock_mode_enabled, get_mock_redis_client
+        if is_mock_mode_enabled():
+            self._client = get_mock_redis_client()
+            if self._client is not None:
+                LOGGER.info("Using mock Redis client for observability (mock mode enabled)")
+            return self._client
+        
         if redis is None:  # pragma: no cover - dependency missing
             LOGGER.info("redis not available; disabling observability stream publishing")
             return None

@@ -5,12 +5,14 @@ description = "Streamlit UI for Quadracode orchestrator"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "streamlit>=1.38",
+    "streamlit>=1.40",
     "redis>=5.0",
     "httpx>=0.27",
     "pandas>=2.0",
     "pygments>=2.17",
     "plotly>=5.18",
+    "pyyaml>=6.0",
+    "fakeredis>=2.20",
     "quadracode-contracts",
     "quadracode-tools",
 ]

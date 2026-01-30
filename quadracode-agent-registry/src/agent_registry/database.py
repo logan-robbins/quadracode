@@ -9,9 +9,10 @@ records. By centralizing data access, this module ensures consistency and makes
 the application easier to maintain and test.
 """
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional
 
 
 class Database:
@@ -23,6 +24,9 @@ class Database:
     for connection handling to ensure that connections are properly managed and 
     thread-safe.
 
+    For in-memory databases (path=":memory:"), a shared connection with URI mode
+    is used to ensure all operations see the same data.
+
     Attributes:
         path: The file path to the SQLite database.
     """
@@ -32,9 +36,23 @@ class Database:
         Initializes the Database instance with the path to the SQLite file.
 
         Args:
-            path: The file path for the SQLite database.
+            path: The file path for the SQLite database. Use ":memory:" for
+                  an in-memory database (mock mode).
         """
         self.path = path
+        self._is_memory = path == ":memory:"
+        self._lock = threading.Lock()
+        
+        # For in-memory databases, use a shared connection with URI mode
+        # This ensures all operations see the same database
+        if self._is_memory:
+            self._shared_uri = "file:quadracode_registry?mode=memory&cache=shared"
+            # Keep one connection alive to prevent the database from being destroyed
+            self._keeper = sqlite3.connect(self._shared_uri, uri=True, check_same_thread=False)
+            self._keeper.row_factory = sqlite3.Row
+        else:
+            self._shared_uri = None
+            self._keeper = None
 
     @contextmanager
     def connect(self):
@@ -46,13 +64,18 @@ class Database:
         also configures the connection to return rows as `sqlite3.Row` objects, 
         which allows for dictionary-like access to columns.
         """
-        con = sqlite3.connect(self.path, check_same_thread=False)
-        try:
-            con.row_factory = sqlite3.Row
-            yield con
-            con.commit()
-        finally:
-            con.close()
+        with self._lock:
+            if self._is_memory:
+                # Use the shared URI connection for in-memory databases
+                con = sqlite3.connect(self._shared_uri, uri=True, check_same_thread=False)
+            else:
+                con = sqlite3.connect(self.path, check_same_thread=False)
+            try:
+                con.row_factory = sqlite3.Row
+                yield con
+                con.commit()
+            finally:
+                con.close()
 
     def init_schema(self) -> None:
         """

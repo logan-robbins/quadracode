@@ -2,6 +2,7 @@
 Mailbox Monitor page for Quadracode UI.
 
 This page provides real-time monitoring of all Redis Streams mailbox traffic.
+Supports QUADRACODE_MOCK_MODE for standalone testing with simulated streams.
 """
 
 import re
@@ -12,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from quadracode_ui.components.message_list import render_message_card
-from quadracode_ui.config import UI_MESSAGE_PAGE_SIZE
+from quadracode_ui.config import MOCK_MODE, UI_MESSAGE_PAGE_SIZE
 from quadracode_ui.utils.message_utils import get_all_messages
 from quadracode_ui.utils.redis_client import get_redis_client, list_mailboxes, test_redis_connection
 
@@ -31,6 +32,10 @@ if not success:
 # Header
 st.title("📡 Mailbox Monitor")
 st.caption("Real-time view of all Redis Streams traffic")
+
+# Show mock mode indicator
+if MOCK_MODE:
+    st.info("🧪 **Mock Mode** - Viewing simulated Redis Streams data")
 
 # Initialize session state
 if "mailbox_monitor_auto_refresh" not in st.session_state:

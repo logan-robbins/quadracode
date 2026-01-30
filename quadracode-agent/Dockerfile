@@ -11,7 +11,10 @@ ENV PATH="/root/.cargo/bin:/root/.local/bin:${PATH}" \
     UV_ENVIRONMENT=docker \
     PYTHONPATH="/app/quadracode-orchestrator:${PYTHONPATH}"
 
-# Install UV (fast Python package manager)
+# Mock mode environment (set to "true" for standalone testing without Redis/LLM)
+ENV QUADRACODE_MOCK_MODE="false"
+
+# Install UV (fast Python package manager) and Node.js
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -48,9 +51,27 @@ RUN uv sync --frozen --no-dev || uv pip install --system -e .
 # Expose dev server port used by langgraph CLI
 EXPOSE 8123
 
-# Health check to verify the LangGraph dev server is up
+# Health check - supports both LangGraph dev mode and mock mode
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:8123/ok >/dev/null || exit 1
+    CMD if [ "$QUADRACODE_MOCK_MODE" = "true" ]; then \
+            python -c "import quadracode_agent; print('healthy')" || exit 1; \
+        else \
+            curl -fsS http://localhost:8123/ok >/dev/null || exit 1; \
+        fi
 
-# Run the agent LangGraph in dev server mode
-CMD ["uv", "run", "langgraph", "dev", "--config", "langgraph-docker.json", "--host", "0.0.0.0", "--port", "8123"]
+# Entrypoint script to support different modes
+COPY --chmod=755 <<'EOF' /app/quadracode-agent/entrypoint.sh
+#!/bin/bash
+set -e
+
+if [ "$QUADRACODE_MOCK_MODE" = "true" ]; then
+    echo "Starting agent in MOCK MODE (no Redis/LLM required)"
+    exec python -m quadracode_agent
+else
+    echo "Starting agent in LangGraph dev mode"
+    exec uv run langgraph dev --config langgraph-docker.json --host 0.0.0.0 --port 8123
+fi
+EOF
+
+# Run via entrypoint for mode-aware startup
+CMD ["/app/quadracode-agent/entrypoint.sh"]

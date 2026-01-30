@@ -45,11 +45,14 @@ from .graph import (
 )
 from .logging_utils import configure_logging
 from .messaging import RedisMCPMessaging
+from .mock_mode import is_mock_mode, configure_mock_mode
 from .profiles import RuntimeProfile, is_autonomous_mode_enabled
 from .state import ExhaustionMode, RuntimeState
 from .registry import AgentRegistryIntegration
 from .validation import validate_human_clone_envelope
 
+# Configure mock mode early if enabled
+configure_mock_mode()
 configure_logging()
 
 IDENTITY_ENV_VAR = "QUADRACODE_ID"
@@ -152,6 +155,24 @@ def _publish_autonomous_event(
             record_payload["categories"] = sorted(set(existing + categories))
         else:
             record_payload["categories"] = categories
+
+    # Check for mock mode first
+    from .mock import is_mock_mode_enabled, get_mock_redis_client
+    if is_mock_mode_enabled():
+        client = get_mock_redis_client()
+        if client is not None:
+            try:
+                client.xadd(
+                    AUTONOMOUS_STREAM_KEY,
+                    {
+                        "event": event,
+                        "timestamp": _now_iso(),
+                        "payload": json.dumps(record_payload),
+                    },
+                )
+            except Exception:
+                pass  # Mock mode - best effort
+        return
 
     try:
         import redis  # type: ignore
@@ -374,10 +395,12 @@ class RuntimeRunner:
             poll_interval: The interval in seconds for polling the message bus.
             batch_size: The maximum number of messages to process in each poll.
         """
-        if not USE_CUSTOM_CHECKPOINTER:
+        # Allow mock mode to bypass persistence requirement
+        if not USE_CUSTOM_CHECKPOINTER and not is_mock_mode():
             raise RuntimeError(
                 "Quadracode runtime requires persistence. Disable QUADRACODE_LOCAL_DEV_MODE "
-                "or run inside Docker before starting runtime services."
+                "or run inside Docker before starting runtime services. "
+                "Alternatively, set QUADRACODE_MOCK_MODE=true for testing."
             )
         self._profile = profile
         self._poll_interval = poll_interval

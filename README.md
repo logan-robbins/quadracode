@@ -78,12 +78,12 @@ This two-level loop ensures that the system is always questioning its own conclu
 
 ## Repository Layout
 
-This monorepo contains several Python 3.12 packages and supporting assets:
+This monorepo contains several Python 3.12 packages and supporting assets, built on **LangGraph 1.0** (production-ready release).
 
-- `quadracode-runtime/` — Shared runtime for all services. Contains the LangGraph workflow (driver + tools), the Context Engineering node (pre/governor/post/tool_response), Redis/MCP messaging, metrics emitters, and state/contracts glue.
+- `quadracode-runtime/` — Shared runtime for all services. Contains the LangGraph 1.0 workflow (driver + tools), the Context Engineering node (pre/governor/post/tool_response), Redis/MCP messaging, metrics emitters, and state/contracts glue. Supports `QUADRACODE_MOCK_MODE=true` for standalone testing with in-memory Redis mock.
 - `quadracode-orchestrator/` — Orchestrator service wrapper. Provides system prompt, runtime profile, and process entrypoint to run the orchestrator graph.
-- `quadracode-agent/` — Generic agent service wrapper. Uses the shared runtime with the agent profile to execute delegated work.
-- `quadracode-agent-registry/` — Uvicorn/FastAPI registry on port 8090 for agent discovery, health, and stats used by the orchestrator.
+- `quadracode-agent/` — Generic agent service wrapper. Uses the shared runtime with the agent profile to execute delegated work. Supports `QUADRACODE_MOCK_MODE=true` for standalone testing without Redis/LLM.
+- `quadracode-agent-registry/` — FastAPI registry on port 8090 for agent discovery, health, and stats. Supports `QUADRACODE_MOCK_MODE=true` for standalone testing with in-memory SQLite (no external dependencies).
 - `quadracode-tools/` — Reusable tools exposed to agents (LangChain and MCP-backed) such as `agent_management`, workspace management, file IO, etc.
 - `quadracode-contracts/` — Shared Pydantic models and message envelope contracts used across services.
 - `quadracode-ui/` — Streamlit UI with 5 pages: Chat (background polling), Mailbox Monitor (advanced filtering), Workspaces (hierarchical tree), Dashboard (Plotly charts), and Prompt Settings.
@@ -238,12 +238,23 @@ All services treat payload fields as opaque except for threading/routing attribu
 
 ### Prerequisites
 
+- **Python 3.12** (required)
 - **Docker** and **Docker Compose** (for Docker deployment)
 - **kubectl** and cluster access (for Kubernetes deployment)
 - **uv** (Python package manager): [Installation](https://docs.astral.sh/uv/getting-started/installation/)
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
+
+**Key Dependencies (minimum versions, no caps):**
+- `langgraph>=1.0` - LangGraph 1.0+ production-ready
+- `langchain>=1.0` - LangChain 1.x ecosystem
+- `langchain-anthropic>=1.0` - Anthropic Claude integration
+- `langchain-openai>=1.0` - OpenAI integration
+- `langgraph-checkpoint-sqlite>=3` - SQLite checkpointer
+- `pydantic>=2.10` - Data validation
+- `fastapi>=0.115` - Agent Registry API
+- `streamlit>=1.40` - UI framework
 
 ### 1. Configure Environment
 
@@ -459,6 +470,63 @@ uv run langgraph dev --config quadracode-orchestrator/langgraph-local.json --por
 uv run langgraph dev agent --config quadracode-agent/langgraph-local.json
 ```
 
+### Mock Mode - Standalone Testing
+
+All services support `QUADRACODE_MOCK_MODE=true` for standalone testing without external dependencies (Redis, LLM APIs, etc.). This is useful for development, CI/CD pipelines, and debugging.
+
+#### Agent Registry (Standalone)
+
+```bash
+cd quadracode-agent-registry
+uv sync
+QUADRACODE_MOCK_MODE=true uv run uvicorn agent_registry.app:app --host 0.0.0.0 --port 8090
+
+# Or with Docker
+docker build -f Dockerfile -t quadracode-agent-registry .
+docker run -e QUADRACODE_MOCK_MODE=true -p 8090:8090 quadracode-agent-registry
+```
+
+API endpoints at http://localhost:8090:
+- `GET /health` - Health check
+- `GET /stats` - Registry statistics
+- `POST /agents/register` - Register an agent
+- `GET /agents` - List all agents
+- `GET /agents/{agent_id}` - Get specific agent
+- `POST /agents/{agent_id}/heartbeat` - Send heartbeat
+- `DELETE /agents/{agent_id}` - Unregister agent
+- `POST /agents/{agent_id}/hotpath` - Set hotpath status
+- `GET /agents/hotpath` - List hotpath agents
+
+#### UI (Standalone)
+
+```bash
+cd quadracode-ui
+uv sync
+QUADRACODE_MOCK_MODE=true uv run streamlit run src/quadracode_ui/app.py
+
+# Or with Docker
+docker build -f quadracode-ui/Dockerfile -t quadracode-ui .
+docker run -e QUADRACODE_MOCK_MODE=true -p 8501:8501 quadracode-ui
+```
+
+Mock mode uses `fakeredis` for in-memory Redis and displays sample data. A banner indicates mock mode is active. Note: Docker workspace operations are disabled in mock mode.
+
+#### Runtime/Orchestrator/Agent (Mock Mode)
+
+The runtime services support mock mode for testing without LLM API calls:
+
+```bash
+# In any service directory
+QUADRACODE_MOCK_MODE=true uv run python -m quadracode_orchestrator
+QUADRACODE_MOCK_MODE=true uv run python -m quadracode_agent
+```
+
+Mock mode provides:
+- `MockRedisStorage` - In-memory Redis stream simulation
+- `MockRedisMCPMessaging` - Drop-in messaging replacement
+- `MockLLMResponse` - Deterministic mock LLM responses
+- `MemorySaver` checkpointer instead of SQLite
+
 ### Testing
 
 > **IMPORTANT FOR AI AGENTS:** All tests require a live Docker stack with real services and API keys. These are integration tests with actual LLM calls, not unit tests.
@@ -648,6 +716,26 @@ quadracode/
 └── docker-compose.yml         # Production deployment configuration
 ```
 
+### Mock Mode (Testing/Development)
+
+Quadracode supports a mock mode for testing and development without external dependencies:
+
+```bash
+# Run quadracode-runtime in mock mode (no Redis/MCP required)
+QUADRACODE_MOCK_MODE=true python -m quadracode_runtime
+
+# Or using Docker
+docker run -e QUADRACODE_MOCK_MODE=true quadracode-runtime
+```
+
+When `QUADRACODE_MOCK_MODE=true`:
+- Uses `fakeredis` for in-memory Redis operations
+- Uses `MemorySaver` checkpointer instead of SQLite
+- Allows the service to start without external dependencies (Redis, MCP servers)
+- Useful for unit testing, local development, and CI pipelines
+
+**Note:** Mock mode is for testing only. Production deployments should always use real Redis and MCP services.
+
 ### Context Engine Configuration
 
 You can tune the context engine at runtime using environment variables. These are picked up automatically by the orchestrator and agent runtimes.
@@ -670,3 +758,42 @@ Other advanced settings for metrics, quality thresholds, and externalization are
 
 - Sync dependencies: `uv sync`
 - Run package-specific tests: `uv run pytest`
+
+### Mock Mode (Standalone Testing)
+
+All services support `QUADRACODE_MOCK_MODE=true` for standalone testing without external dependencies:
+
+```bash
+# Run agent in mock mode (no Redis/LLM required)
+QUADRACODE_MOCK_MODE=true uv run python -m quadracode_agent
+
+# Run UI in mock mode (no Redis/agent-registry required)
+cd quadracode-ui
+QUADRACODE_MOCK_MODE=true uv run streamlit run src/quadracode_ui/app.py
+
+# Run with Docker
+docker build -f quadracode-agent/Dockerfile -t quadracode-agent .
+docker run -e QUADRACODE_MOCK_MODE=true quadracode-agent
+
+# Run UI with Docker in mock mode
+docker build -f quadracode-ui/Dockerfile -t quadracode-ui .
+docker run -e QUADRACODE_MOCK_MODE=true -p 8501:8501 quadracode-ui
+```
+
+Mock mode provides:
+- In-memory Redis mock (fakeredis) for messaging
+- MemorySaver checkpointer (no SQLite required)
+- Deterministic mock responses for LLM calls
+- Simulated agent registry data for UI dashboards
+- No external network dependencies
+
+### Core Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| langgraph | >=1.0,<2.0 | Graph-based agent orchestration (production release) |
+| langchain | >=1.0,<2.0 | LLM abstractions and tool interfaces |
+| langchain-anthropic | >=1.0,<2.0 | Claude integration |
+| langchain-openai | >=1.0,<2.0 | OpenAI integration |
+| langchain-mcp-adapters | >=0.2,<0.3 | MCP tool integration |
+| python-dotenv | >=1.0,<2.0 | Environment configuration |

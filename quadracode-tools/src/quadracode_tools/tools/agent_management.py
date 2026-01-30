@@ -20,7 +20,7 @@ from typing import Any, Dict, Literal, Optional
 import httpx
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 from quadracode_contracts import DEFAULT_WORKSPACE_MOUNT
 from .agent_registry import _registry_base_url, DEFAULT_TIMEOUT
 
@@ -74,20 +74,15 @@ class AgentManagementRequest(BaseModel):
         description="Mount path inside the agent container for the workspace volume (default /workspace).",
     )
 
-    @root_validator(skip_on_failure=True)
-    def _validate_requirements(cls, values):  # type: ignore[override]
-        op = values.get("operation")
-        agent_id = values.get("agent_id")
+    @model_validator(mode="after")
+    def _validate_requirements(self) -> "AgentManagementRequest":
+        if self.operation in {"delete_agent", "get_container_status", "mark_hotpath", "clear_hotpath"} and not self.agent_id:
+            raise ValueError(f"{self.operation} requires agent_id")
 
-        if op in {"delete_agent", "get_container_status", "mark_hotpath", "clear_hotpath"} and not agent_id:
-            raise ValueError(f"{op} requires agent_id")
-
-        workspace_volume = values.get("workspace_volume")
-        workspace_mount = values.get("workspace_mount")
-        if workspace_mount and not workspace_volume:
+        if self.workspace_mount and not self.workspace_volume:
             raise ValueError("workspace_mount requires workspace_volume")
 
-        return values
+        return self
 
 
 def _get_scripts_dir() -> Path:

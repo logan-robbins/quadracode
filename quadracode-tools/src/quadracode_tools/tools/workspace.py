@@ -23,7 +23,7 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from quadracode_contracts import (
     DEFAULT_WORKSPACE_MOUNT,
@@ -62,8 +62,9 @@ class WorkspaceBaseRequest(BaseModel):
     """Base schema for workspace requests, ensuring a valid `workspace_id`."""
     workspace_id: str = Field(..., description="Workspace identifier (usually the chat_id).")
 
-    @validator("workspace_id")
-    def _validate_id(cls, value: str) -> str:  # type: ignore[override]
+    @field_validator("workspace_id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("workspace_id must be a non-empty string")
         return value.strip()
@@ -97,8 +98,9 @@ class WorkspaceExecRequest(WorkspaceBaseRequest):
         description="Optional timeout in seconds for the command.",
     )
 
-    @validator("command")
-    def _validate_command(cls, value: str) -> str:  # type: ignore[override]
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("command must be a non-empty string")
         return value

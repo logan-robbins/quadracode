@@ -54,10 +54,11 @@ class AgentHeartbeat(BaseModel):
     liveness.
 
     This model is used to update the agent's status in the registry, keeping 
-    it marked as healthy.
+    it marked as healthy. The agent_id is typically provided via the URL path
+    parameter and injected by the API handler.
     """
 
-    agent_id: str = Field(..., description="Agent identifier sending the heartbeat")
+    agent_id: str = Field(default="", description="Agent identifier (set from URL path)")
     status: AgentStatus = Field(default=AgentStatus.HEALTHY, description="Reported health status")
     reported_at: datetime = Field(default_factory=datetime.utcnow, description="Heartbeat timestamp")
 

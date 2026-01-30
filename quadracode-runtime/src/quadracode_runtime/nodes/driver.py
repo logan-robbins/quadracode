@@ -4,11 +4,13 @@ creating the core decision-making component (the "driver") of the LangGraph.
 
 The driver is the node in the graph that is responsible for interpreting the 
 current state and deciding on the next action, which is typically to call a tool 
-or to respond to the user. This module supports two types of drivers: a simple, 
-heuristic-based driver for testing and a more powerful, LLM-based driver for 
-production. The choice of driver is determined by the `QUADRACODE_DRIVER_MODEL` 
-environment variable, allowing for flexible configuration of the runtime's core 
-logic.
+or to respond to the user. This module supports three driver types:
+- "heuristic": Simple rule-based driver for testing
+- "mock": Uses mock responses (for QUADRACODE_MOCK_MODE)
+- Default: LLM-based driver for production
+
+The choice of driver is determined by the `QUADRACODE_DRIVER_MODEL` environment 
+variable, allowing for flexible configuration of the runtime's core logic.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 
 from ..state import QuadraCodeState
+from ..mock_mode import is_mock_mode, MockLLMResponse
 
 
 LOGGER = logging.getLogger(__name__)
@@ -62,6 +65,40 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         A callable that serves as the driver for the LangGraph.
     """
     driver_model = os.environ.get("QUADRACODE_DRIVER_MODEL", "").strip().lower()
+    
+    # Auto-select mock driver when mock mode is enabled
+    if is_mock_mode() and driver_model not in ("heuristic", "mock"):
+        driver_model = "mock"
+        LOGGER.info("[MOCK] Auto-selected mock driver")
+    
+    if driver_model == "mock":
+        def mock_driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
+            """
+            Mock driver that uses MockLLMResponse for predictable responses.
+            
+            Useful for standalone testing without LLM API calls.
+            """
+            msgs: list[AnyMessage] = state.get("messages", [])
+            
+            if not msgs:
+                return {"messages": [AIMessage(content="[MOCK] Ready.")]}
+            
+            last_message = msgs[-1]
+            
+            # Handle tool responses
+            if isinstance(last_message, ToolMessage):
+                tool_name = getattr(last_message, "name", "tool")
+                tool_output = _coerce_text(getattr(last_message, "content", ""))
+                summary = tool_output[:200] if tool_output else "No output."
+                reply = f"[MOCK] Tool '{tool_name}' result: {summary}"
+                return {"messages": [AIMessage(content=reply)]}
+            
+            # Use MockLLMResponse for other messages
+            ai_msg = MockLLMResponse.generate_response(msgs)
+            return {"messages": [ai_msg]}
+        
+        LOGGER.info("[MOCK] Using mock driver")
+        return mock_driver
 
     if driver_model == "heuristic":
 

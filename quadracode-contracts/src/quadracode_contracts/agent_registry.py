@@ -11,11 +11,16 @@ implementations and ensures consistency.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+
+def _utc_now() -> datetime:
+    """Returns the current UTC time as a timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 
 class AgentStatus(str, Enum):
@@ -55,7 +60,7 @@ class AgentHeartbeat(BaseModel):
 
     agent_id: str = Field(..., description="Agent identifier sending the heartbeat")
     status: AgentStatus = Field(default=AgentStatus.HEALTHY, description="Reported health status")
-    reported_at: datetime = Field(default_factory=datetime.utcnow, description="Heartbeat timestamp")
+    reported_at: datetime = Field(default_factory=_utc_now, description="Heartbeat timestamp")
 
 
 class AgentInfo(BaseModel):
@@ -98,7 +103,7 @@ class RegistryStats(BaseModel):
     total_agents: int
     healthy_agents: int
     unhealthy_agents: int
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=_utc_now)
 
 
 __all__ = [

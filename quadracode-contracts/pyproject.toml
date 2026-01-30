@@ -9,8 +9,13 @@ description = "Contracts and schemas for Quadracode agent-orchestrator communica
 authors = [{ name = "Quadracode Team" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pydantic>=2.6",
-    "typing-extensions>=4.9"
+    "pydantic>=2.10",
+    "typing-extensions>=4.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
 ]
 
 [tool.setuptools]

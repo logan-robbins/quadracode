@@ -3,13 +3,18 @@ Quadracode UI - Main Entry Point
 
 A Streamlit-based user interface for the Quadracode multi-agent orchestration system.
 Provides direct Redis Streams communication with the orchestrator.
+
+Supports QUADRACODE_MOCK_MODE=true for standalone testing:
+- Uses fakeredis for in-memory Redis operations
+- Mocks agent registry API responses  
+- Provides sample data for UI demonstration
 """
 
 import streamlit as st
 
 from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
 from quadracode_ui.components.mode_toggle import render_mode_toggle
-from quadracode_ui.config import AGENT_REGISTRY_URL, REDIS_HOST, REDIS_PORT
+from quadracode_ui.config import AGENT_REGISTRY_URL, MOCK_MODE, REDIS_HOST, REDIS_PORT
 from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
 
 
@@ -45,6 +50,13 @@ init_session_state()
 client = get_redis_client()
 success, error = test_redis_connection(client)
 
+# Show mock mode banner
+if MOCK_MODE:
+    st.warning(
+        "🧪 **Mock Mode Active** - Running with simulated data. "
+        "No external Redis or agent-registry required."
+    )
+
 # Header
 st.title("🚀 Quadracode UI")
 st.markdown("""
@@ -62,13 +74,17 @@ st.subheader("System Status")
 status_col1, status_col2, status_col3 = st.columns(3)
 
 with status_col1:
-    if success:
+    if MOCK_MODE:
+        st.success("✅ Redis Connected\n\n`fakeredis (mock)`", icon="✅")
+    elif success:
         st.success(f"✅ Redis Connected\n\n`{REDIS_HOST}:{REDIS_PORT}`", icon="✅")
     else:
         st.error(f"❌ Redis Disconnected\n\n{error}", icon="❌")
 
 with status_col2:
-    if AGENT_REGISTRY_URL:
+    if MOCK_MODE:
+        st.info("🤖 Agent Registry\n\n`mock (simulated)`", icon="🤖")
+    elif AGENT_REGISTRY_URL:
         st.info(f"🤖 Agent Registry\n\n`{AGENT_REGISTRY_URL}`", icon="🤖")
     else:
         st.warning("⚠️ Agent Registry\n\nNot Configured", icon="⚠️")
@@ -178,7 +194,21 @@ with link_col4:
 
 # System information
 with st.expander("ℹ️ System Information", expanded=False):
-    st.markdown(f"""
+    if MOCK_MODE:
+        st.markdown("""
+    **Configuration (Mock Mode):**
+    - Redis: `fakeredis (in-memory)`
+    - Agent Registry: `mock (simulated data)`
+    - Mode: Standalone testing - no external dependencies
+    
+    **Mock Mode Features:**
+    - In-memory Redis using fakeredis
+    - Simulated agent registry responses
+    - Sample data seeded for demonstration
+    - UI fully functional without Docker services
+    """)
+    else:
+        st.markdown(f"""
     **Configuration:**
     - Redis Host: `{REDIS_HOST}`
     - Redis Port: `{REDIS_PORT}`

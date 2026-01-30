@@ -1,16 +1,22 @@
 # ./quadracode-orchestrator/Dockerfile
 # Dockerfile for Quadracode Orchestrator
 # BUILD FROM ROOT: docker build -f quadracode-orchestrator/Dockerfile -t quadracode-orchestrator .
+#
+# MOCK MODE: Set QUADRACODE_MOCK_MODE=true for standalone testing without Redis/LLM
+#   docker run -e QUADRACODE_MOCK_MODE=true quadracode-orchestrator
 
-FROM arm64v8/python:3.12-slim
+# Use multi-arch Python 3.12 slim image
+FROM python:3.12-slim
 
 # Standard Quadracode Python service environment
 ENV PATH="/root/.cargo/bin:/root/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_ENVIRONMENT=docker
+    UV_ENVIRONMENT=docker \
+    # Default mock mode to false - set to "true" for standalone testing
+    QUADRACODE_MOCK_MODE=false
 
-# Install UV (fast Python package manager) and Docker CLI
+# Install UV (fast Python package manager), Docker CLI, and health check tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -53,9 +59,15 @@ RUN uv sync --frozen --no-dev || uv pip install --system -e .
 # Expose dev server port used by langgraph CLI
 EXPOSE 8123
 
-# Health check to verify the LangGraph dev server is up
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:8123/ok >/dev/null || exit 1
+# Health check script that works in both normal and mock mode
+# In mock mode, we verify the process is running; in normal mode, verify HTTP endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD if [ "$QUADRACODE_MOCK_MODE" = "true" ]; then \
+            pgrep -f "langgraph" > /dev/null || exit 1; \
+        else \
+            curl -fsS http://localhost:8123/ok >/dev/null || exit 1; \
+        fi
 
 # Run the orchestrator LangGraph in dev server mode
+# In mock mode, the runtime uses in-memory stores and mock responses
 CMD ["uv", "run", "langgraph", "dev", "--config", "langgraph-docker.json", "--host", "0.0.0.0", "--port", "8123"]

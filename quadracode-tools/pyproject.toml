@@ -9,11 +9,12 @@ description = "Shared tool definitions for Quadracode agents and orchestrator"
 authors = [{ name = "Quadracode Team" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "langchain-core",
-    "httpx",
+    "langchain-core>=1.0",
+    "httpx>=0.27",
     "quadracode-contracts",
     "redis>=5.0",
-    "hypothesis>=6.100.0",
+    "hypothesis>=6.100",
+    "pydantic>=2.0",
 ]
 
 [tool.uv.sources]
@@ -24,3 +25,10 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-mock>=3.15.1",
+    "python-dotenv>=1.2.1",
+]

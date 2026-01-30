@@ -7,6 +7,13 @@ It provides the `build_graph` function, which assembles the various nodes
 two modes of operation: a full-featured mode with the context engine enabled, and 
 a simpler mode without it. It also handles the configuration of the graph's 
 checkpointer, which is responsible for persisting the state of the graph.
+
+Environment Variables:
+    QUADRACODE_MOCK_MODE: When "true", enables mock mode for testing/development
+                          without external dependencies (uses in-memory Redis mock
+                          and MemorySaver checkpointer).
+    QUADRACODE_LOCAL_DEV_MODE: When "true", disables persistence features.
+    QUADRACODE_IN_CONTAINER: Set to "1" when running inside Docker container.
 """
 from __future__ import annotations
 
@@ -48,11 +55,29 @@ def _optional_bool(value: str | None) -> bool | None:
     return None
 
 
+def is_mock_mode() -> bool:
+    """
+    Check if mock mode is enabled via QUADRACODE_MOCK_MODE environment variable.
+    
+    When mock mode is enabled:
+    - Uses in-memory Redis mock (fakeredis) instead of real Redis
+    - Uses MemorySaver checkpointer instead of SQLite
+    - Allows the service to start without external dependencies
+    
+    Returns:
+        True if mock mode is enabled, False otherwise.
+    """
+    return _optional_bool(os.environ.get("QUADRACODE_MOCK_MODE")) is True
+
+
 def _running_inside_container() -> bool:
     return Path("/.dockerenv").exists() or os.environ.get("QUADRACODE_IN_CONTAINER") == "1"
 
 
 def _is_local_dev_mode() -> bool:
+    # Mock mode implies local dev mode behavior
+    if is_mock_mode():
+        return True
     override = _optional_bool(os.environ.get("QUADRACODE_LOCAL_DEV_MODE"))
     if override is not None:
         return override

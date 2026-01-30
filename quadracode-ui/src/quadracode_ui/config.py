@@ -2,6 +2,11 @@
 Configuration module for Quadracode UI.
 
 Centralizes all environment variable reads and configuration constants.
+
+Mock Mode (QUADRACODE_MOCK_MODE=true):
+- Uses fakeredis for in-memory Redis operations
+- Mocks agent registry API responses
+- Enables standalone UI testing without external dependencies
 """
 
 import os
@@ -23,6 +28,21 @@ def _int_env(var_name: str, default: int) -> int:
     except ValueError:
         return default
 
+
+def _bool_env(var_name: str, default: bool = False) -> bool:
+    """
+    Safely reads a boolean value from an environment variable.
+
+    Returns True for "true", "1", "yes", "on" (case insensitive).
+    """
+    value = os.environ.get(var_name, "").lower().strip()
+    if not value:
+        return default
+    return value in ("true", "1", "yes", "on")
+
+
+# Mock mode - enables standalone operation without Redis/agent-registry
+MOCK_MODE = _bool_env("QUADRACODE_MOCK_MODE", False)
 
 # Redis configuration
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")

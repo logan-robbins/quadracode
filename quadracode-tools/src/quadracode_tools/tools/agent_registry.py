@@ -15,7 +15,7 @@ from typing import Literal, Optional
 
 import httpx
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_TIMEOUT = 10.0
 
@@ -87,21 +87,20 @@ class AgentRegistryRequest(BaseModel):
         description="Desired hotpath flag for update_hotpath operations.",
     )
 
-    @root_validator(skip_on_failure=True)
-    def _validate_requirements(cls, values):  # type: ignore[override]
-        op = values.get("operation")
-        agent_id = values.get("agent_id")
-        if op in {"get_agent", "heartbeat", "unregister_agent", "update_hotpath"} and not agent_id:
+    @model_validator(mode="after")
+    def _validate_requirements(self) -> "AgentRegistryRequest":
+        if self.operation in {"get_agent", "heartbeat", "unregister_agent", "update_hotpath"} and not self.agent_id:
             raise ValueError("agent_id is required for the requested operation")
-        if op == "register_agent":
-            missing = [name for name in ("agent_id", "host", "port") if values.get(name) in (None, "")]
+        if self.operation == "register_agent":
+            missing = [
+                name for name, value in [("agent_id", self.agent_id), ("host", self.host), ("port", self.port)]
+                if value in (None, "")
+            ]
             if missing:
-                raise ValueError(
-                    "register_agent requires agent_id, host, and port"
-                )
-        if op == "update_hotpath" and values.get("hotpath") is None:
+                raise ValueError("register_agent requires agent_id, host, and port")
+        if self.operation == "update_hotpath" and self.hotpath is None:
             raise ValueError("update_hotpath requires the 'hotpath' flag")
-        return values
+        return self
 
 
 def _registry_base_url() -> str:

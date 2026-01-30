@@ -8,6 +8,8 @@ providing a clean and simple API for publishing, reading, and deleting messages
 from Redis streams. The module is designed to be a self-contained component for 
 all Redis-based messaging in the Quadracode runtime, ensuring that all 
 interactions with the message bus are consistent and robust.
+
+Supports mock mode for standalone testing via QUADRACODE_MOCK_MODE=true.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from langchain_core.tools import BaseTool
 from quadracode_contracts import MessageEnvelope, mailbox_key
 
 from .tools.mcp_loader import aget_mcp_tools
+from .mock_mode import is_mock_mode, get_mock_redis_tools, MockRedisMCPMessaging
 
 _REQUIRED_TOOLS = {"xadd", "xrange", "xdel"}
 _TOOL_CACHE: Dict[str, BaseTool] | None = None
@@ -31,9 +34,17 @@ async def _ensure_tool_cache() -> Dict[str, BaseTool]:
     This function ensures that the necessary Redis tools (`xadd`, `xrange`, `xdel`) 
     are loaded from the MCP server and are available for use. It caches the 
     tools to avoid the overhead of repeated loading.
+    
+    In mock mode, uses in-memory mock tools instead of real MCP tools.
     """
     global _TOOL_CACHE
     if _TOOL_CACHE is None:
+        # Use mock tools in mock mode
+        if is_mock_mode():
+            mock_tools = get_mock_redis_tools()
+            _TOOL_CACHE = {tool.name: tool for tool in mock_tools}
+            return _TOOL_CACHE
+        
         tools = await aget_mcp_tools()
         tool_map = {tool.name: tool for tool in tools if tool.name in _REQUIRED_TOOLS}
         missing = _REQUIRED_TOOLS - tool_map.keys()
@@ -46,16 +57,25 @@ async def _ensure_tool_cache() -> Dict[str, BaseTool]:
     return _TOOL_CACHE
 
 
-def _parse_stream_response(raw: str) -> List[Tuple[str, MessageEnvelope]]:
+def _parse_stream_response(raw) -> List[Tuple[str, MessageEnvelope]]:
     """
-    Parses the raw string response from an `xrange` command into a list of 
-    message envelopes.
+    Parses the response from an `xrange` command into a list of message envelopes.
+    Handles both string responses (for parsing) and pre-parsed list responses.
     """
-    if not raw or raw.startswith("Stream "):
+    if not raw:
         return []
-    try:
-        parsed = ast.literal_eval(raw)
-    except (ValueError, SyntaxError):
+    
+    # Handle already-parsed list response (from newer MCP/Redis clients)
+    if isinstance(raw, list):
+        parsed = raw
+    elif isinstance(raw, str):
+        if raw.startswith("Stream "):
+            return []
+        try:
+            parsed = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            return []
+    else:
         return []
 
     entries: List[Tuple[str, MessageEnvelope]] = []
@@ -101,7 +121,13 @@ class RedisMCPMessaging:
         """
         Asynchronously creates and initializes a new `RedisMCPMessaging` 
         instance.
+        
+        In mock mode, returns a MockRedisMCPMessaging instance instead.
         """
+        # Return mock implementation in mock mode
+        if is_mock_mode():
+            return await MockRedisMCPMessaging.create()  # type: ignore[return-value]
+        
         tools = await _ensure_tool_cache()
         return cls(tools)
 

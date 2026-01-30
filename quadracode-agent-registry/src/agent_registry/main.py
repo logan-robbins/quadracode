@@ -2,21 +2,15 @@
 This module serves as the main entry point for running the agent registry 
 service.
 
-It initializes the FastAPI application using the `create_app` factory and then 
-uses `uvicorn` to run the application as an ASGI server. This script is intended 
-to be executed directly to start the service, and it handles the configuration 
-of the server based on the application's settings.
+It uses `uvicorn` to run the application as an ASGI server. This script is 
+intended to be executed directly to start the service, and it handles the 
+configuration of the server based on the application's settings.
 """
 import logging
 
 import uvicorn
 
-from .app import create_app
 from .config import RegistrySettings
-
-
-# ASGI application
-app = create_app()
 
 
 def main():
@@ -31,7 +25,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     settings = RegistrySettings()
     uvicorn.run(
-        "agent_registry.main:app",
+        "agent_registry.app:app",
         host="0.0.0.0",
         port=settings.registry_port,
         reload=False,

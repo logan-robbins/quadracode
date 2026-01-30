@@ -17,6 +17,8 @@ from .config import RegistrySettings
 from .database import Database
 from .service import AgentRegistryService
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> FastAPI:
     """
@@ -34,13 +36,24 @@ def create_app() -> FastAPI:
 
     # Initialize settings, database, and service synchronously
     settings = RegistrySettings()
+    
+    # Log mock mode status
+    if settings.quadracode_mock_mode:
+        logger.info("QUADRACODE_MOCK_MODE=true: Using in-memory SQLite database")
+    else:
+        logger.info(f"Using SQLite database at: {settings.database_path}")
+    
     db = Database(settings.database_path)
     db.init_schema()
     service = AgentRegistryService(db=db, settings=settings)
 
+    description = "Lightweight registry for Quadracode agents (SQLite-backed)"
+    if settings.quadracode_mock_mode:
+        description += " [MOCK MODE: in-memory database]"
+
     app = FastAPI(
         title="Quadracode Agent Registry",
-        description="Lightweight registry for Quadracode agents (SQLite-backed)",
+        description=description,
         version="1.0.0",
     )
 
@@ -53,3 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(get_router(service))
 
     return app
+
+
+# Create the ASGI app instance for uvicorn
+app = create_app()

@@ -2,10 +2,12 @@
 System Dashboard page for Quadracode UI.
 
 This page provides system-wide metrics, agent registry status, and observability.
+Supports QUADRACODE_MOCK_MODE for standalone testing with mock data.
 """
 
 import json
 from collections import Counter
+from datetime import datetime, timezone
 
 import httpx
 import pandas as pd
@@ -19,6 +21,7 @@ from quadracode_ui.config import (
     CONTEXT_METRICS_LIMIT,
     CONTEXT_METRICS_STREAM,
     AUTONOMOUS_EVENTS_STREAM,
+    MOCK_MODE,
     UI_BARE,
 )
 from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
@@ -35,15 +38,66 @@ if not success:
     st.error(f"❌ Unable to connect to Redis: {error}")
     st.stop()
 
+# Show mock mode indicator
+if MOCK_MODE:
+    st.info("🧪 **Mock Mode Active** - Using simulated data for demonstration")
+
 # Header
 st.title("📊 System Dashboard")
 st.caption("Overview of system health, metrics, and agent activity")
+
+
+def _get_mock_agent_registry_data() -> dict:
+    """Returns mock agent registry data for demonstration."""
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "agents": [
+            {
+                "id": "orchestrator",
+                "status": "healthy",
+                "type": "orchestrator",
+                "last_heartbeat": now,
+                "hotpath": False,
+                "port": 8123,
+                "capabilities": ["coordination", "task_dispatch"],
+            },
+            {
+                "id": "agent-001",
+                "status": "healthy",
+                "type": "worker",
+                "last_heartbeat": now,
+                "hotpath": True,
+                "port": 8124,
+                "capabilities": ["code_execution", "file_operations"],
+            },
+            {
+                "id": "agent-002",
+                "status": "idle",
+                "type": "worker",
+                "last_heartbeat": now,
+                "hotpath": False,
+                "port": 8125,
+                "capabilities": ["research", "summarization"],
+            },
+        ],
+        "stats": {
+            "total_agents": 3,
+            "healthy_agents": 2,
+            "idle_agents": 1,
+            "unhealthy_agents": 0,
+        },
+        "error": None,
+    }
 
 
 # Helper functions
 @st.cache_data(ttl=5.0, show_spinner=False)
 def fetch_agent_registry_data():
     """Fetches agent registry data."""
+    # In mock mode, return simulated data
+    if MOCK_MODE:
+        return _get_mock_agent_registry_data()
+    
     if UI_BARE or not AGENT_REGISTRY_URL:
         return {"agents": [], "stats": None, "error": "Registry not configured"}
     

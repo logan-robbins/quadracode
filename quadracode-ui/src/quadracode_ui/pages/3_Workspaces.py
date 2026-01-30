@@ -2,6 +2,7 @@
 Workspaces page for Quadracode UI.
 
 This page provides workspace management and file browsing capabilities.
+Note: Workspace operations require Docker - limited functionality in mock mode.
 """
 
 from pathlib import Path
@@ -10,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from quadracode_ui.components.file_browser import render_workspace_file_browser
-from quadracode_ui.config import WORKSPACE_EXPORT_ROOT
+from quadracode_ui.config import MOCK_MODE, WORKSPACE_EXPORT_ROOT
 from quadracode_ui.utils.persistence import (
     load_all_workspace_descriptors,
     save_workspace_descriptor,
@@ -47,6 +48,13 @@ if not success:
 # Header
 st.title("📁 Workspace Browser")
 st.caption("Inspect workspaces, files, and artifacts created by agents")
+
+# Show mock mode warning for workspaces
+if MOCK_MODE:
+    st.warning(
+        "🧪 **Mock Mode** - Workspace operations require Docker. "
+        "Create/destroy operations may fail. Event streams and snapshots work with mock Redis."
+    )
 
 # Initialize session state with persistence
 if "workspaces_loaded" not in st.session_state:

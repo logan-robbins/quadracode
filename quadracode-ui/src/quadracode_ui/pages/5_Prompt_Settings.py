@@ -4,6 +4,8 @@ Streamlit page for configuring LLM prompt templates.
 This page provides an interactive UI for viewing and editing all prompt templates
 used in the context engine and related components. Changes can be saved and applied
 to the runtime configuration.
+
+Supports QUADRACODE_MOCK_MODE for standalone testing.
 """
 
 import json
@@ -12,6 +14,7 @@ from pathlib import Path
 from typing import Dict, Any
 import yaml
 
+from quadracode_ui.config import MOCK_MODE
 from quadracode_ui.utils.config_sync import get_config_sync
 from quadracode_ui.utils.redis_client import get_redis_client
 
@@ -36,6 +39,10 @@ st.markdown("""
 Configure the prompt templates used by the context engine and other LLM-based components.
 These prompts control how the system manages context, performs compression, and makes decisions.
 """)
+
+# Show mock mode indicator
+if MOCK_MODE:
+    st.info("🧪 **Mock Mode** - Configuration changes stored in mock Redis (memory only)")
 
 # Initialize Redis client and config sync
 redis_client = get_redis_client()
