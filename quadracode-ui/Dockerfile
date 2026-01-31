@@ -51,11 +51,11 @@ ENV REDIS_HOST="redis" \
 
 EXPOSE 8501
 
-# Health check for standalone operation
+# Health check for standalone operation (using Python since curl is not available)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2)" || exit 1
 
-CMD ["uv", "run", "streamlit", "run", "src/quadracode_ui/app.py", \
+CMD ["streamlit", "run", "src/quadracode_ui/app.py", \
      "--server.address", "0.0.0.0", \
      "--server.port", "8501", \
      "--server.headless", "true"]
