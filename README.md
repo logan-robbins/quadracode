@@ -2,6 +2,8 @@
 
 **An always-on, LangGraph-native orchestration platform for asynchronous, long-running AI workloads with dynamic agent fleet management.**
 
+<img width="1565" height="807" alt="image" src="https://github.com/user-attachments/assets/7d6423c9-dd87-4541-aba6-56bf061e0d63" />
+
 Quadracode is a production-ready framework that enables AI agents to handle complex, multi-step tasks that span minutes, hours, or days—without blocking, without losing state, and without manual intervention. Built on Redis Streams, LangGraph checkpointing, and MCP-aware tooling, Quadracode provides the infrastructure you need to deploy resilient, self-scaling AI agent systems.
 
 ## Why Quadracode?
