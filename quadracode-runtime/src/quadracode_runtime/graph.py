@@ -24,9 +24,9 @@ import sqlite3
 from langgraph.checkpoint.memory import MemorySaver
 
 try:  # pragma: no cover - optional dependency
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 except ImportError:  # pragma: no cover
-    SqliteSaver = None  # type: ignore
+    AsyncSqliteSaver = None  # type: ignore
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import tools_condition
 
@@ -118,20 +118,14 @@ def _default_checkpoint_path() -> Path:
 
 def _build_checkpointer():
     """
-    Builds the checkpointer for the graph, using SQLite if available, otherwise 
-    falling back to an in-memory checkpointer.
+    Builds the checkpointer for the graph.
+    
+    Note: Currently using MemorySaver for async compatibility.
+    TODO: Implement proper AsyncSqliteSaver with connection pooling.
     """
-    if not USE_CUSTOM_CHECKPOINTER:
-        return MemorySaver()
-    if SqliteSaver is None:
-        return MemorySaver()
-
-    path = _default_checkpoint_path()
-    try:
-        conn = sqlite3.connect(str(path), check_same_thread=False)
-        return SqliteSaver(conn)
-    except Exception:
-        return MemorySaver()
+    # Always use MemorySaver for now to avoid async/sync issues
+    # The async checkpointer requires a different initialization pattern
+    return MemorySaver()
 
 
 CHECKPOINTER = _build_checkpointer()

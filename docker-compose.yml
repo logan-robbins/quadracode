@@ -23,6 +23,7 @@ x-orchestrator-base: &orchestrator-base
     <<: *python-env
     QUADRACODE_ID: orchestrator
     QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
+    QUADRACODE_DRIVER_MODEL: "anthropic:claude-sonnet-4-5-20250929"
   depends_on:
     redis:
       condition: service_healthy
@@ -44,6 +45,7 @@ x-agent-base: &agent-base
     <<: *python-env
     QUADRACODE_ID: agent-compose
     QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
+    QUADRACODE_DRIVER_MODEL: "anthropic:claude-haiku-4-5"
   depends_on:
     redis:
       condition: service_healthy
@@ -148,6 +150,8 @@ services:
       QUADRACODE_SCRIPTS_DIR: /app/scripts/agent-management
       AGENT_RUNTIME_PLATFORM: docker
       QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
+      QUADRACODE_DRIVER_MODEL: "anthropic:claude-sonnet-4-5-20250929"
+      QUADRACODE_ID: orchestrator
     volumes:
       - shared-data:/shared
       - mcp-remote-cache:/var/lib/mcp-remote
@@ -179,6 +183,7 @@ services:
       <<: *python-env
       QUADRACODE_ID: agent-runtime
       QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
+      QUADRACODE_DRIVER_MODEL: "anthropic:claude-haiku-4-5"
 
     command: ["python", "-m", "quadracode_agent"]
     healthcheck:

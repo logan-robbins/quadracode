@@ -50,7 +50,6 @@ WORKDIR /app/quadracode-orchestrator
 COPY quadracode-orchestrator/pyproject.toml ./pyproject.toml
 COPY quadracode-orchestrator/uv.lock ./uv.lock
 COPY quadracode-orchestrator/langgraph-docker.json ./langgraph-docker.json
-COPY .env ./.env
 COPY quadracode-orchestrator/src/quadracode_orchestrator ./quadracode_orchestrator
 
 # Install orchestrator dependencies and project in the uv-managed environment

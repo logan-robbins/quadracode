@@ -147,7 +147,9 @@ def make_driver(system_prompt: str, tools: list) -> callable:
 
         return heuristic_driver
 
-    llm = init_chat_model("anthropic:claude-sonnet-4-20250514")
+    # Use environment variable for model selection, with fallback to Sonnet 4.5
+    model_name = os.environ.get("QUADRACODE_DRIVER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    llm = init_chat_model(model_name)
 
     def driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
         """
@@ -159,6 +161,9 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         LLM with this context to generate the next action.
         """
         msgs: list[AnyMessage] = state["messages"]
+        LOGGER.info(f"Driver starting with {len(msgs)} messages")
+        for i, msg in enumerate(msgs):
+            LOGGER.info(f"  Message {i}: {type(msg).__name__} - {str(msg)[:100]}")
         outline = state.get("governor_prompt_outline", {}) if isinstance(state, dict) else {}
         system_sections = [system_prompt]
 
@@ -256,12 +261,12 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         
         # Inject context segments into the conversation
         context_segments = state.get("context_segments", []) if isinstance(state, dict) else []
+        ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
         LOGGER.info(f"DEBUG: Driver received state with {len(context_segments)} context_segments")
         for seg in context_segments:
             LOGGER.info(f"DEBUG: Segment: {seg.get('id')} - {seg.get('type')}")
         if context_segments:
             # Build context injection from segments marked in governor's ordered_segments
-            ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
             context_blocks = []
 
             LOGGER.info(f"Driver context injection: {len(context_segments)} total segments, {len(ordered_segments)} ordered")

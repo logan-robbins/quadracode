@@ -61,11 +61,18 @@ def _parse_stream_response(raw) -> List[Tuple[str, MessageEnvelope]]:
     """
     Parses the response from an `xrange` command into a list of message envelopes.
     Handles both string responses (for parsing) and pre-parsed list responses.
+    Also handles LangChain tool response format with {'type': 'text', 'text': '...'}.
     """
     if not raw:
         return []
     
-    # Handle already-parsed list response (from newer MCP/Redis clients)
+    # Handle LangChain tool response format: [{'type': 'text', 'text': '...'}]
+    if isinstance(raw, list) and len(raw) > 0:
+        if isinstance(raw[0], dict) and 'text' in raw[0]:
+            # Extract the text field from the LangChain response
+            raw = raw[0]['text']
+    
+    # Now parse the actual Redis data
     if isinstance(raw, list):
         parsed = raw
     elif isinstance(raw, str):

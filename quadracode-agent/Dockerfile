@@ -42,7 +42,6 @@ WORKDIR /app/quadracode-agent
 COPY quadracode-agent/pyproject.toml ./pyproject.toml
 COPY quadracode-agent/uv.lock ./uv.lock
 COPY quadracode-agent/langgraph-docker.json ./langgraph-docker.json
-COPY .env ./.env
 COPY quadracode-agent/src/quadracode_agent ./quadracode_agent
 
 # Install agent dependencies and project in the uv-managed environment

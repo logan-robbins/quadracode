@@ -289,6 +289,36 @@ docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-r
 
 # Verify services are healthy
 docker compose ps
+
+# Quick test to verify end-to-end functionality
+# (Orchestrator uses claude-sonnet-4-5-20250929, Agent uses claude-haiku-4-5)
+python -c "
+import json, redis, uuid
+from datetime import datetime, timezone
+r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+chat_id = f'test-{uuid.uuid4()}'
+msg = 'Hello! Confirm the system is working.'
+env = {
+    'timestamp': datetime.now(timezone.utc).isoformat(),
+    'sender': 'human',
+    'recipient': 'orchestrator',
+    'message': msg,
+    'payload': json.dumps({
+        'chat_id': chat_id,
+        'messages': [{
+            'type': 'human',
+            'data': {
+                'content': msg,
+                'type': 'human',
+                'id': str(uuid.uuid4())
+            }
+        }]
+    })
+}
+r.xadd('qc:mailbox/orchestrator', env)
+print(f'✓ Test message sent (chat_id: {chat_id})')
+print('  Check http://localhost:8501 for response')
+"
 ```
 
 The orchestrator will have access to the Docker socket and can spawn additional agents and workspaces dynamically as workload requires.
@@ -669,6 +699,32 @@ uv run python tests/e2e_advanced/scripts/plot_metrics.py \
 
 ## Configuration
 
+### Model Configuration
+
+The LLM models used by orchestrator and agents are configured via environment variables in `docker-compose.yml` and `.env.docker`:
+
+- **Orchestrator**: Uses `claude-sonnet-4-5-20250929` (set via `QUADRACODE_DRIVER_MODEL`)
+- **Agents**: Use `claude-haiku-4-5` (set via `QUADRACODE_DRIVER_MODEL` in agent services)
+
+To change models, update the `QUADRACODE_DRIVER_MODEL` environment variable in the appropriate service section of `docker-compose.yml`:
+
+```yaml
+environment:
+  QUADRACODE_DRIVER_MODEL: "anthropic:claude-sonnet-4-5-20250929"  # or any other model
+```
+
+Supported model formats:
+- `anthropic:claude-sonnet-4-5-20250929`
+- `anthropic:claude-haiku-4-5`
+- `openai:gpt-4` (requires `OPENAI_API_KEY`)
+
+After changing models, rebuild and restart the services:
+
+```bash
+docker compose build orchestrator-runtime agent-runtime
+docker compose up -d orchestrator-runtime agent-runtime
+```
+
 ### Context Engine Configuration
 
 You can tune the context engine at runtime using environment variables. These are picked up automatically by the orchestrator and agent runtimes.
@@ -709,3 +765,21 @@ Other advanced settings for metrics, quality thresholds, and externalization are
 | streamlit | >=1.40 | UI framework |
 | redis | >=5.0 | Redis client |
 | fakeredis | >=2.20 | Mock Redis for testing |
+
+## Recent Fixes & Updates
+
+### Messaging & Persistence (Jan 2026)
+
+1. **Fixed LangChain Tool Response Parsing**: Updated `_parse_stream_response` in `quadracode-runtime/src/quadracode_runtime/messaging.py` to handle LangChain tool response format `[{'type': 'text', 'text': '...'}]`
+
+2. **Fixed Async Checkpointer**: Switched from `SqliteSaver` to `MemorySaver` for async compatibility. Proper AsyncSqliteSaver implementation pending.
+
+3. **Fixed Driver UnboundLocalError**: Moved `ordered_segments` variable definition outside conditional block in `driver.py` to prevent UnboundLocalError when context_segments is empty.
+
+4. **Removed Baked .env Files**: Removed `COPY .env` from Dockerfiles to prevent environment variable conflicts. Configuration now properly flows from `docker-compose.yml` and `.env.docker`.
+
+5. **Updated Default Models**:
+   - Orchestrator: `claude-sonnet-4-5-20250929` (from `claude-sonnet-4-20250514`)
+   - Agents: `claude-haiku-4-5`
+
+6. **Enhanced Debug Logging**: Added comprehensive debug logging to `_extract_messages` and driver nodes for easier troubleshooting.

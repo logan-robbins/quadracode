@@ -538,11 +538,15 @@ class RuntimeRunner:
         config = {"configurable": configurable, "recursion_limit": GRAPH_RECURSION_LIMIT}
 
         has_checkpoint = CHECKPOINTER.get_tuple(config) is not None
+        LOGGER.info(f"Processing envelope: has_checkpoint={has_checkpoint}, include_history={not has_checkpoint}")
+        LOGGER.info(f"Payload keys: {list(payload.keys())}")
+        LOGGER.info(f"Payload.messages type: {type(payload.get('messages'))}, len: {len(payload.get('messages', []))}")
         messages = _extract_messages(
             payload,
             envelope,
             include_history=not has_checkpoint,
         )
+        LOGGER.info(f"Extracted {len(messages)} messages")
         state: RuntimeState = {"messages": messages, "thread_id": thread_id}
         state["_last_envelope_sender"] = envelope.sender
 
@@ -900,24 +904,33 @@ def _extract_messages(
     include_history: bool,
 ) -> Sequence[BaseMessage]:
     """Extracts a sequence of `BaseMessage` objects from the payload."""
+    LOGGER.debug(f"_extract_messages: include_history={include_history}, payload_keys={list(payload.keys())}")
+    
     if include_history:
         state_payload = payload.get("state")
         if isinstance(state_payload, dict):
             messages_raw = state_payload.get("messages")
             if isinstance(messages_raw, list):
+                LOGGER.debug(f"Found messages in state.messages: {len(messages_raw)} items")
                 try:
-                    return messages_from_dict(messages_raw)
-                except Exception:  # noqa: BLE001
-                    pass
+                    result = messages_from_dict(messages_raw)
+                    LOGGER.debug(f"Successfully parsed {len(result)} messages from state")
+                    return result
+                except Exception as e:  # noqa: BLE001
+                    LOGGER.warning(f"Failed to parse messages from state: {e}")
 
         messages_raw = payload.get("messages")
         if isinstance(messages_raw, list):
+            LOGGER.debug(f"Found messages in payload: {len(messages_raw)} items")
             try:
-                return messages_from_dict(messages_raw)
-            except Exception:  # noqa: BLE001
-                pass
+                result = messages_from_dict(messages_raw)
+                LOGGER.debug(f"Successfully parsed {len(result)} messages from payload")
+                return result
+            except Exception as e:  # noqa: BLE001
+                LOGGER.warning(f"Failed to parse messages from payload: {e}")
 
     if envelope.message:
+        LOGGER.debug(f"Using envelope.message as fallback: {envelope.message[:50]}")
         return [HumanMessage(content=envelope.message)]
 
     if not include_history:
@@ -930,6 +943,7 @@ def _extract_messages(
             except Exception:  # noqa: BLE001
                 pass
 
+    LOGGER.warning("No messages extracted, returning empty list")
     return []
 
 
