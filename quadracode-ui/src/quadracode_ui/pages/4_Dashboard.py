@@ -53,7 +53,7 @@ def _get_mock_agent_registry_data() -> dict:
     return {
         "agents": [
             {
-                "id": "orchestrator",
+                "agent_id": "orchestrator",
                 "status": "healthy",
                 "type": "orchestrator",
                 "last_heartbeat": now,
@@ -62,7 +62,7 @@ def _get_mock_agent_registry_data() -> dict:
                 "capabilities": ["coordination", "task_dispatch"],
             },
             {
-                "id": "agent-001",
+                "agent_id": "agent-a1b2c3",
                 "status": "healthy",
                 "type": "worker",
                 "last_heartbeat": now,
@@ -71,7 +71,7 @@ def _get_mock_agent_registry_data() -> dict:
                 "capabilities": ["code_execution", "file_operations"],
             },
             {
-                "id": "agent-002",
+                "agent_id": "agent-d4e5f6",
                 "status": "idle",
                 "type": "worker",
                 "last_heartbeat": now,
@@ -220,7 +220,7 @@ with overview_tab:
             agent_data = []
             for agent in agents:
                 agent_data.append({
-                    "Agent ID": agent.get("id", ""),
+                    "Agent ID": agent.get("agent_id", ""),
                     "Status": agent.get("status", ""),
                     "Type": agent.get("type", ""),
                     "Last Heartbeat": agent.get("last_heartbeat", ""),
@@ -285,17 +285,17 @@ with agents_tab:
             
             # Agent activity drill-down
             st.subheader("Agent Activity Drill-Down")
-            
+
             # Agent selector
-            agent_ids = [agent.get("id", "unknown") for agent in agents]
+            agent_ids = [agent.get("agent_id", "unknown") for agent in agents]
             selected_agent = st.selectbox(
                 "Select agent to view details",
                 options=agent_ids,
                 key="agent_selector",
             )
-            
+
             if selected_agent:
-                agent_info = next((a for a in agents if a.get("id") == selected_agent), None)
+                agent_info = next((a for a in agents if a.get("agent_id") == selected_agent), None)
                 
                 if agent_info:
                     # Agent metadata cards
@@ -339,7 +339,7 @@ with agents_tab:
                         st.markdown("**Agent Configuration**")
                         config_data = {
                             k: v for k, v in agent_info.items()
-                            if k not in ["id", "status", "type", "last_heartbeat", "hotpath"]
+                            if k not in ["agent_id", "status", "type", "last_heartbeat", "hotpath"]
                         }
                         if config_data:
                             st.json(config_data)
@@ -355,7 +355,7 @@ with agents_tab:
             # All agents summary table
             st.subheader("All Agents Summary")
             for agent in agents:
-                with st.expander(f"🤖 {agent.get('id', 'unknown')}", expanded=False):
+                with st.expander(f"🤖 {agent.get('agent_id', 'unknown')}", expanded=False):
                     st.json(agent)
 
 with metrics_tab:

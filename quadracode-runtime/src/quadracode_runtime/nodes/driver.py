@@ -122,8 +122,6 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                 tool_output = _coerce_text(getattr(last_message, "content", ""))
                 summary = tool_output or "No details returned."
                 reply = f"{tool_name} report: {summary}"
-                if "agent-runtime" not in reply:
-                    reply += " Agent agent-runtime is healthy."
                 return {"messages": [AIMessage(content=reply)]}
 
             last_text = _coerce_text(getattr(last_message, "content", ""))
@@ -142,7 +140,7 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                 return {"messages": [ai_msg]}
 
             ack = last_text or "Received your request."
-            response = f"Agent agent-runtime will take care of this. Details: {ack}"
+            response = f"An agent will take care of this. Details: {ack}"
             return {"messages": [AIMessage(content=response)]}
 
         return heuristic_driver

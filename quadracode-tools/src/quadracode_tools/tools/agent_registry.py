@@ -124,12 +124,14 @@ def _format_json(payload: object) -> str:
 def agent_registry_tool(
     operation: str,
     healthy_only: bool = False,
+    hotpath_only: bool = False,
     limit: int = 50,
     agent_id: str | None = None,
     host: str | None = None,
     port: int | None = None,
     status: str | None = None,
     reported_at: datetime | None = None,
+    hotpath: bool | None = None,
 ) -> str:
     """Dispatches a REST API call to the Quadracode Agent Registry service.
 
@@ -159,12 +161,14 @@ def agent_registry_tool(
     params = AgentRegistryRequest(
         operation=operation,  # type: ignore[arg-type]
         healthy_only=healthy_only,
+        hotpath_only=hotpath_only,
         limit=limit,
         agent_id=agent_id,
         host=host,
         port=port,
         status=status,  # type: ignore[arg-type]
         reported_at=reported_at,
+        hotpath=hotpath,
     )
 
     base_url = _registry_base_url()

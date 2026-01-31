@@ -93,7 +93,8 @@ def docker_stack(check_prerequisites):
             wait_for_container("orchestrator-runtime", timeout=5)
             wait_for_container("agent-runtime", timeout=5)
             wait_for_redis(timeout=5)
-            wait_for_registry_agent("agent-runtime", timeout=10)
+            # Agent IDs are ephemeral (agent-{uuid}), wait for any agent to register
+            wait_for_registry_agent("agent-", timeout=10)
             
             # Containers are healthy, reuse them
             should_teardown = False
@@ -128,8 +129,8 @@ def docker_stack(check_prerequisites):
         wait_for_container("agent-runtime")
         wait_for_redis()
 
-        # Wait for agent to register
-        wait_for_registry_agent("agent-runtime", timeout=120)
+        # Wait for any agent to register (ephemeral IDs)
+        wait_for_registry_agent("agent-", timeout=120)
 
         # Flush Redis to start clean
         redis_cli("FLUSHALL")
@@ -211,8 +212,9 @@ def docker_stack_with_humanclone(check_prerequisites):
             wait_for_container("agent-runtime", timeout=5)
             wait_for_container("human-clone-runtime", timeout=5)
             wait_for_redis(timeout=5)
-            wait_for_registry_agent("agent-runtime", timeout=10)
-            
+            # Agent IDs are ephemeral (agent-{uuid}), wait for any agent to register
+            wait_for_registry_agent("agent-", timeout=10)
+
             # Containers are healthy, reuse them
             should_teardown = False
             redis_cli("FLUSHALL")  # Just flush Redis data
@@ -250,7 +252,8 @@ def docker_stack_with_humanclone(check_prerequisites):
         wait_for_container("human-clone-runtime")
         wait_for_redis()
 
-        wait_for_registry_agent("agent-runtime", timeout=120)
+        # Agent IDs are ephemeral (agent-{uuid}), wait for any agent to register
+        wait_for_registry_agent("agent-", timeout=120)
         redis_cli("FLUSHALL")
 
     yield
@@ -303,12 +306,13 @@ def stream_baselines():
     """Capture baseline stream IDs for comparison.
 
     Returns:
-        Dict with baseline stream IDs for common streams
+        Dict with baseline stream IDs for common streams.
+        Note: Agent mailbox baselines are not tracked since agent IDs are ephemeral.
     """
     return {
         "supervisor": get_last_stream_id(f"qc:mailbox/{SUPERVISOR_RECIPIENT}"),
         "orchestrator": get_last_stream_id("qc:mailbox/orchestrator"),
-        "agent_runtime": get_last_stream_id("qc:mailbox/agent-runtime"),
+        # Agent mailboxes are dynamic (agent-{uuid}), not tracked here
         "context_metrics": get_last_stream_id("qc:context:metrics"),
         "autonomous_events": get_last_stream_id("qc:autonomous:events"),
     }

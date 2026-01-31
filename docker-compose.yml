@@ -43,7 +43,7 @@ x-agent-base: &agent-base
     dockerfile: quadracode-agent/Dockerfile
   environment:
     <<: *python-env
-    QUADRACODE_ID: agent-compose
+    # QUADRACODE_ID is NOT set - agents auto-generate ephemeral IDs (agent-{uuid})
     QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
     QUADRACODE_DRIVER_MODEL: "anthropic:claude-haiku-4-5"
   depends_on:
@@ -181,7 +181,7 @@ services:
     <<: *agent-base
     environment:
       <<: *python-env
-      QUADRACODE_ID: agent-runtime
+      # QUADRACODE_ID is NOT set - agent auto-generates ephemeral ID (agent-{uuid})
       QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
       QUADRACODE_DRIVER_MODEL: "anthropic:claude-haiku-4-5"
 

@@ -16,7 +16,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]  # Go up 1 parent from tests/ to project root
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 COMPOSE_CMD = ["docker", "compose", "-f", str(COMPOSE_FILE)]
-AGENT_ID = "agent-runtime"
+# Agent IDs are now ephemeral (agent-{uuid}), discovered dynamically from registry
+AGENT_ID_PREFIX = "agent-"
 REQUIRED_ENV_VARS = [
     "ANTHROPIC_API_KEY",
 ]
@@ -291,7 +292,22 @@ def _fetch_registry_json(path: str) -> dict:
         return json.load(response)
 
 
-def wait_for_registry_agent(agent_id: str, *, timeout: int = 60) -> dict:
+def wait_for_registry_agent(agent_id_or_prefix: str, *, timeout: int = 60) -> dict:
+    """Wait for an agent to register.
+
+    Args:
+        agent_id_or_prefix: Either an exact agent ID or a prefix to match.
+            If the value ends with '-', it's treated as a prefix (e.g., 'agent-').
+            Otherwise, it's treated as an exact match.
+        timeout: Maximum time to wait in seconds.
+
+    Returns:
+        The agent record dict from the registry.
+
+    Raises:
+        TimeoutError: If no matching agent is found within timeout.
+    """
+    is_prefix = agent_id_or_prefix.endswith("-")
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -300,10 +316,15 @@ def wait_for_registry_agent(agent_id: str, *, timeout: int = 60) -> dict:
             payload = None
         if payload and isinstance(payload.get("agents"), list):
             for agent in payload["agents"]:
-                if agent.get("agent_id") == agent_id:
-                    return agent
+                aid = agent.get("agent_id", "")
+                if is_prefix:
+                    if aid.startswith(agent_id_or_prefix):
+                        return agent
+                else:
+                    if aid == agent_id_or_prefix:
+                        return agent
         time.sleep(2)
-    raise TimeoutError(f"Registry did not report agent {agent_id!r} within timeout")
+    raise TimeoutError(f"Registry did not report agent matching {agent_id_or_prefix!r} within timeout")
 
 
 def get_registry_stats() -> dict:

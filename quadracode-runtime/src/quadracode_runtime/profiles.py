@@ -1,20 +1,26 @@
 """
-This module is responsible for defining and loading the runtime profiles for the 
-different components of the Quadracode system, such as the orchestrator, agents, 
+This module is responsible for defining and loading the runtime profiles for the
+different components of the Quadracode system, such as the orchestrator, agents,
 and the HumanClone.
 
-A `RuntimeProfile` is a dataclass that encapsulates the core configuration for a 
-runtime component, including its name, default identity, system prompt, and a 
-`RecipientPolicy` that governs its message routing behavior. This module provides 
-a set of specialized `RecipientPolicy` classes and factory functions for creating 
-the different profiles, allowing for a clear and centralized definition of each 
+A `RuntimeProfile` is a dataclass that encapsulates the core configuration for a
+runtime component, including its name, default identity, system prompt, and a
+`RecipientPolicy` that governs its message routing behavior. This module provides
+a set of specialized `RecipientPolicy` classes and factory functions for creating
+the different profiles, allowing for a clear and centralized definition of each
 component's role and behavior within the system.
 """
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass, field
 from typing import Iterable, List, Mapping, Optional
+
+
+def _generate_agent_id() -> str:
+    """Generate a unique agent ID in the format 'agent-{short_uuid}'."""
+    return f"agent-{secrets.token_hex(4)}"
 
 from quadracode_contracts import (
     HUMAN_CLONE_RECIPIENT,
@@ -286,10 +292,10 @@ def _make_orchestrator_profile() -> RuntimeProfile:
 
 
 def _make_agent_profile() -> RuntimeProfile:
-    """Constructs the default agent profile."""
+    """Constructs the default agent profile with a unique ephemeral ID."""
     return RuntimeProfile(
         name="agent",
-        default_identity="agent",
+        default_identity=_generate_agent_id(),
         system_prompt=BASE_PROMPT,
         policy=AgentRecipientPolicy(
             fallback=ORCHESTRATOR_RECIPIENT,
