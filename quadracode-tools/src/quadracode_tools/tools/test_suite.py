@@ -113,6 +113,8 @@ def discover_test_commands(root: Path, *, include_e2e: bool = True) -> List[Disc
     if (root / "pyproject.toml").exists():
         _register(("uv", "run", "pytest"), root, "pyproject:root")
 
+    if not root.exists():
+        return []
     for child in sorted(root.iterdir(), key=lambda path: path.name):
         if not child.is_dir():
             continue

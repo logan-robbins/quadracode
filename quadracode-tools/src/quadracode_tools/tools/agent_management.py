@@ -184,6 +184,9 @@ def agent_management_tool(
     agent_id: str | None = None,
     image: str | None = None,
     network: str | None = None,
+    workspace_id: str | None = None,
+    workspace_volume: str | None = None,
+    workspace_mount: str | None = None,
 ) -> str:
     """Manages the lifecycle of Quadracode agents by spawning, deleting, or inspecting them.
 
