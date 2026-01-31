@@ -64,6 +64,7 @@ from .context_curator import ContextCurator
 from .context_operations import ContextOperation
 from .context_reducer import ContextReducer
 from .context_scorer import ContextScorer
+from .context_reset import ContextResetAgent
 from .progressive_loader import ProgressiveContextLoader
 
 
@@ -117,6 +118,11 @@ class ContextEngine:
         self.external_memory = _NoOpExternalMemory()
         self.metrics = ContextMetricsEmitter(config)
         self.reducer = ContextReducer(config)
+        self.context_reset_agent = ContextResetAgent(
+            config,
+            system_prompt=system_prompt,
+            reducer=self.reducer,
+        )
         self.max_tool_payload_chars = config.max_tool_payload_chars
         self.governor_model = (config.governor_model or "heuristic").lower()
         self._governor_llm = None
@@ -158,6 +164,24 @@ class ContextEngine:
         tool_messages = self._extract_tool_messages(state)
         return asyncio.run(self.handle_tool_response(state, tool_messages))
 
+    async def pre_process_node(self, state: QuadraCodeState) -> Dict[str, Any]:
+        updated = await self.pre_process(state)
+        return self._state_for_graph(updated)
+
+    async def post_process_node(self, state: QuadraCodeState) -> Dict[str, Any]:
+        updated = await self.post_process(state)
+        return self._state_for_graph(updated)
+
+    async def govern_context_node(self, state: QuadraCodeState) -> Dict[str, Any]:
+        updated = await self.govern_context(state)
+        return self._state_for_graph(updated)
+
+    async def handle_tool_response_node(
+        self, state: QuadraCodeState, tool_response: Any | None = None
+    ) -> Dict[str, Any]:
+        updated = await self.handle_tool_response(state, tool_response)
+        return self._state_for_graph(updated)
+
     async def pre_process(self, state: QuadraCodeState) -> Dict[str, Any]:
         """
         Executes the pre-processing stage of the context engineering pipeline.
@@ -177,6 +201,7 @@ class ContextEngine:
         # though shallow copy means mutable values are still shared, which is generally fine
         # for "replace" reducers, but we must be careful with "add_messages".
         state = state.copy()
+        original_messages = list(state.get("messages") or [])
         history_updates: dict[str, Any] = {}
         
         state = self._ensure_state_defaults(state)
@@ -209,8 +234,6 @@ class ContextEngine:
             # Compress conversation history and segments to fit
             history_updates = await self._manage_conversation_history(state, available_dynamic_space)
             if history_updates:
-                # Apply message updates and re-calculate usage
-                state["messages"].extend(history_updates.get("messages", []))
                 state = self._recompute_context_usage(state)
 
             # After message compression, check if segment compression is still needed
@@ -226,7 +249,14 @@ class ContextEngine:
         state = self._recompute_context_usage(state)
         state = await self._enforce_limits(state)
         await self._emit_load_metrics(state)
+        state, _ = await self._maybe_reset_context(state)
         state = await self._update_exhaustion_mode(state, stage="pre_process")
+        message_updates = self._build_message_updates(
+            original_messages,
+            list(state.get("messages") or []),
+        )
+        if message_updates:
+            state["_message_updates"] = message_updates
         # Invariant: at least one context update per cycle
         mark_context_updated(state)
         
@@ -259,7 +289,7 @@ class ContextEngine:
         # The reducer will remove messages with matching IDs and keep the rest.
         
         LOGGER.info(f"pre_process returning: {len(state.get('context_segments', []))} context_segments")
-        return {"context_segments": state.get("context_segments", [])}
+        return state
 
     async def post_process(self, state: QuadraCodeState) -> Dict[str, Any]:
         """
@@ -335,7 +365,7 @@ class ContextEngine:
         
         # IMPORTANT: Remove messages to prevent duplication via add_messages reducer
         state.pop("messages", None)
-        return {"context_segments": state.get("context_segments", [])}
+        return state
 
     async def govern_context(self, state: QuadraCodeState) -> QuadraCodeState:
         """
@@ -480,7 +510,7 @@ class ContextEngine:
             stage="handle_tool_response",
             tool_response=last_payload,
         )
-        return {"context_segments": state.get("context_segments", [])}
+        return state
 
     async def _decide_operation(
         self, relevance: float, state: QuadraCodeState
@@ -1169,13 +1199,18 @@ class ContextEngine:
         
         # Count tokens from messages
         message_tokens = self._count_message_tokens(state)
-        
-        # Total context window usage includes static prompt, segments and messages
-        total = self.system_prompt_tokens + segment_tokens + message_tokens
+
+        addendum = state.get("system_prompt_addendum")
+        addendum_tokens = self._estimate_tokens(addendum) if isinstance(addendum, str) else 0
+
+        # Total context window usage includes static prompt, addendum, segments and messages
+        total = self.system_prompt_tokens + addendum_tokens + segment_tokens + message_tokens
         state["context_window_used"] = int(total)
         
         # Store breakdown for observability
         state.setdefault("_context_breakdown", {})
+        state["_context_breakdown"]["system_prompt_tokens"] = int(self.system_prompt_tokens)
+        state["_context_breakdown"]["system_prompt_addendum_tokens"] = int(addendum_tokens)
         state["_context_breakdown"]["segment_tokens"] = int(segment_tokens)
         state["_context_breakdown"]["message_tokens"] = int(message_tokens)
         
@@ -1261,6 +1296,9 @@ class ContextEngine:
         updates: Dict[str, Any] = {
             "messages": [RemoveMessage(id=msg.id) for msg in summarization_candidates if msg.id]
         }
+
+        # Apply trimming to the state for direct-call semantics
+        state["messages"] = list(messages_to_keep)
         
         # Create a new context segment for the summary
         segment: ContextSegment = {
@@ -1305,6 +1343,53 @@ class ContextEngine:
         }
         
         return updates
+
+    async def _maybe_reset_context(
+        self, state: QuadraCodeState
+    ) -> tuple[QuadraCodeState, Any | None]:
+        before_tokens = int(state.get("context_window_used", 0) or 0)
+        before_ratio = self._context_ratio(state)
+        updated, did_reset, artifacts = await self.context_reset_agent.reset_if_needed(state)
+        if not did_reset or artifacts is None:
+            return state, None
+        updated = self._recompute_context_usage(updated)
+        after_tokens = int(updated.get("context_window_used", 0) or 0)
+        payload = {
+            "reset_id": artifacts.reset_id,
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "before_ratio": before_ratio,
+            "history_path": artifacts.history_path,
+            "trimmed_history_path": artifacts.trimmed_history_path,
+            "segments_path": artifacts.segments_path,
+            "summary_path": artifacts.summary_path,
+            "system_prompt_path": artifacts.system_prompt_path,
+        }
+        await self.metrics.emit(updated, "context_reset", payload)
+        self.time_travel.log_transition(
+            updated,
+            event="context_reset",
+            payload=payload,
+            state_update={"context_window_used": after_tokens},
+        )
+        return updated, artifacts
+
+    @staticmethod
+    def _build_message_updates(
+        original: List[BaseMessage],
+        updated: List[BaseMessage],
+    ) -> List[RemoveMessage]:
+        updated_ids = {
+            msg.id for msg in updated if getattr(msg, "id", None)
+        }
+        removals: List[RemoveMessage] = []
+        for message in original:
+            message_id = getattr(message, "id", None)
+            if not message_id:
+                continue
+            if message_id not in updated_ids:
+                removals.append(RemoveMessage(id=message_id))
+        return removals
 
     def _count_message_tokens(self, state: QuadraCodeState) -> int:
         """
@@ -1650,9 +1735,15 @@ class ContextEngine:
         action_taken: Optional[str] = None
 
         if mode is ExhaustionMode.CONTEXT_SATURATION:
-            state = await self.curator.optimize(state)
-            state = self._recompute_context_usage(state)
-            action_taken = "context_compaction"
+            reset_state, reset_artifacts = await self._maybe_reset_context(state)
+            if reset_artifacts:
+                state.clear()
+                state.update(reset_state)
+                action_taken = "context_reset"
+            else:
+                state = await self.curator.optimize(state)
+                state = self._recompute_context_usage(state)
+                action_taken = "context_compaction"
         elif mode is ExhaustionMode.TOOL_BACKPRESSURE:
             backlog = list(state.get("prefetch_queue", []))
             limit = getattr(self.config, "prefetch_queue_limit", 20)
@@ -2029,6 +2120,15 @@ class ContextEngine:
                 seen.add(value)
                 result.append(value)
         return result
+
+    def _state_for_graph(self, state: QuadraCodeState) -> Dict[str, Any]:
+        updates = dict(state)
+        message_updates = updates.pop("_message_updates", None)
+        if message_updates:
+            updates["messages"] = message_updates
+        else:
+            updates.pop("messages", None)
+        return updates
 
     def _update_curation_rules(
         self, state: QuadraCodeState, reflection: ReflectionResult

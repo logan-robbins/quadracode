@@ -120,6 +120,14 @@ class ContextEngineConfig:
     # Externalization persistence
     externalize_write_enabled: bool = False
 
+    # Context reset (hard reset via disk artifacts)
+    context_reset_enabled: bool = True
+    context_reset_trigger_ratio: float = 0.92
+    context_reset_trigger_tokens: int = 0  # override ratio when >0
+    context_reset_keep_turns: int = 4  # keep last N user turns verbatim
+    context_reset_min_user_turns: int = 6
+    context_reset_root: str = ""  # defaults to external_memory_path/context_resets
+
     # Scoring weights (sum to 1.0)
     scoring_weights: Dict[str, float] = field(
         default_factory=lambda: {
@@ -223,6 +231,15 @@ class ContextEngineConfig:
         base.reducer_target_tokens = _int("QUADRACODE_REDUCER_TARGET_TOKENS", base.reducer_target_tokens)
         base.governor_max_segments = _int("QUADRACODE_GOVERNOR_MAX_SEGMENTS", base.governor_max_segments)
         base.quality_threshold = _float("QUADRACODE_QUALITY_THRESHOLD", base.quality_threshold)
+        base.context_reset_trigger_tokens = _int(
+            "QUADRACODE_CONTEXT_RESET_TRIGGER_TOKENS", base.context_reset_trigger_tokens
+        )
+        base.context_reset_keep_turns = _int(
+            "QUADRACODE_CONTEXT_RESET_KEEP_TURNS", base.context_reset_keep_turns
+        )
+        base.context_reset_min_user_turns = _int(
+            "QUADRACODE_CONTEXT_RESET_MIN_USER_TURNS", base.context_reset_min_user_turns
+        )
 
         # String overrides
         base.reducer_model = os.environ.get("QUADRACODE_REDUCER_MODEL", base.reducer_model)
@@ -236,11 +253,18 @@ class ContextEngineConfig:
             "QUADRACODE_AUTONOMOUS_STREAM_KEY",
             base.autonomous_metrics_stream_key,
         )
+        base.context_reset_root = os.environ.get("QUADRACODE_CONTEXT_RESET_ROOT", base.context_reset_root)
 
         # Booleans
         base.metrics_enabled = _bool("QUADRACODE_METRICS_ENABLED", base.metrics_enabled)
         base.externalize_write_enabled = _bool(
             "QUADRACODE_EXTERNALIZE_WRITE_ENABLED", base.externalize_write_enabled
+        )
+        base.context_reset_enabled = _bool(
+            "QUADRACODE_CONTEXT_RESET_ENABLED", base.context_reset_enabled
+        )
+        base.context_reset_trigger_ratio = _float(
+            "QUADRACODE_CONTEXT_RESET_TRIGGER_RATIO", base.context_reset_trigger_ratio
         )
 
         return base

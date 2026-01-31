@@ -786,6 +786,10 @@ class ContextEngineState(RuntimeState):
         recent_externalizations: A log of recently externalized context segments.
         llm_stop_detected: Flag indicating if the LLM has signaled a stop condition (exhaustion).
         llm_resume_hint: Flag indicating the LLM should be hinted to resume from a stop.
+    system_prompt_addendum: Supplemental system prompt text injected after reset.
+    context_reset_count: Number of context reset events executed.
+    context_reset_log: Log of context reset metadata.
+    last_context_reset: Latest context reset metadata.
     """
 
     # Context Management
@@ -794,7 +798,7 @@ class ContextEngineState(RuntimeState):
     context_quality_score: float
 
     # Context Segments (Single Source of Truth)
-    context_segments: Annotated[List[ContextSegment], add_context_segments]
+    context_segments: Annotated[List[ContextSegment], set_context_segments]
 
     # External Memory (File System)
     external_memory_index: Dict[str, str]
@@ -830,6 +834,12 @@ class ContextEngineState(RuntimeState):
     # LLM Stop/Resume Detection (for exhaustion handling)
     llm_stop_detected: bool
     llm_resume_hint: bool
+
+    # Context reset metadata
+    system_prompt_addendum: str
+    context_reset_count: int
+    context_reset_log: List[Dict[str, Any]]
+    last_context_reset: Dict[str, Any]
 
 
 class QuadraCodeState(ContextEngineState, total=False):
@@ -879,7 +889,7 @@ class QuadraCodeState(ContextEngineState, total=False):
     """
 
     # Explicitly re-declare with annotation to ensure visibility in subclass
-    context_segments: Annotated[List[ContextSegment], add_context_segments]
+    context_segments: Annotated[List[ContextSegment], set_context_segments]
 
     is_in_prp: bool
     prp_cycle_count: int
@@ -968,6 +978,10 @@ def make_initial_context_engine_state(
             "last_compression_event": {},
             "llm_stop_detected": False,
             "llm_resume_hint": False,
+            "system_prompt_addendum": "",
+            "context_reset_count": 0,
+            "context_reset_log": [],
+            "last_context_reset": {},
             "is_in_prp": False,
             "prp_cycle_count": 0,
             "prp_state": PRP_STATE_MACHINE.initial_state,
@@ -1217,6 +1231,14 @@ def deserialize_context_engine_state(payload: Dict[str, Any]) -> QuadraCodeState
         state["memory_consolidation_log"] = []
     if "memory_guidance" not in state or not isinstance(state.get("memory_guidance"), dict):
         state["memory_guidance"] = {}
+    if "system_prompt_addendum" not in state or not isinstance(state.get("system_prompt_addendum"), str):
+        state["system_prompt_addendum"] = ""
+    if "context_reset_count" not in state or not isinstance(state.get("context_reset_count"), int):
+        state["context_reset_count"] = 0
+    if "context_reset_log" not in state or not isinstance(state.get("context_reset_log"), list):
+        state["context_reset_log"] = []
+    if "last_context_reset" not in state or not isinstance(state.get("last_context_reset"), dict):
+        state["last_context_reset"] = {}
     return cast(QuadraCodeState, state)
 
 

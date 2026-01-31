@@ -162,6 +162,10 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         outline = state.get("governor_prompt_outline", {}) if isinstance(state, dict) else {}
         system_sections = [system_prompt]
 
+        addendum = state.get("system_prompt_addendum") if isinstance(state, dict) else None
+        if addendum:
+            system_sections.append(str(addendum))
+
         outline_system = outline.get("system") if isinstance(outline, dict) else None
         if outline_system:
             system_sections.append(str(outline_system))

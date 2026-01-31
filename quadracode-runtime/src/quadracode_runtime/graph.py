@@ -167,12 +167,12 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
 
         # Add nodes
         workflow.add_node("prp_trigger_check", prp_trigger_check)
-        workflow.add_node("context_pre", context_engine.pre_process)
-        workflow.add_node("context_governor", context_engine.govern_context)
+        workflow.add_node("context_pre", context_engine.pre_process_node)
+        workflow.add_node("context_governor", context_engine.govern_context_node)
         workflow.add_node("driver", driver)
-        workflow.add_node("context_post", context_engine.post_process)
+        workflow.add_node("context_post", context_engine.post_process_node)
         workflow.add_node("tools", QuadracodeTools)
-        workflow.add_node("context_tool", context_engine.handle_tool_response)
+        workflow.add_node("context_tool", context_engine.handle_tool_response_node)
 
         # Add edges
         workflow.add_edge(START, "prp_trigger_check")

@@ -167,6 +167,8 @@ Every orchestrator turn traverses an opt-in context engineering pipeline that us
 2. **`context_governor`** (LLM-backed) reviews the latest state, plans retain/compress/summarize/externalize/discard operations for engineered segments, and hands the driver a goal-aware prompt outline.
 3. **`driver` / tools** execute with the trimmed, skill-aware context; tool responses flow back into the working set automatically.
 
+When token pressure persists, a Context Reset Agent persists full history + artifacts to disk, refreshes the system prompt addendum, and trims the active message history to the last N user turns.
+
 The reducer uses Anthropic's Claude Haiku by default (configurable via `ContextEngineConfig.reducer_model`) to map/reduce long blobs into concise summaries while embedding a `restorable_reference`. The progressive loader now includes a **skills catalog** that stages SKILL.md metadata, loads full skill content on demand, and queues linked references for future turns. Tool outputs are captured automatically, externalized segments can be persisted to disk via `externalize_write_enabled`, and each stage emits structured metrics that feed the Streamlit dashboard and the e2e logs.
 
 ## How It Works
@@ -682,6 +684,12 @@ You can tune the context engine at runtime using environment variables. These ar
 - `QUADRACODE_GOVERNOR_MODEL` (string) - The LLM used for planning context curation (or `heuristic`).
 
 - `QUADRACODE_MAX_TOOL_PAYLOAD_CHARS` (int) - Max characters of a tool's output before it's automatically compressed.
+- `QUADRACODE_CONTEXT_RESET_ENABLED` (bool) - Enable context reset agent for token pressure.
+- `QUADRACODE_CONTEXT_RESET_TRIGGER_RATIO` (float, 0.0-1.0) - Ratio of context_window_max that triggers reset.
+- `QUADRACODE_CONTEXT_RESET_TRIGGER_TOKENS` (int) - Explicit token threshold for reset (overrides ratio when >0).
+- `QUADRACODE_CONTEXT_RESET_KEEP_TURNS` (int) - Keep the last N user turns verbatim during reset.
+- `QUADRACODE_CONTEXT_RESET_MIN_USER_TURNS` (int) - Minimum user turns before reset can trigger.
+- `QUADRACODE_CONTEXT_RESET_ROOT` (string) - Directory for reset artifacts (defaults to external_memory_path/context_resets).
 
 Other advanced settings for metrics, quality thresholds, and externalization are also available. See `quadracode-runtime/src/quadracode_runtime/config/context_engine.py` for a complete list.
 

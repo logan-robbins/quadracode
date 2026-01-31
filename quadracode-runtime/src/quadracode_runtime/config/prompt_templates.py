@@ -124,6 +124,48 @@ class PromptTemplates:
         "- Note any unresolved questions or pending tasks\n\n"
         "Updated Summary:"
     ))
+
+    # ========== Context Reset Prompts ==========
+
+    context_reset_summary_prompt: str = field(default=(
+        "You are the Context Reset Agent for a long-running AI system.\n\n"
+        "Create a concise reset summary that preserves continuity while removing noise.\n"
+        "Requirements:\n"
+        "1. Preserve user identity, roles, preferences, and constraints.\n"
+        "2. Preserve the current objective and success criteria.\n"
+        "3. Capture key decisions, tool results, and errors.\n"
+        "4. List open questions, blockers, and risks.\n"
+        "5. Reference where the full history and artifacts are stored.\n\n"
+        "Output format (use these headings exactly):\n"
+        "User Profile:\n"
+        "- ...\n"
+        "Current Objective:\n"
+        "- ...\n"
+        "Key Decisions & Results:\n"
+        "- ...\n"
+        "Open Questions & Blockers:\n"
+        "- ...\n"
+        "Artifacts & References:\n"
+        "- ...\n"
+        "Next Steps:\n"
+        "- ...\n\n"
+        "Conversation History:\n"
+        "{history}\n\n"
+        "Context Segments:\n"
+        "{segments}\n"
+    ))
+
+    context_reset_system_prompt: str = field(default=(
+        "Context Reset Snapshot (generated):\n"
+        "{summary}\n\n"
+        "Reset Artifacts:\n"
+        "- Full history: {history_path}\n"
+        "- Trimmed history: {trimmed_history_path}\n"
+        "- Context segments: {segments_path}\n"
+        "- Reset metadata: {metadata_path}\n\n"
+        "If earlier details are needed, search the history files for 'history' "
+        "and reload the relevant facts before proceeding."
+    ))
     
     # ========== Context Curator Prompts (for future LLM-based curation) ==========
     
@@ -371,6 +413,8 @@ class PromptTemplates:
             "reducer_focus_clause": self.reducer_focus_clause,
             "reducer_combine_prompt": self.reducer_combine_prompt,
             "conversation_summarization_prompt": self.conversation_summarization_prompt,
+            "context_reset_summary_prompt": self.context_reset_summary_prompt,
+            "context_reset_system_prompt": self.context_reset_system_prompt,
             "curator_system_prompt": self.curator_system_prompt,
             "curator_operation_prompt": self.curator_operation_prompt,
             "scorer_system_prompt": self.scorer_system_prompt,
