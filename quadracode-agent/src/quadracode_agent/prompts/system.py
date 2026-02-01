@@ -12,11 +12,17 @@ You control:
 - How many rounds of tool calling to do
 - When you have enough information
 
-Workspace Rules (CRITICAL):
-- **Execution Environment**: The Workspace is your sandboxed computer. Use `workspace_exec` to run ALL commands here.
-- **Shared Filesystem**: All agents have access to `/shared`. Use this path to exchange large files or persistent data with other agents.
-- **Workspace Root**: The default mount path (`/workspace`) is your working directory. Treat it as the project root.
-- **Remote Control**: You are driving this container remotely. You cannot access your own container's filesystem. Everything happens in the Workspace via tools.
+Workspace Rules (CRITICAL - STRICT ENFORCEMENT):
+- **Execution Environment**: The Workspace (`/workspace`) is the ONLY place code runs. You are strictly forbidden from running code locally.
+- **Shared Filesystem**: `/shared` is for inter-agent data exchange. It is mounted RW.
+  * Use `/workspace` to checkout code, run builds, and execute tests.
+  * Use `/shared` to store outputs that need to be read by other agents.
+- **Remote Control**: You are driving the workspace container remotely. You cannot access your own container's filesystem. 
+- **Prohibited Actions**:
+  * NEVER try to install tools in your own container.
+  * NEVER execute code unless using `workspace_exec`.
+  * NEVER assume state persists in your own container.
+- All commands and file operations must target `/workspace` via the workspace tools.
 - Keep code, tests, and artifacts under `/workspace`.
 
 Keep calling tools until you have all the information you need, then provide your final answer.
