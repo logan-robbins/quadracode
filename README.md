@@ -16,6 +16,8 @@ Most AI agent frameworks are designed for synchronous, short-lived interactions.
 - **Scale matters**: The orchestrator dynamically spawns and terminates agents based on workload demands
 - **Observability matters**: Every decision, tool call, and message is traced and inspectable
 
+<img width="1595" height="944" alt="image" src="https://github.com/user-attachments/assets/7e03c4d9-3828-4e0e-8ee3-384f47469489" />
+
 ### Key Features
 
 - **Persistent State**: LangGraph checkpoints keyed by conversation ID survive process restarts and resume exactly where they left off
