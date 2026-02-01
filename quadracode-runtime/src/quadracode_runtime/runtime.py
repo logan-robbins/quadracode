@@ -799,10 +799,10 @@ class RuntimeRunner:
 
         success, descriptor_model, error = ensure_workspace(thread_id, image=image, network=network)
         if not success or descriptor_model is None:
-            if error:
-                print(f"[workspace] unable to provision workspace for {thread_id}: {error}")
+            LOGGER.error(f"[workspace] unable to provision workspace for {thread_id}: {error}")
             return
 
+        LOGGER.info(f"[workspace] provisioned successfully for {thread_id}: {descriptor_model.container}")
         descriptor_dict = descriptor_model.dict()
         if network:
             descriptor_dict.setdefault("network", network)

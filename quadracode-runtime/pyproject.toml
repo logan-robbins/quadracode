@@ -28,6 +28,7 @@ dependencies = [
     "pyyaml>=6.0",
     "scikit-learn>=1.4",
     "networkx>=3.2",
+    "psutil>=5.9",
 ]
 
 [tool.uv.sources]

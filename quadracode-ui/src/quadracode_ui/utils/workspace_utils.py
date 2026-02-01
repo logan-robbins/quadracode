@@ -737,3 +737,22 @@ def get_file_diff(workspace_id: str, file_path: str, snapshot: dict[str, Any]) -
     }
 
 
+
+def ensure_default_workspace(client: redis.Redis) -> bool:
+    """
+    Ensures that the 'default' workspace is registered in Redis.
+    This corresponds to the 'workspace-default' service in docker-compose.
+    """
+    from quadracode_ui.utils.persistence import save_workspace_descriptor
+    
+    # Check if already registered
+    if client.exists("qc:workspace:descriptor:default"):
+        return True
+        
+    # Attempt to register
+    success, descriptor, _ = create_workspace("default")
+    if success and descriptor:
+        save_workspace_descriptor(client, "default", descriptor)
+        return True
+        
+    return False

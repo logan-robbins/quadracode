@@ -106,7 +106,22 @@ def load_workspace_descriptor(
         if not data:
             return None
         
-        return dict(data)
+        # Decode fields
+        descriptor = {}
+        for k, v in data.items():
+            key_str = k.decode("utf-8") if isinstance(k, bytes) else k
+            val_str = v.decode("utf-8") if isinstance(v, bytes) else v
+            
+            # Attempt to parse JSON for complex fields
+            if key_str in {"state", "files", "ports", "mounts"}:
+                try:
+                    descriptor[key_str] = json.loads(val_str)
+                except (json.JSONDecodeError, TypeError):
+                    descriptor[key_str] = val_str
+            else:
+                descriptor[key_str] = val_str
+                
+        return descriptor
     except redis.RedisError:
         return None
 
@@ -130,13 +145,21 @@ def save_workspace_descriptor(
     try:
         key = f"{WORKSPACE_DESCRIPTOR_PREFIX}:{workspace_id}"
         
+        # Prepare data for storage (serialize complex types)
+        storage_data = {}
+        for k, v in descriptor.items():
+            if isinstance(v, (dict, list)):
+                storage_data[k] = json.dumps(v)
+            else:
+                storage_data[k] = v
+        
         # Add created timestamp if not in descriptor
-        if "created" not in descriptor:
-            descriptor["created"] = datetime.now(UTC).isoformat()
+        if "created" not in storage_data:
+            storage_data["created"] = datetime.now(UTC).isoformat()
         
-        descriptor["updated"] = datetime.now(UTC).isoformat()
+        storage_data["updated"] = datetime.now(UTC).isoformat()
         
-        client.hset(key, mapping=descriptor)
+        client.hset(key, mapping=storage_data)
         return True
     except redis.RedisError:
         return False

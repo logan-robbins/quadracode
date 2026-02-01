@@ -12,6 +12,7 @@ service class manages the more complex state transitions and data validation.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from typing import List, Optional
 
 from .config import RegistrySettings
@@ -95,7 +96,13 @@ class AgentRegistryService:
         Returns:
             True if the heartbeat was successfully recorded, False otherwise.
         """
-        return self.db.update_heartbeat(agent_id=hb.agent_id, status=hb.status.value, at=hb.reported_at)
+        metrics_json = json.dumps(hb.metrics) if hb.metrics else None
+        return self.db.update_heartbeat(
+            agent_id=hb.agent_id, 
+            status=hb.status.value, 
+            at=hb.reported_at,
+            metrics=metrics_json
+        )
 
     def _row_to_agent(self, row) -> AgentInfo:
         """
@@ -116,6 +123,13 @@ class AgentRegistryService:
         if row["last_heartbeat"]:
             last_hb = datetime.fromisoformat(row["last_heartbeat"])  # type: ignore[arg-type]
 
+        metrics = None
+        if "metrics" in row.keys() and row["metrics"]:
+             try:
+                 metrics = json.loads(row["metrics"])
+             except Exception:
+                 metrics = None
+
         return AgentInfo(
             agent_id=row["agent_id"],
             host=row["host"],
@@ -124,6 +138,7 @@ class AgentRegistryService:
             registered_at=datetime.fromisoformat(row["registered_at"]),
             last_heartbeat=last_hb,
             hotpath=bool(row["hotpath"]),
+            metrics=metrics,
         )
 
     @staticmethod

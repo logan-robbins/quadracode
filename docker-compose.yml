@@ -212,6 +212,16 @@ services:
       retries: 1
       start_period: 5s
 
+  workspace-default:
+    image: python:3.12-slim
+    container_name: qc-ws-default-ctr
+    command: ["sleep", "infinity"]
+    volumes:
+      - qc-ws-default:/workspace
+      - shared-data:/shared
+    networks:
+      - default
+
   ui:
     build:
       context: .
@@ -223,6 +233,8 @@ services:
         condition: service_started
       orchestrator-runtime:
         condition: service_started
+      workspace-default:
+        condition: service_started
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
@@ -230,6 +242,8 @@ services:
       UI_POLL_INTERVAL_MS: "2000"
       QUADRACODE_WORKSPACE_IMAGE: quadracode-workspace:latest
       QUADRACODE_WORKSPACE_NETWORK: quadracode_default
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8501:8501"
     restart: unless-stopped
@@ -278,3 +292,4 @@ volumes:
   redis-data:
   shared-data:
   mcp-remote-cache:
+  qc-ws-default:

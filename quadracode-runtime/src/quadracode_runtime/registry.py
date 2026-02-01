@@ -274,6 +274,39 @@ class AgentRegistryIntegration:
 
     async def _heartbeat(self) -> bool:
         LOGGER.debug("Agent registry heartbeat agent_id=%s", self._agent_id)
+        
+        # Gather system metrics
+        cpu_percent = 0.0
+        memory_mb = 0.0
+        processes = []
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent()
+            memory_info = psutil.virtual_memory()
+            memory_mb = memory_info.used / (1024 * 1024)
+            
+            # Find relevant python processes
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cpu_percent']):
+                try:
+                    if proc.info['name'] in ('python', 'python3'):
+                        cmdline = " ".join(proc.info['cmdline'] or [])
+                        # Filter to interesting processes (runtime, etc)
+                        if "quadracode" in cmdline or "uv run" in cmdline:
+                            processes.append({
+                                "pid": proc.info['pid'],
+                                "cmdline": cmdline[:100],  # Truncate for safety
+                                "cpu": proc.info['cpu_percent']
+                            })
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            # Sort by CPU usage and take top 5
+            processes.sort(key=lambda x: x.get("cpu", 0), reverse=True)
+            processes = processes[:5]
+            
+        except ImportError:
+            pass  # psutil not installed or failed
+
         success = await self._request(
             "POST",
             f"/agents/{self._agent_id}/heartbeat",
@@ -281,6 +314,11 @@ class AgentRegistryIntegration:
                 "agent_id": self._agent_id,
                 "status": "healthy",
                 "reported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "metrics": {
+                    "cpu_percent": cpu_percent,
+                    "memory_mb": memory_mb,
+                    "active_processes": processes
+                }
             },
         )
         if not success:

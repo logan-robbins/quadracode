@@ -12,10 +12,17 @@ Supports QUADRACODE_MOCK_MODE=true for standalone testing:
 
 import streamlit as st
 
-from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
-from quadracode_ui.components.mode_toggle import render_mode_toggle
-from quadracode_ui.config import AGENT_REGISTRY_URL, MOCK_MODE, REDIS_HOST, REDIS_PORT
-from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
+from quadracode_ui.utils.workspace_utils import create_workspace, ensure_default_workspace
+# ... (imports)
+
+if MOCK_MODE:
+    st.warning(
+        "🧪 **Mock Mode Active** - Running with simulated data. "
+        "No external Redis or agent-registry required."
+    )
+elif success:
+    # Ensure default workspace is registered
+    ensure_default_workspace(client)
 
 
 # Page configuration
@@ -56,6 +63,14 @@ if MOCK_MODE:
         "🧪 **Mock Mode Active** - Running with simulated data. "
         "No external Redis or agent-registry required."
     )
+elif success:
+    # Ensure default workspace is registered
+    # This picks up the 'workspace-default' service from docker-compose
+    if not client.exists("qc:workspace:descriptor:default"):
+        with st.spinner("Registering default workspace..."):
+            ws_success, ws_descriptor, _ = create_workspace("default")
+            if ws_success and ws_descriptor:
+                save_workspace_descriptor(client, "default", ws_descriptor)
 
 # Header
 st.title("🚀 Quadracode UI")

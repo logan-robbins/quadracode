@@ -61,6 +61,7 @@ class AgentHeartbeat(BaseModel):
     agent_id: str = Field(default="", description="Agent identifier (set from URL path)")
     status: AgentStatus = Field(default=AgentStatus.HEALTHY, description="Reported health status")
     reported_at: datetime = Field(default_factory=datetime.utcnow, description="Heartbeat timestamp")
+    metrics: Optional[dict] = Field(default=None, description="System metrics and process info")
 
 
 class AgentInfo(BaseModel):
@@ -79,6 +80,7 @@ class AgentInfo(BaseModel):
     registered_at: datetime
     last_heartbeat: Optional[datetime]
     hotpath: bool = Field(default=False)
+    metrics: Optional[dict] = None
 
 
 class AgentListResponse(BaseModel):

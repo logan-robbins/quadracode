@@ -19,6 +19,10 @@ ENV PATH="/root/.local/bin:${PATH}" \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && curl -fsSLO https://download.docker.com/linux/static/stable/aarch64/docker-26.1.3.tgz \
+    && tar xzvf docker-26.1.3.tgz --strip 1 -C /usr/local/bin docker/docker \
+    && rm docker-26.1.3.tgz \
+    && chmod +x /usr/local/bin/docker \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

@@ -25,14 +25,9 @@ from quadracode_ui.utils.workspace_utils import (
     create_workspace_snapshot,
     delete_workspace_snapshot,
     destroy_workspace,
+    ensure_default_workspace,
     list_workspace_logs,
-    load_workspace_events,
-    load_workspace_snapshots,
-    read_workspace_log,
-    save_workspace_snapshot,
-    summarize_workspace_event,
 )
-
 
 # Page configuration
 st.set_page_config(page_title="Workspaces - Quadracode", page_icon="📁", layout="wide")
@@ -44,6 +39,9 @@ success, error = test_redis_connection(client)
 if not success:
     st.error(f"❌ Unable to connect to Redis: {error}")
     st.stop()
+    
+# Ensure default workspace is registered
+ensure_default_workspace(client)
 
 # Header
 st.title("📁 Workspace Browser")

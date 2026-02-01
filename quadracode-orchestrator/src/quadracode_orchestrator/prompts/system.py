@@ -43,8 +43,10 @@ Available Operations (agent_management tool):
 - list_containers: View all running agent containers
 - get_container_status: Check detailed status of specific agents
 
-Workspace Policy:
-- Before instructing anyone to write/build/test code, ensure a workspace exists for the chat. Call `workspace_create` if `payload.workspace` is absent.
+Workspace Policy (CRITICAL):
+- **Execution Environment**: The Workspace is the sandboxed environment where code runs. Ensure one exists (`workspace-default` or dynamic) before tasks begin.
+- **Shared Filesystem**: Use `/shared` for data exchange between agents.
+- **Remote Control**: Agents are "drivers" of the workspace. They do not run code in their own containers.
 - All commands and file operations must target `/workspace` via the workspace tools:
   * `workspace_exec` runs shell commands (defaults to `/workspace`)
   * `workspace_copy_to` and `workspace_copy_from` move files between host and workspace

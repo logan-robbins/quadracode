@@ -155,7 +155,7 @@ class Database:
                 ),
             )
 
-    def update_heartbeat(self, *, agent_id: str, status: str, at: datetime) -> bool:
+    def update_heartbeat(self, *, agent_id: str, status: str, at: datetime, metrics: str | None = None) -> bool:
         """
         Updates the heartbeat timestamp for a given agent.
 
@@ -173,10 +173,39 @@ class Database:
         """
         with self.connect() as con:
             cur = con.execute(
-                "UPDATE agents SET status = ?, last_heartbeat = ? WHERE agent_id = ?",
-                (status, at.isoformat(), agent_id),
+                "UPDATE agents SET status = ?, last_heartbeat = ?, metrics = ? WHERE agent_id = ?",
+                (status, at.isoformat(), metrics if metrics else "{}", agent_id),
             )
             return cur.rowcount > 0
+
+    def init_schema(self) -> None:
+        """
+        Initializes the database schema if it doesn't already exist.
+        """
+        with self.connect() as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    host TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    registered_at TEXT NOT NULL,
+                    last_heartbeat TEXT,
+                    hotpath INTEGER NOT NULL DEFAULT 0,
+                    metrics TEXT
+                )
+                """
+            )
+            # Migrations
+            try:
+                con.execute("ALTER TABLE agents ADD COLUMN hotpath INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                con.execute("ALTER TABLE agents ADD COLUMN metrics TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def delete_agent(self, *, agent_id: str) -> bool:
         """
