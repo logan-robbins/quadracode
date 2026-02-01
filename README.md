@@ -794,3 +794,19 @@ Other advanced settings for metrics, quality thresholds, and externalization are
 - **Orchestration**: Confirmed `qc:mailbox` communication between Human <-> Orchestrator <-> Agents.
 - **Agent Fleet**: Dynamic spawning and deletion verified. `spawn_agent` tool patched to support workspace arguments.
 - **Autonomous Mode**: `human-clone-runtime` service enabled.
+
+## System Reset (Hard Clean)
+
+If `docker compose down` leaves behind orphaned containers (e.g. dynamically spawned agents) or volumes, use this hard reset sequence:
+
+```bash
+# 1. Force remove ALL containers (including those not in compose)
+docker rm -f $(docker ps -aq)
+
+# 2. Prune volumes to clear Redis/Postgres data and workspace files
+docker volume prune -f
+
+# 3. Restart stack
+docker compose up -d redis redis-mcp agent-registry orchestrator-runtime agent-runtime ui
+```
+
