@@ -4,6 +4,9 @@
 
 Quadracode is a production-ready framework for deploying resilient AI agent systems that span minutes, hours, or days. It features dynamic fleet management, persistent workspace environments, and full observability.
 
+<img width="1594" height="911" alt="image" src="https://github.com/user-attachments/assets/5298067f-acd6-41b7-aff5-1eb3bab93ccb" />
+
+
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
