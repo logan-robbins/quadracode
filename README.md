@@ -44,11 +44,15 @@ You should see the **Default Workspace** automatically listed in the Workspaces 
 ### Orchestrator (`quadracode-orchestrator`)
 The brain of the system. It consumes tasks from `qc:mailbox/orchestrator`, maintains conversation state via LangGraph checkpoints, and dynamically spawns agent containers to handle burst workloads or specialized tasks. It never blocks; it polls for results and emits incremental updates.
 
+<img width="1587" height="908" alt="image" src="https://github.com/user-attachments/assets/c65110b7-da6f-4c5c-aab0-94c3f328bde7" />
+
 ### Agents (`quadracode-agent`)
 Specialized workers spawned on-demand. They are **purely remote drivers**.
 *   **No Local Execution**: Agents do NOT run code in their own containers.
 *   **Remote Control**: They use tools to drive the `quadracode-workspace` container.
 *   **Ephemeral**: Agents can be destroyed at any time without losing project state (which lives in the workspace).
+
+<img width="1585" height="914" alt="image" src="https://github.com/user-attachments/assets/5f306353-bdda-40d1-987a-bccdb5fbeff1" />
 
 ### Workspace Engine (`quadracode-workspace`)
 A strict, sandboxed Docker environment where all actual work happens.
@@ -56,7 +60,8 @@ A strict, sandboxed Docker environment where all actual work happens.
 *   **/shared**: High-speed volume mounted RW to all agents. used for passing large artifacts between agents.
 *   **Default Workspace**: A `workspace-default` service is always available for general tasks.
 
-![Default Workspace](file:///Users/loganrobbins/.gemini/antigravity/brain/25728b2f-838e-4bb8-a5b4-79123836abde/default_workspace_fixed_success_1769918978649.png)
+<img width="1593" height="909" alt="image" src="https://github.com/user-attachments/assets/77d2a3fc-47be-4662-996f-2148812e30e3" />
+
 
 ### Control Plane (`quadracode-ui`)
 A Streamlit application for full observability.
@@ -64,7 +69,6 @@ A Streamlit application for full observability.
 *   **Mailbox Monitor**: Regex-filtered view of the Redis Stream event fabric.
 *   **Workspace Browser**: File explorer for the Docker volumes.
 
-![Workspace Details](file:///Users/loganrobbins/.gemini/antigravity/brain/25728b2f-838e-4bb8-a5b4-79123836abde/workspace_details_success_1769917172483.png)
 
 ### Agent Registry (`quadracode-agent-registry`)
 FastAPI service (Port 8090) that provides service discovery. It tracks active agents, their capabilities, and healthy heartbeats.
