@@ -12,20 +12,20 @@ Supports QUADRACODE_MOCK_MODE=true for standalone testing:
 
 import streamlit as st
 
+from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
+from quadracode_ui.components.mode_toggle import render_mode_toggle
+from quadracode_ui.config import (
+    AGENT_REGISTRY_URL,
+    MOCK_MODE,
+    REDIS_HOST,
+    REDIS_PORT,
+)
+from quadracode_ui.utils.persistence import save_workspace_descriptor
+from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
 from quadracode_ui.utils.workspace_utils import create_workspace, ensure_default_workspace
-# ... (imports)
-
-if MOCK_MODE:
-    st.warning(
-        "🧪 **Mock Mode Active** - Running with simulated data. "
-        "No external Redis or agent-registry required."
-    )
-elif success:
-    # Ensure default workspace is registered
-    ensure_default_workspace(client)
 
 
-# Page configuration
+# Page configuration must come first
 st.set_page_config(
     page_title="Quadracode UI",
     page_icon="🚀",
@@ -90,26 +90,26 @@ status_col1, status_col2, status_col3 = st.columns(3)
 
 with status_col1:
     if MOCK_MODE:
-        st.success("✅ Redis Connected\n\n`fakeredis (mock)`", icon="✅")
+        st.success("Redis Connected\n\n`fakeredis (mock)`", icon="✅")
     elif success:
-        st.success(f"✅ Redis Connected\n\n`{REDIS_HOST}:{REDIS_PORT}`", icon="✅")
+        st.success(f"Redis Connected\n\n`{REDIS_HOST}:{REDIS_PORT}`", icon="✅")
     else:
-        st.error(f"❌ Redis Disconnected\n\n{error}", icon="❌")
+        st.error(f"Redis Disconnected\n\n{error}", icon="❌")
 
 with status_col2:
     if MOCK_MODE:
-        st.info("🤖 Agent Registry\n\n`mock (simulated)`", icon="🤖")
+        st.info("Agent Registry\n\n`mock (simulated)`", icon="🤖")
     elif AGENT_REGISTRY_URL:
-        st.info(f"🤖 Agent Registry\n\n`{AGENT_REGISTRY_URL}`", icon="🤖")
+        st.info(f"Agent Registry\n\n`{AGENT_REGISTRY_URL}`", icon="🤖")
     else:
-        st.warning("⚠️ Agent Registry\n\nNot Configured", icon="⚠️")
+        st.warning("Agent Registry\n\nNot Configured", icon="⚠️")
 
 with status_col3:
     mode = st.session_state.get("supervisor_recipient", HUMAN_RECIPIENT)
     if mode == HUMAN_CLONE_RECIPIENT:
-        st.info("🤖 Mode: HumanClone\n\nAutonomous", icon="🤖")
+        st.info("Mode: HumanClone\n\nAutonomous", icon="🤖")
     else:
-        st.info("👤 Mode: Human\n\nDirect Control", icon="👤")
+        st.info("Mode: Human\n\nDirect Control", icon="👤")
 
 st.divider()
 
