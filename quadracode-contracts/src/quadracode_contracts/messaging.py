@@ -1,67 +1,68 @@
 """
-This module defines the shared data contracts and utility functions for the 
-Redis streams-based messaging system used in Quadracode.
+Shared data contracts and utility functions for the Redis Streams-based
+messaging system used in Quadracode.
 
-It provides the `MessageEnvelope` model, which is the canonical structure for all 
-messages passed between system components. This ensures that all messages are 
-well-formed and include essential metadata such as sender, recipient, and 
-timestamp. The module also provides constants and helper functions for 
-constructing and parsing mailbox keys, which are used to route messages to the 
-correct Redis stream.
+Provides the :class:`MessageEnvelope` model — the canonical structure for all
+messages passed between system components.  Every message is well-formed and
+includes essential metadata (sender, recipient, timestamp).  Helper functions
+construct and parse mailbox keys used to route messages to the correct Redis
+stream.
 """
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping
+from typing import Any, Self
 
 from pydantic import BaseModel, Field
 
-MAILBOX_PREFIX = "qc:mailbox/"
-ORCHESTRATOR_RECIPIENT = "orchestrator"
-HUMAN_RECIPIENT = "human"
-HUMAN_CLONE_RECIPIENT = "human_clone"
+
+MAILBOX_PREFIX: str = "qc:mailbox/"
+ORCHESTRATOR_RECIPIENT: str = "orchestrator"
+HUMAN_RECIPIENT: str = "human"
+HUMAN_CLONE_RECIPIENT: str = "human_clone"
+# Preferred alias — use SUPERVISOR_RECIPIENT in new code.
+SUPERVISOR_RECIPIENT: str = HUMAN_CLONE_RECIPIENT
 
 
 def _default_timestamp() -> str:
+    """Return the current UTC time as a seconds-precision ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class MessageEnvelope(BaseModel):
-    """
-    Defines the envelope for all messages passed through the Redis streams.
+    """Envelope for all messages passed through the Redis Streams fabric.
 
-    This Pydantic model ensures that every message is uniformly structured, 
-    containing essential metadata for routing and diagnostics. It includes 
-    serialization and deserialization methods to convert the envelope to and 
-    from the format required by Redis streams.
+    This Pydantic model ensures that every message is uniformly structured,
+    containing essential metadata for routing and diagnostics.  It includes
+    serialization and deserialization helpers to convert the envelope to and
+    from the flat ``dict[str, str]`` format required by Redis ``XADD``.
 
     Attributes:
-        timestamp: The ISO-8601 formatted timestamp of when the message was created.
-        sender: The ID of the component sending the message.
-        recipient: The ID of the component intended to receive the message.
-        message: A string identifier for the type of message being sent.
-        payload: A JSON-serializable dictionary containing the message's data.
+        timestamp: ISO-8601 formatted creation timestamp.
+        sender: ID of the component sending the message.
+        recipient: ID of the intended recipient component.
+        message: String identifier for the message type.
+        payload: JSON-serializable dictionary containing the message data.
     """
 
     timestamp: str = Field(default_factory=_default_timestamp)
     sender: str
     recipient: str
     message: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
-    def to_stream_fields(self) -> Dict[str, str]:
-        """
-        Serializes the envelope to a dictionary suitable for Redis streams.
+    def to_stream_fields(self) -> dict[str, str]:
+        """Serialize the envelope to a Redis-compatible flat dictionary.
 
-        This method converts the `MessageEnvelope` into a flat dictionary of 
-        strings, which is the format required by the `XADD` command in Redis. The 
-        payload is JSON-encoded.
+        Converts the :class:`MessageEnvelope` into a flat ``dict[str, str]``
+        suitable for the ``XADD`` command.  The *payload* field is
+        JSON-encoded with compact separators.
 
         Returns:
             A dictionary of string key-value pairs.
         """
-
         return {
             "timestamp": self.timestamp,
             "sender": self.sender,
@@ -71,21 +72,19 @@ class MessageEnvelope(BaseModel):
         }
 
     @classmethod
-    def from_stream_fields(cls, fields: Mapping[str, str]) -> "MessageEnvelope":
-        """
-        Deserializes a Redis stream entry back into a `MessageEnvelope`.
+    def from_stream_fields(cls, fields: Mapping[str, str]) -> Self:
+        """Deserialize a Redis stream entry back into a :class:`MessageEnvelope`.
 
-        This class method is designed to be robust against malformed data. It 
-        safely parses the fields from a Redis stream message, including handling 
-        potential JSON decoding errors in the payload.
+        Designed to be robust against malformed data.  Safely parses the
+        fields from a Redis stream message, including handling potential
+        JSON decoding errors in the payload.
 
         Args:
             fields: A mapping of fields from a Redis stream entry.
 
         Returns:
-            A `MessageEnvelope` instance.
+            A :class:`MessageEnvelope` instance.
         """
-
         payload_raw = fields.get("payload", "{}")
         try:
             payload = json.loads(payload_raw) if payload_raw else {}
@@ -101,12 +100,8 @@ class MessageEnvelope(BaseModel):
         )
 
 
-__all__ = ["MessageEnvelope"]
-
-
 def mailbox_key(recipient: str) -> str:
-    """
-    Constructs the Redis stream key for a given recipient.
+    """Construct the Redis stream key for a given recipient.
 
     Args:
         recipient: The ID of the recipient.
@@ -118,8 +113,7 @@ def mailbox_key(recipient: str) -> str:
 
 
 def mailbox_recipient(mailbox: str) -> str:
-    """
-    Extracts the recipient ID from a Redis stream key.
+    """Extract the recipient ID from a Redis stream key.
 
     Args:
         mailbox: The Redis stream key.
@@ -132,24 +126,10 @@ def mailbox_recipient(mailbox: str) -> str:
     return mailbox
 
 
-__all__.extend(
-    [
-        "MAILBOX_PREFIX",
-        "ORCHESTRATOR_RECIPIENT",
-        "HUMAN_RECIPIENT",
-        "HUMAN_CLONE_RECIPIENT",
-        "mailbox_key",
-        "mailbox_recipient",
-        "agent_mailbox",
-    ]
-)
-
-
 def agent_mailbox(agent_id: str) -> str:
-    """
-    Constructs the mailbox key for a specific agent.
+    """Construct the mailbox key for a specific agent.
 
-    This is a convenience function that wraps `mailbox_key` for agents.
+    Convenience wrapper around :func:`mailbox_key`.
 
     Args:
         agent_id: The ID of the agent.
@@ -158,3 +138,16 @@ def agent_mailbox(agent_id: str) -> str:
         The agent's mailbox key.
     """
     return mailbox_key(agent_id)
+
+
+__all__ = [
+    "MessageEnvelope",
+    "MAILBOX_PREFIX",
+    "ORCHESTRATOR_RECIPIENT",
+    "HUMAN_RECIPIENT",
+    "HUMAN_CLONE_RECIPIENT",
+    "SUPERVISOR_RECIPIENT",
+    "mailbox_key",
+    "mailbox_recipient",
+    "agent_mailbox",
+]

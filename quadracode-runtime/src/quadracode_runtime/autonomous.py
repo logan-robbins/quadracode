@@ -24,6 +24,7 @@ from quadracode_contracts import (
     AutonomousEscalationRecord,
     AutonomousRoutingDirective,
     HUMAN_CLONE_RECIPIENT,
+    SUPERVISOR_RECIPIENT,
     HypothesisCritiqueRecord,
 )
 
@@ -188,7 +189,7 @@ def process_autonomous_tool_response(
         state["autonomous_routing"] = AutonomousRoutingDirective(
             deliver_to_human=False,
             escalate=False,
-            recipient=HUMAN_CLONE_RECIPIENT,
+            recipient=SUPERVISOR_RECIPIENT,
         ).to_payload()
         state["current_phase"] = "awaiting_review"
         tests_payload = payload.get("tests")

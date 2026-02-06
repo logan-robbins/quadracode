@@ -1,32 +1,31 @@
 """
-This module is responsible for constructing and compiling the main LangGraph for 
-the Quadracode runtime.
+LangGraph construction and checkpointer factory for the Quadracode runtime.
 
-It provides the `build_graph` function, which assembles the various nodes 
-(e.g., driver, tools, context engine) into a stateful graph. The module supports 
-two modes of operation: a full-featured mode with the context engine enabled, and 
-a simpler mode without it. It also handles the configuration of the graph's 
-checkpointer, which is responsible for persisting the state of the graph.
+Provides ``build_graph`` to assemble the stateful LangGraph workflow, and
+``create_checkpointer`` to build the appropriate persistence backend:
+
+- **PostgresSaver** (async, pooled) when ``DATABASE_URL`` is set
+- **MemorySaver** (in-memory, non-persistent) otherwise
 
 Environment Variables:
-    QUADRACODE_MOCK_MODE: When "true", enables mock mode for testing/development
-                          without external dependencies (uses in-memory Redis mock
-                          and MemorySaver checkpointer).
-    QUADRACODE_LOCAL_DEV_MODE: When "true", disables persistence features.
-    QUADRACODE_IN_CONTAINER: Set to "1" when running inside Docker container.
+    DATABASE_URL: PostgreSQL connection string. When set, the runtime uses
+                  ``AsyncPostgresSaver`` with ``psycopg`` async driver and
+                  ``psycopg_pool.AsyncConnectionPool`` for production-grade
+                  checkpoint persistence that survives restarts.
+    QUADRACODE_MOCK_MODE: When "true", forces MemorySaver regardless of
+                          DATABASE_URL.
+    QUADRACODE_LOCAL_DEV_MODE: When "true", disables persistence requirement.
+    QUADRACODE_IN_CONTAINER: Set to "1" when running inside Docker.
+    QUADRACODE_GRAPH_RECURSION_LIMIT: Max recursion depth (default 80).
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-import sqlite3
+from typing import TYPE_CHECKING
 
 from langgraph.checkpoint.memory import MemorySaver
-
-try:  # pragma: no cover - optional dependency
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-except ImportError:  # pragma: no cover
-    AsyncSqliteSaver = None  # type: ignore
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import tools_condition
 
@@ -37,12 +36,23 @@ from .nodes.driver import make_driver
 from .nodes.tool_node import QuadracodeTools
 from .state import QuadraCodeState, RuntimeState
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+logger = logging.getLogger(__name__)
 
 _BOOL_TRUE = {"1", "true", "yes", "on"}
 _BOOL_FALSE = {"0", "false", "no", "off"}
 
+GRAPH_RECURSION_LIMIT = int(os.environ.get("QUADRACODE_GRAPH_RECURSION_LIMIT", "80"))
+
+# Connection pool sizing for AsyncPostgresSaver
+_PG_POOL_MIN_SIZE = int(os.environ.get("QUADRACODE_PG_POOL_MIN_SIZE", "2"))
+_PG_POOL_MAX_SIZE = int(os.environ.get("QUADRACODE_PG_POOL_MAX_SIZE", "20"))
+
 
 def _optional_bool(value: str | None) -> bool | None:
+    """Parse a string into a boolean, returning None for empty/unrecognized."""
     if value is None:
         return None
     normalized = value.strip().lower()
@@ -58,12 +68,12 @@ def _optional_bool(value: str | None) -> bool | None:
 def is_mock_mode() -> bool:
     """
     Check if mock mode is enabled via QUADRACODE_MOCK_MODE environment variable.
-    
+
     When mock mode is enabled:
+    - Uses MemorySaver checkpointer (ignores DATABASE_URL)
     - Uses in-memory Redis mock (fakeredis) instead of real Redis
-    - Uses MemorySaver checkpointer instead of SQLite
     - Allows the service to start without external dependencies
-    
+
     Returns:
         True if mock mode is enabled, False otherwise.
     """
@@ -71,11 +81,12 @@ def is_mock_mode() -> bool:
 
 
 def _running_inside_container() -> bool:
+    """Detect if we're running inside a Docker container."""
     return Path("/.dockerenv").exists() or os.environ.get("QUADRACODE_IN_CONTAINER") == "1"
 
 
 def _is_local_dev_mode() -> bool:
-    # Mock mode implies local dev mode behavior
+    """Determine if we're in local development mode."""
     if is_mock_mode():
         return True
     override = _optional_bool(os.environ.get("QUADRACODE_LOCAL_DEV_MODE"))
@@ -84,66 +95,121 @@ def _is_local_dev_mode() -> bool:
     return not _running_inside_container()
 
 
-USE_CUSTOM_CHECKPOINTER = not _is_local_dev_mode()
+def _get_database_url() -> str | None:
+    """Return DATABASE_URL if set and non-empty, else None."""
+    url = os.environ.get("DATABASE_URL", "").strip()
+    return url or None
 
 
-def _default_checkpoint_path() -> Path:
+async def create_checkpointer() -> BaseCheckpointSaver:
     """
-    Determines the default path for the SQLite checkpoint database.
+    Create the appropriate LangGraph checkpointer based on environment.
+
+    Decision logic:
+    1. If mock mode is enabled → MemorySaver (always, ignores DATABASE_URL)
+    2. If DATABASE_URL is set → AsyncPostgresSaver with psycopg async pool
+    3. Otherwise → MemorySaver (local dev fallback)
+
+    The AsyncPostgresSaver is initialized with:
+    - ``psycopg_pool.AsyncConnectionPool`` for connection reuse
+    - ``autocommit=True`` and ``row_factory=dict_row`` as required by LangGraph
+    - ``prepare_threshold=0`` to disable prepared statements (required for pooling)
+    - Automatic table creation via ``.setup()``
+
+    Must be called from within a running async event loop.
+
+    Returns:
+        A configured checkpointer instance.
+
+    Raises:
+        Falls back to MemorySaver on any initialization error (logged).
     """
-    explicit = os.environ.get("QUADRACODE_CHECKPOINT_DB")
-    if explicit:
-        target = Path(explicit)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return target
+    if is_mock_mode():
+        logger.info("Mock mode active — using MemorySaver checkpointer")
+        return MemorySaver()
 
-    candidates = []
-    shared_env = os.environ.get("SHARED_PATH")
-    if shared_env:
-        candidates.append(Path(shared_env))
-    candidates.append(Path("/shared"))
-    candidates.append(Path.cwd() / ".quadracode")
+    database_url = _get_database_url()
 
-    for directory in candidates:
+    if database_url:
         try:
-            directory.mkdir(parents=True, exist_ok=True)
+            import asyncio
+
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            from psycopg.rows import dict_row
+            from psycopg_pool import AsyncConnectionPool
+
+            open_timeout = float(
+                os.environ.get("QUADRACODE_PG_OPEN_TIMEOUT", "30")
+            )
+            logger.info(
+                "Initializing AsyncPostgresSaver "
+                "(pool min=%d, max=%d, open_timeout=%.0fs)",
+                _PG_POOL_MIN_SIZE,
+                _PG_POOL_MAX_SIZE,
+                open_timeout,
+            )
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                open=False,
+                min_size=_PG_POOL_MIN_SIZE,
+                max_size=_PG_POOL_MAX_SIZE,
+                timeout=open_timeout,
+                reconnect_timeout=open_timeout,
+                kwargs={
+                    "autocommit": True,
+                    "prepare_threshold": 0,
+                    "row_factory": dict_row,
+                },
+            )
+            await asyncio.wait_for(
+                pool.open(wait=True, timeout=open_timeout), timeout=open_timeout
+            )
+            checkpointer = AsyncPostgresSaver(pool)
+            await checkpointer.setup()
+            logger.info("AsyncPostgresSaver ready — checkpoint tables verified")
+            return checkpointer
+        except ImportError:
+            logger.warning(
+                "langgraph-checkpoint-postgres not installed; "
+                "falling back to MemorySaver"
+            )
         except Exception:
-            continue
-        if os.access(directory, os.W_OK):
-            return directory / "checkpoints.sqlite3"
+            logger.exception(
+                "Failed to initialize AsyncPostgresSaver; "
+                "falling back to MemorySaver"
+            )
 
-    fallback = Path.cwd()
-    return fallback / "checkpoints.sqlite3"
+    if not database_url and _running_inside_container():
+        logger.warning(
+            "Running in container without DATABASE_URL — "
+            "checkpoints will NOT survive restarts (MemorySaver)"
+        )
+    else:
+        logger.info("No DATABASE_URL — using MemorySaver (non-persistent)")
 
-
-def _build_checkpointer():
-    """
-    Builds the checkpointer for the graph.
-    
-    Note: Currently using MemorySaver for async compatibility.
-    TODO: Implement proper AsyncSqliteSaver with connection pooling.
-    """
-    # Always use MemorySaver for now to avoid async/sync issues
-    # The async checkpointer requires a different initialization pattern
     return MemorySaver()
 
 
-CHECKPOINTER = _build_checkpointer()
-GRAPH_RECURSION_LIMIT = int(os.environ.get("QUADRACODE_GRAPH_RECURSION_LIMIT", "80"))
-
-
-def build_graph(system_prompt: str, enable_context_engineering: bool = True):
+def build_graph(
+    system_prompt: str,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    enable_context_engineering: bool = True,
+):
     """
-    Constructs and compiles the main LangGraph for the Quadracode runtime.
+    Construct and compile the main LangGraph for the Quadracode runtime.
 
-    This function assembles the graph's nodes and edges, creating a complete, 
-    runnable workflow. It can be configured to either include the full context 
-    engineering pipeline or to use a simpler, more direct workflow.
+    Assembles the graph's nodes and edges, creating a complete, runnable
+    workflow. Supports a full-featured mode with the context engineering
+    pipeline, or a simpler direct workflow.
 
     Args:
-        system_prompt: The base system prompt for the driver.
-        enable_context_engineering: A flag to enable or disable the context 
-                                    engineering nodes.
+        system_prompt: The base system prompt for the driver LLM.
+        checkpointer: The checkpoint saver for state persistence. If None,
+                      the graph is compiled without checkpointing (suitable
+                      for the LangGraph dev server or stateless invocations).
+        enable_context_engineering: Enable the context engineering pipeline
+                                    nodes (pre-process, governor, post-process).
 
     Returns:
         A compiled LangGraph instance.
@@ -151,7 +217,6 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
     driver = make_driver(system_prompt, QuadracodeTools.tools)
 
     if enable_context_engineering:
-        # Full graph with context engineering
         try:
             config = ContextEngineConfig.from_environment()  # type: ignore[attr-defined]
         except AttributeError:
@@ -159,7 +224,6 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         context_engine = ContextEngine(config, system_prompt=system_prompt)
         workflow = StateGraph(QuadraCodeState)
 
-        # Add nodes
         workflow.add_node("prp_trigger_check", prp_trigger_check)
         workflow.add_node("context_pre", context_engine.pre_process_node)
         workflow.add_node("context_governor", context_engine.govern_context_node)
@@ -168,7 +232,6 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         workflow.add_node("tools", QuadracodeTools)
         workflow.add_node("context_tool", context_engine.handle_tool_response_node)
 
-        # Add edges
         workflow.add_edge(START, "prp_trigger_check")
         workflow.add_edge("prp_trigger_check", "context_pre")
         workflow.add_edge("context_pre", "context_governor")
@@ -182,7 +245,6 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         workflow.add_edge("tools", "context_tool")
         workflow.add_edge("context_tool", "driver")
     else:
-        # Simple graph without context engineering
         workflow = StateGraph(RuntimeState)
         workflow.add_node("driver", driver)
         workflow.add_node("tools", QuadracodeTools)
@@ -195,5 +257,4 @@ def build_graph(system_prompt: str, enable_context_engineering: bool = True):
         )
         workflow.add_edge("tools", "driver")
 
-    checkpointer = CHECKPOINTER if USE_CUSTOM_CHECKPOINTER else None
     return workflow.compile(checkpointer=checkpointer)

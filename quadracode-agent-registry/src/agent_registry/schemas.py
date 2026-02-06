@@ -1,121 +1,120 @@
-"""
-This module defines the Pydantic data models used for API requests and responses 
-in the Quadracode Agent Registry.
+"""Pydantic v2 request/response schemas for the Agent Registry API.
 
-These models, referred to as schemas, ensure that all data exchanged with the 
-API is strongly-typed and validated. They serve as the single source of truth 
-for the data contracts of the service, and are used by FastAPI to automatically 
-generate OpenAPI documentation and perform data validation. This strict typing 
-is crucial for maintaining a robust and reliable API.
+All models use Python 3.12+ built-in generics (``list``, ``dict``, ``X | None``)
+and timezone-aware ``datetime.now(timezone.utc)`` instead of the deprecated
+``datetime.utcnow()``.
 """
-from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentStatus(str, Enum):
-    """
-    Enumeration for the possible health statuses of an agent.
+    """Health status of a registered agent."""
 
-    Attributes:
-        HEALTHY: The agent is responsive and operating normally.
-        UNHEALTHY: The agent has missed its heartbeats and is considered stale.
-    """
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
 
 
 class AgentRegistrationRequest(BaseModel):
-    """
-    Data model for the payload sent by an agent when it registers with the 
-    registry service.
+    """Payload sent by an agent on startup to register with the service."""
 
-    This model captures all the necessary information for the registry to track 
-    a new agent, including its unique ID, network location, and whether it 
-    should be treated as a resident (hotpath) agent.
-    """
+    model_config = ConfigDict(strict=False)
 
     agent_id: str = Field(..., description="Unique identifier for the agent")
-    host: str = Field(..., description="Hostname or IP address reachable by the orchestrator")
-    port: int = Field(..., description="Primary service port exposed by the agent")
+    host: str = Field(
+        ..., description="Hostname or IP address reachable by the orchestrator"
+    )
+    port: int = Field(
+        ..., ge=1, le=65535, description="Primary service port exposed by the agent"
+    )
     hotpath: bool = Field(
         default=False,
-        description="Mark the agent as resident (hotpath) so it is never scaled down automatically.",
+        description="Mark the agent as resident (hotpath) so it is never scaled down.",
     )
 
 
 class AgentHeartbeat(BaseModel):
-    """
-    Data model for the heartbeat payload reported by an agent to indicate 
-    liveness.
+    """Heartbeat payload reported by an agent to signal liveness.
 
-    This model is used to update the agent's status in the registry, keeping 
-    it marked as healthy. The agent_id is typically provided via the URL path
-    parameter and injected by the API handler.
+    ``agent_id`` is injected from the URL path parameter by the API handler.
     """
 
-    agent_id: str = Field(default="", description="Agent identifier (set from URL path)")
-    status: AgentStatus = Field(default=AgentStatus.HEALTHY, description="Reported health status")
-    reported_at: datetime = Field(default_factory=datetime.utcnow, description="Heartbeat timestamp")
-    metrics: Optional[dict] = Field(default=None, description="System metrics and process info")
+    model_config = ConfigDict(strict=False)
+
+    agent_id: str = Field(
+        default="", description="Agent identifier (set from URL path)"
+    )
+    status: AgentStatus = Field(
+        default=AgentStatus.HEALTHY, description="Reported health status"
+    )
+    reported_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Heartbeat timestamp (UTC)",
+    )
+    metrics: dict | None = Field(
+        default=None, description="Optional system metrics and process info"
+    )
 
 
 class AgentInfo(BaseModel):
-    """
-    Represents the full record for an agent as maintained by the registry 
-    service.
+    """Full agent record as maintained by the registry."""
 
-    This model is used in API responses to provide detailed information about a 
-    registered agent.
-    """
+    model_config = ConfigDict(from_attributes=True)
 
     agent_id: str
     host: str
     port: int
     status: AgentStatus
     registered_at: datetime
-    last_heartbeat: Optional[datetime]
+    last_heartbeat: datetime | None = None
     hotpath: bool = Field(default=False)
-    metrics: Optional[dict] = None
+    metrics: dict | None = None
 
 
 class AgentListResponse(BaseModel):
-    """
-    Data model for the response envelope when returning a list of agents.
+    """Response envelope for agent listing endpoints."""
 
-    This model wraps the list of agents and includes metadata about the filters 
-    that were applied to the request.
-    """
-
-    agents: List[AgentInfo]
+    agents: list[AgentInfo]
     healthy_only: bool = Field(default=False)
     hotpath_only: bool = Field(default=False)
 
 
 class HotpathUpdateRequest(BaseModel):
-    """
-    Data model for the request payload used to toggle an agent's hotpath state.
-    """
+    """Request payload to toggle an agent's hotpath designation."""
 
     hotpath: bool = Field(..., description="Desired hotpath flag value")
 
 
 class RegistryStats(BaseModel):
-    """
-    Data model for the aggregate statistics exposed by the registry service.
-
-    This model provides a snapshot of the registry's state, including the 
-    number of total, healthy, and unhealthy agents.
-    """
+    """Aggregate statistics snapshot of the registry."""
 
     total_agents: int
     healthy_agents: int
     unhealthy_agents: int
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+
+    status: str = "healthy"
+
+
+class StatusResponse(BaseModel):
+    """Generic operation status response."""
+
+    status: str
+
+
+class ErrorDetail(BaseModel):
+    """Structured error response body."""
+
+    detail: str
 
 
 __all__ = [
@@ -124,6 +123,9 @@ __all__ = [
     "AgentHeartbeat",
     "AgentInfo",
     "AgentListResponse",
-    "RegistryStats",
     "HotpathUpdateRequest",
+    "RegistryStats",
+    "HealthResponse",
+    "StatusResponse",
+    "ErrorDetail",
 ]

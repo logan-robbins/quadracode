@@ -7,10 +7,11 @@ and the runtime context engine via Redis and persistent storage.
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 import redis
-from datetime import datetime, timezone
 
 from quadracode_ui.config import REDIS_HOST, REDIS_PORT
 
@@ -28,20 +29,20 @@ SHARED_CONFIG_PATH = Path("/shared/config/prompt_templates.json")
 class ConfigSync:
     """Manages synchronization of prompt configurations between UI and runtime."""
     
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: redis.Redis | None = None):
         """
         Initialize the ConfigSync manager.
         
         Args:
-            redis_client: Optional Redis client instance
+            redis_client: Optional Redis client instance.
         """
         self.redis_client = redis_client or redis.Redis(
-            host=REDIS_HOST, 
-            port=REDIS_PORT, 
-            decode_responses=True
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
         )
-    
-    def save_prompts(self, prompt_templates: Dict[str, Any]) -> bool:
+
+    def save_prompts(self, prompt_templates: dict[str, Any]) -> bool:
         """
         Save prompt templates to both Redis and persistent storage.
         
@@ -61,10 +62,10 @@ class ConfigSync:
             config_with_metadata = {
                 **prompt_templates,
                 "_metadata": {
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                     "version": self._increment_version(),
-                    "source": "ui"
-                }
+                    "source": "ui",
+                },
             }
             
             # 1. Save to Redis hash
@@ -74,9 +75,9 @@ class ConfigSync:
             # 2. Publish update event to stream
             update_event = {
                 "type": "prompt_template_update",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "version": config_with_metadata["_metadata"]["version"],
-                "source": "ui"
+                "source": "ui",
             }
             self.redis_client.xadd(CONFIG_UPDATE_STREAM, update_event, maxlen=100)
             
@@ -93,7 +94,7 @@ class ConfigSync:
             LOGGER.error(f"Failed to save prompt templates: {e}")
             return False
     
-    def load_prompts(self) -> Dict[str, Any]:
+    def load_prompts(self) -> dict[str, Any]:
         """
         Load prompt templates from Redis or file system.
         
@@ -128,7 +129,7 @@ class ConfigSync:
             LOGGER.error(f"Failed to load prompt templates: {e}")
             return self._get_defaults()
     
-    def watch_for_updates(self, callback=None) -> Optional[Dict[str, Any]]:
+    def watch_for_updates(self, callback=None) -> dict[str, Any] | None:
         """
         Check for configuration updates from other sources.
         
@@ -184,7 +185,7 @@ class ConfigSync:
         except redis.RedisError:
             return 1
     
-    def _save_to_file(self, config: Dict[str, Any]) -> None:
+    def _save_to_file(self, config: dict[str, Any]) -> None:
         """Save configuration to shared file system."""
         try:
             # Create directory if it doesn't exist
@@ -203,7 +204,7 @@ class ConfigSync:
         except Exception as e:
             LOGGER.warning(f"Failed to save to shared file: {e}")
     
-    def _save_backup(self, config: Dict[str, Any]) -> None:
+    def _save_backup(self, config: dict[str, Any]) -> None:
         """Save backup configuration to user's home directory."""
         try:
             backup_path = Path.home() / ".quadracode" / "prompt_templates_backup.json"
@@ -215,11 +216,11 @@ class ConfigSync:
         except Exception as e:
             LOGGER.debug(f"Failed to save backup: {e}")
     
-    def _strip_metadata(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def _strip_metadata(self, config: dict[str, Any]) -> dict[str, Any]:
         """Remove internal metadata from configuration."""
         return {k: v for k, v in config.items() if not k.startswith("_")}
     
-    def _get_defaults(self) -> Dict[str, Any]:
+    def _get_defaults(self) -> dict[str, Any]:
         """Get default prompt template configuration."""
         return {
             "governor": {
@@ -249,8 +250,8 @@ class ConfigSync:
         try:
             reload_event = {
                 "type": "reload_prompts",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "version": self.get_current_version()
+                "timestamp": datetime.now(UTC).isoformat(),
+                "version": self.get_current_version(),
             }
             self.redis_client.xadd(CONFIG_UPDATE_STREAM, reload_event, maxlen=100)
             
@@ -264,7 +265,7 @@ class ConfigSync:
             return False
 
 
-def get_config_sync(redis_client: Optional[redis.Redis] = None) -> ConfigSync:
+def get_config_sync(redis_client: redis.Redis | None = None) -> ConfigSync:
     """
     Get a ConfigSync instance.
     

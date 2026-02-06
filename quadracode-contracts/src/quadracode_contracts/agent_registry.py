@@ -1,108 +1,126 @@
 """
-This module defines the Pydantic data models that serve as the shared contract 
-for the Quadracode Agent Registry service.
+Pydantic data models serving as the shared contract for the Quadracode Agent
+Registry service.
 
-These models ensure type-safe and validated data exchange between the agent 
-registry and its clients (such as agents and the orchestrator). The contracts 
-are designed to be minimal and efficient, supporting a lightweight registration 
-and discovery protocol. By centralizing these schemas, this module provides a 
-single source of truth for the registry's API, which simplifies client 
-implementations and ensures consistency.
+These models ensure type-safe and validated data exchange between the agent
+registry and its clients (agents, orchestrator).  The contracts are minimal
+and efficient, supporting a lightweight registration and discovery protocol.
+Centralizing these schemas provides a single source of truth for the
+registry's API.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def _utc_now() -> datetime:
-    """Returns the current UTC time as a timezone-aware datetime."""
+    """Return the current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
 
 class AgentStatus(str, Enum):
-    """
-    Enumeration for the possible health statuses of an agent.
+    """Possible health statuses of an agent.
 
     Attributes:
         HEALTHY: The agent is responsive and operating normally.
-        UNHEALTHY: The agent has missed its heartbeats and is considered stale.
+        UNHEALTHY: The agent has missed heartbeats and is considered stale.
     """
+
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
 
 
 class AgentRegistrationRequest(BaseModel):
-    """
-    Data model for the payload sent by an agent when it registers with the 
-    registry service.
+    """Payload sent by an agent when it registers with the registry service.
 
-    This model captures the essential information required for the registry to 
-    track a new agent, including its unique ID and network location.
+    Captures the essential information required for the registry to track a
+    new agent, including its unique ID and network location.
     """
 
-    agent_id: str = Field(..., description="Unique identifier for the agent")
-    host: str = Field(..., description="Hostname or IP address reachable by the orchestrator")
-    port: int = Field(..., description="Primary service port exposed by the agent")
+    model_config = ConfigDict(extra="ignore")
+
+    agent_id: str = Field(
+        ...,
+        min_length=1,
+        description="Unique identifier for the agent.",
+    )
+    host: str = Field(
+        ...,
+        min_length=1,
+        description="Hostname or IP address reachable by the orchestrator.",
+    )
+    port: int = Field(
+        ...,
+        ge=1,
+        le=65535,
+        description="Primary service port exposed by the agent.",
+    )
 
 
 class AgentHeartbeat(BaseModel):
-    """
-    Data model for the heartbeat payload reported by an agent to indicate 
-    liveness.
+    """Heartbeat payload reported by an agent to indicate liveness.
 
-    This model is used to update an agent's status in the registry, keeping it 
-    marked as healthy.
+    Used to update an agent's status in the registry, keeping it marked as
+    healthy.
     """
 
-    agent_id: str = Field(..., description="Agent identifier sending the heartbeat")
-    status: AgentStatus = Field(default=AgentStatus.HEALTHY, description="Reported health status")
-    reported_at: datetime = Field(default_factory=_utc_now, description="Heartbeat timestamp")
+    agent_id: str = Field(
+        ...,
+        min_length=1,
+        description="Agent identifier sending the heartbeat.",
+    )
+    status: AgentStatus = Field(
+        default=AgentStatus.HEALTHY,
+        description="Reported health status.",
+    )
+    reported_at: datetime = Field(
+        default_factory=_utc_now,
+        description="Heartbeat timestamp.",
+    )
 
 
 class AgentInfo(BaseModel):
-    """
-    Represents the full record for an agent as maintained by the registry 
-    service.
+    """Full record for an agent as maintained by the registry service.
 
-    This model is used in API responses to provide detailed information about a 
-    registered agent, including its status and timestamps.
+    Used in API responses to provide detailed information about a registered
+    agent, including its status and timestamps.
     """
 
-    agent_id: str
+    agent_id: str = Field(..., min_length=1)
     host: str
-    port: int
+    port: int = Field(..., ge=1, le=65535)
     status: AgentStatus
     registered_at: datetime
-    last_heartbeat: Optional[datetime] = None
+    last_heartbeat: datetime | None = None
 
 
 class AgentListResponse(BaseModel):
-    """
-    Data model for the response envelope when returning a list of agents.
+    """Response envelope when returning a list of agents.
 
-    This model wraps the list of agents and includes metadata about any filters 
-    that were applied to the request.
+    Wraps the list of agents and includes metadata about any filters that
+    were applied.
     """
 
-    agents: List[AgentInfo]
-    healthy_only: bool = Field(default=False, description="Whether unhealthy agents were filtered")
+    agents: list[AgentInfo]
+    healthy_only: bool = Field(
+        default=False,
+        description="Whether unhealthy agents were filtered.",
+    )
 
 
 class RegistryStats(BaseModel):
-    """
-    Data model for the aggregate statistics exposed by the registry service.
+    """Aggregate statistics exposed by the registry service.
 
-    This model provides a snapshot of the registry's state, including the 
-    number of total, healthy, and unhealthy agents.
+    Provides a snapshot of the registry's state — total, healthy, and
+    unhealthy agent counts.
     """
 
-    total_agents: int
-    healthy_agents: int
-    unhealthy_agents: int
+    total_agents: int = Field(..., ge=0)
+    healthy_agents: int = Field(..., ge=0)
+    unhealthy_agents: int = Field(..., ge=0)
     last_updated: datetime = Field(default_factory=_utc_now)
 
 

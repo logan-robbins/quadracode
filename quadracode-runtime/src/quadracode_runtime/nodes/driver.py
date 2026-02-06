@@ -1,26 +1,33 @@
 """
-This module provides the `make_driver` factory function, which is responsible for 
-creating the core decision-making component (the "driver") of the LangGraph.
+This module provides the ``make_driver`` factory function, which is responsible
+for creating the core decision-making component (the "driver") of the LangGraph.
 
-The driver is the node in the graph that is responsible for interpreting the 
-current state and deciding on the next action, which is typically to call a tool 
+The driver is the node in the graph that is responsible for interpreting the
+current state and deciding on the next action, which is typically to call a tool
 or to respond to the user. This module supports three driver types:
-- "heuristic": Simple rule-based driver for testing
-- "mock": Uses mock responses (for QUADRACODE_MOCK_MODE)
-- Default: LLM-based driver for production
 
-The choice of driver is determined by the `QUADRACODE_DRIVER_MODEL` environment 
+- ``"heuristic"``: Simple rule-based driver for testing (sync).
+- ``"mock"``: Uses mock responses for QUADRACODE_MOCK_MODE (sync).
+- Default: LLM-based driver for production (**async** — uses ``ainvoke``).
+
+The LLM driver is an ``async def`` so it never blocks the asyncio event loop
+under LangGraph's ASGI runtime. LangGraph natively dispatches async node
+functions without any wrapper. The mock and heuristic drivers remain sync;
+LangGraph handles both transparently.
+
+The choice of driver is determined by the ``QUADRACODE_DRIVER_MODEL`` environment
 variable, allowing for flexible configuration of the runtime's core logic.
 """
 from __future__ import annotations
 
 import logging
 import os
+from typing import Callable
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 
-from ..state import QuadraCodeState
+from ..state import QuadraCodeState, RuntimeState
 from ..mock_mode import is_mock_mode, MockLLMResponse
 
 
@@ -47,7 +54,7 @@ def _coerce_text(content) -> str:
     return str(content).strip() if content is not None else ""
 
 
-def make_driver(system_prompt: str, tools: list) -> callable:
+def make_driver(system_prompt: str, tools: list) -> Callable[[QuadraCodeState], dict[str, list[AnyMessage]]]:
     """
     Factory function that creates and returns the appropriate driver for the 
     LangGraph.
@@ -102,7 +109,7 @@ def make_driver(system_prompt: str, tools: list) -> callable:
 
     if driver_model == "heuristic":
 
-        def heuristic_driver(state: RuntimeState) -> dict[str, list[AnyMessage]]:
+        def heuristic_driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
             """
             A simple, heuristic-based driver for testing and development.
 
@@ -149,19 +156,18 @@ def make_driver(system_prompt: str, tools: list) -> callable:
     model_name = os.environ.get("QUADRACODE_DRIVER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     llm = init_chat_model(model_name)
 
-    def driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
+    async def driver(state: QuadraCodeState) -> dict[str, list[AnyMessage]]:
         """
-        An LLM-based driver that uses a language model to make decisions.
+        An async LLM-based driver that uses a language model to make decisions.
 
         This driver dynamically constructs a detailed system prompt by combining 
         the base prompt with contextual information from the state, such as the 
         governor's plan, active skills, and memory guidance. It then invokes the 
-        LLM with this context to generate the next action.
+        LLM asynchronously via ``ainvoke`` to avoid blocking the LangGraph event
+        loop under the ASGI runtime.
         """
         msgs: list[AnyMessage] = state["messages"]
-        LOGGER.info(f"Driver starting with {len(msgs)} messages")
-        for i, msg in enumerate(msgs):
-            LOGGER.info(f"  Message {i}: {type(msg).__name__} - {str(msg)[:100]}")
+        LOGGER.debug("Driver starting with %d messages", len(msgs))
         outline = state.get("governor_prompt_outline", {}) if isinstance(state, dict) else {}
         system_sections = [system_prompt]
 
@@ -260,14 +266,12 @@ def make_driver(system_prompt: str, tools: list) -> callable:
         # Inject context segments into the conversation
         context_segments = state.get("context_segments", []) if isinstance(state, dict) else []
         ordered_segments = outline.get("ordered_segments", []) if isinstance(outline, dict) else []
-        LOGGER.info(f"DEBUG: Driver received state with {len(context_segments)} context_segments")
-        for seg in context_segments:
-            LOGGER.info(f"DEBUG: Segment: {seg.get('id')} - {seg.get('type')}")
+        LOGGER.debug("Driver received state with %d context_segments", len(context_segments))
         if context_segments:
             # Build context injection from segments marked in governor's ordered_segments
             context_blocks = []
 
-            LOGGER.info(f"Driver context injection: {len(context_segments)} total segments, {len(ordered_segments)} ordered")
+            LOGGER.debug("Driver context injection: %d total segments, %d ordered", len(context_segments), len(ordered_segments))
             
             # First add segments that are in the ordered list
             for segment_id in ordered_segments:
@@ -277,7 +281,7 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                         seg_type = segment.get("type", "context")
                         if content:
                             context_blocks.append(f"[{seg_type}: {segment_id}]\n{content}")
-                            LOGGER.info(f"  Added ordered segment: {segment_id} ({len(content)} chars)")
+                            LOGGER.debug("  Added ordered segment: %s (%d chars)", segment_id, len(content))
             
             # Add any high-priority segments not in ordered list (priority >= 8)
             for segment in context_segments:
@@ -287,15 +291,15 @@ def make_driver(system_prompt: str, tools: list) -> callable:
                     seg_type = segment.get("type", "context")
                     if content:
                         context_blocks.append(f"[{seg_type}: {seg_id}]\n{content}")
-                        LOGGER.info(f"  Added high-priority segment: {seg_id} ({len(content)} chars)")
+                        LOGGER.debug("  Added high-priority segment: %s (%d chars)", seg_id, len(content))
             
             if context_blocks:
                 # Add context as a system message right after the main system prompt
                 context_injection = "# Active Context\n\n" + "\n\n".join(context_blocks)
                 combined_system_prompt = combined_system_prompt + "\n\n" + context_injection
-                LOGGER.info(f"  Context injection complete: {len(context_blocks)} blocks, {len(context_injection)} chars total")
+                LOGGER.debug("Context injection complete: %d blocks, %d chars total", len(context_blocks), len(context_injection))
             else:
-                LOGGER.warning(f"  No context blocks generated despite having {len(context_segments)} segments and {len(ordered_segments)} ordered!")
+                LOGGER.warning("No context blocks generated despite having %d segments and %d ordered", len(context_segments), len(ordered_segments))
 
         if not msgs or not isinstance(msgs[0], SystemMessage):
             msgs = [SystemMessage(content=combined_system_prompt), *msgs]
@@ -304,12 +308,12 @@ def make_driver(system_prompt: str, tools: list) -> callable:
 
         # Debug: log a snippet of the system prompt to verify context injection
         if "# Active Context" in combined_system_prompt:
-            LOGGER.info(f"✓ Active Context section present in system prompt ({len(combined_system_prompt)} chars total)")
+            LOGGER.debug("Active Context section present in system prompt (%d chars total)", len(combined_system_prompt))
         else:
-            LOGGER.warning(f"✗ Active Context section NOT present in system prompt (segments={len(context_segments)}, ordered={len(ordered_segments) if isinstance(outline, dict) and 'ordered_segments' in outline else 0})")
+            LOGGER.debug("Active Context section not present in system prompt (segments=%d)", len(context_segments))
 
         llm_with_tools = llm.bind_tools(tools)
-        ai_msg = llm_with_tools.invoke(msgs)
+        ai_msg = await llm_with_tools.ainvoke(msgs)
         return {"messages": [ai_msg]}
 
     return driver

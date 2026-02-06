@@ -31,7 +31,7 @@ def test_rejection_sets_test_requirement_and_clears_after_tests() -> None:
     apply_prp_transition(state, PRPState.TEST)
     apply_prp_transition(state, PRPState.CONCLUDE)
     apply_prp_transition(state, PRPState.PROPOSE)
-    apply_prp_transition(state, PRPState.HYPOTHESIZE, human_clone_triggered=True)
+    apply_prp_transition(state, PRPState.HYPOTHESIZE, supervisor_triggered=True)
 
     assert state["invariants"]["needs_test_after_rejection"] is True
 

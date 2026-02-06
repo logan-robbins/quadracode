@@ -1,10 +1,19 @@
+"""Provides a LangChain tool for inspecting the Quadracode Context Engine.
+
+This module offers the ``inspect_context_engine`` tool, which aggregates and
+summarizes recent context engine activity (stage transitions, compression
+events, exhaustion mode changes) from JSONL log files.  Agents use this tool
+to understand the current state of their context window and any compression
+or reset operations that have occurred.
+"""
 from __future__ import annotations
 
 import json
 import os
 from collections import deque
 from pathlib import Path
-from typing import Any, Iterable, List, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from langchain_core.tools import tool
 
@@ -19,7 +28,7 @@ def _compression_log_dir() -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def _load_jsonl_tail(path: Path, limit: int) -> List[dict[str, Any]]:
+def _load_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
     entries: deque[dict[str, Any]] = deque(maxlen=limit)
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -44,14 +53,14 @@ def _format_float(value: Any) -> str:
     return f"{number:.2f}"
 
 
-def _summarize_stage_entries(entries: Iterable[dict[str, Any]], limit: int) -> Tuple[List[str], dict[str, Any]]:
-    filtered: List[dict[str, Any]] = []
+def _summarize_stage_entries(entries: Iterable[dict[str, Any]], limit: int) -> tuple[list[str], dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
     for entry in entries:
         event = str(entry.get("event") or "")
         if event.startswith("stage.") or event == "exhaustion_update":
             filtered.append(entry)
     tail = filtered[-limit:]
-    lines: List[str] = []
+    lines: list[str] = []
     last_quality = None
     last_exhaustion = None
     for item in tail:
@@ -90,11 +99,11 @@ def _summarize_stage_entries(entries: Iterable[dict[str, Any]], limit: int) -> T
     return lines, meta
 
 
-def _summarize_compression_entries(entries: Iterable[dict[str, Any]], limit: int) -> Tuple[List[str], dict[str, Any]]:
+def _summarize_compression_entries(entries: Iterable[dict[str, Any]], limit: int) -> tuple[list[str], dict[str, Any]]:
     tail = list(entries)[-limit:]
-    lines: List[str] = []
+    lines: list[str] = []
     total_saved = 0
-    ratios: List[float] = []
+    ratios: list[float] = []
     for item in tail:
         before = int(item.get("before_tokens") or 0)
         after = int(item.get("after_tokens") or 0)
@@ -118,7 +127,7 @@ def _summarize_compression_entries(entries: Iterable[dict[str, Any]], limit: int
     return lines, meta
 
 
-def _format_section(title: str, lines: List[str], footer: str | None = None) -> str:
+def _format_section(title: str, lines: list[str], footer: str | None = None) -> str:
     if not lines:
         if footer:
             return f"{title}\n{footer}"

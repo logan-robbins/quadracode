@@ -130,8 +130,7 @@ class ContextReducer:
                 chunk=chunk
             )
             
-            response = await asyncio.to_thread(
-                llm.invoke,
+            response = await llm.ainvoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=prompt)],
             )
             partial_summaries.append(str(response.content).strip())
@@ -146,8 +145,7 @@ class ContextReducer:
             combined=combined
         )
         
-        response = await asyncio.to_thread(
-            llm.invoke,
+        response = await llm.ainvoke(
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=final_prompt),

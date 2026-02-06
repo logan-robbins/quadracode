@@ -15,7 +15,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 import httpx
 
@@ -48,28 +48,28 @@ class AgentManagementRequest(BaseModel):
         description="Agent management operation to perform: "
         "spawn_agent|delete_agent|list_containers|get_container_status|mark_hotpath|clear_hotpath|list_hotpath",
     )
-    agent_id: Optional[str] = Field(
+    agent_id: str | None = Field(
         default=None,
         description="Agent identifier. Required for delete_agent and get_container_status. "
         "Optional for spawn_agent (will be auto-generated if not provided).",
     )
-    image: Optional[str] = Field(
+    image: str | None = Field(
         default=None,
         description="Docker image name for spawning agent. Defaults to 'quadracode-agent'.",
     )
-    network: Optional[str] = Field(
+    network: str | None = Field(
         default=None,
         description="Docker network to attach the agent to. Defaults to 'quadracode_default'.",
     )
-    workspace_id: Optional[str] = Field(
+    workspace_id: str | None = Field(
         default=None,
         description="Optional workspace identifier to mount into the agent container.",
     )
-    workspace_volume: Optional[str] = Field(
+    workspace_volume: str | None = Field(
         default=None,
         description="Optional Docker volume name backing the workspace to mount at /workspace.",
     )
-    workspace_mount: Optional[str] = Field(
+    workspace_mount: str | None = Field(
         default=None,
         description="Mount path inside the agent container for the workspace volume (default /workspace).",
     )
@@ -113,7 +113,7 @@ def _get_scripts_dir() -> Path:
     return Path("/app/scripts/agent-management")
 
 
-def _run_script(script_name: str, *args: str, env_overrides: Optional[Dict[str, str]] = None) -> dict:
+def _run_script(script_name: str, *args: str, env_overrides: dict[str, str] | None = None) -> dict:
     """Executes a specified agent management script in a subprocess and captures its output.
 
     This function is a generic wrapper for running the shell scripts that implement
@@ -232,7 +232,7 @@ def agent_management_tool(
         workspace_volume = params.workspace_volume
         workspace_mount = params.workspace_mount
 
-        descriptor_env: Optional[dict[str, Any]] = None
+        descriptor_env: dict[str, Any] | None = None
         descriptor_raw = os.environ.get("QUADRACODE_ACTIVE_WORKSPACE_DESCRIPTOR")
         if descriptor_raw:
             try:
@@ -250,7 +250,7 @@ def agent_management_tool(
         if workspace_mount is None:
             workspace_mount = DEFAULT_WORKSPACE_MOUNT
 
-        env_overrides: Dict[str, str] = {}
+        env_overrides: dict[str, str] = {}
         if workspace_id:
             env_overrides["QUADRACODE_WORKSPACE_ID"] = str(workspace_id)
         if workspace_volume:
@@ -312,7 +312,7 @@ agent_management_tool.name = "agent_management"
 REGISTRY_TIMEOUT = float(os.environ.get("AGENT_MANAGEMENT_REGISTRY_TIMEOUT", "5"))
 
 
-def _registry_request(method: str, path: str, payload: Dict[str, Any] | None = None) -> tuple[bool, Any]:
+def _registry_request(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[bool, Any]:
     """A helper function for making direct HTTP requests to the agent registry."""
     base_url = _registry_base_url()
     url = f"{base_url}{path}"
@@ -346,7 +346,7 @@ def _is_hotpath_agent(agent_id: str) -> bool:
     return bool(payload.get("hotpath"))
 
 
-def _update_hotpath_flag(agent_id: Optional[str], hotpath: bool) -> Dict[str, Any]:
+def _update_hotpath_flag(agent_id: str | None, hotpath: bool) -> dict[str, Any]:
     """Sets or clears the 'hotpath' flag for an agent via the registry API."""
     if not agent_id:
         return {"success": False, "error": "agent_id_required"}
@@ -365,7 +365,7 @@ def _update_hotpath_flag(agent_id: Optional[str], hotpath: bool) -> Dict[str, An
     }
 
 
-def _list_hotpath_agents() -> Dict[str, Any]:
+def _list_hotpath_agents() -> dict[str, Any]:
     """Retrieves a list of all agents currently marked as 'hotpath' from the registry."""
     ok, payload = _registry_request("GET", "/agents/hotpath")
     if not ok or not isinstance(payload, dict):

@@ -225,8 +225,8 @@ def docker_stack_with_humanclone(check_prerequisites):
     if not reuse_stack:
         run_compose(["down", "-v"], check=False)
 
-        # Set supervisor to human_clone
-        env_override = {"QUADRACODE_SUPERVISOR_RECIPIENT": "human_clone"}
+        # Set supervisor to supervisor (backward-compat: human_clone also accepted)
+        env_override = {"QUADRACODE_SUPERVISOR_RECIPIENT": "supervisor"}
 
         run_compose(
             [

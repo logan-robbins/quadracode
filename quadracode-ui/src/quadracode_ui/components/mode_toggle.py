@@ -4,7 +4,7 @@ Mode toggle component for switching between Human and HumanClone modes.
 
 import streamlit as st
 
-from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
+from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT, SUPERVISOR_RECIPIENT
 from quadracode_ui.utils.message_utils import active_supervisor, set_supervisor
 
 
@@ -16,20 +16,20 @@ def render_mode_toggle(chat_id: str | None = None) -> str:
         chat_id: Optional chat ID to associate the mode with.
 
     Returns:
-        The currently selected mode ('human' or 'human_clone').
+        The currently selected mode ('human' or 'supervisor').
     """
     current = active_supervisor()
     
     # Display mode indicator badge
-    if current == HUMAN_CLONE_RECIPIENT:
-        st.info("🤖 **HumanClone Mode Active** - Messages sent to orchestrator with HumanClone supervisor")
+    if current in {HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT}:
+        st.info("🤖 **Supervisor Mode Active** - Messages sent to orchestrator with autonomous supervisor")
     else:
         st.info("👤 **Human Mode Active** - Direct human supervision")
     
     # Radio button selection
     mode_options = {
         "Human Mode": HUMAN_RECIPIENT,
-        "HumanClone Mode (Autonomous)": HUMAN_CLONE_RECIPIENT,
+        "Supervisor Mode (Autonomous)": SUPERVISOR_RECIPIENT,
     }
     
     # Find current selection
@@ -64,7 +64,7 @@ def render_mode_toggle(chat_id: str | None = None) -> str:
         # Update the supervisor
         set_supervisor(selected_value, chat_id)
     
-    return "human_clone" if selected_value == HUMAN_CLONE_RECIPIENT else "human"
+    return "supervisor" if selected_value in {HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT} else "human"
 
 
 def render_mode_status(compact: bool = False) -> None:
@@ -77,13 +77,13 @@ def render_mode_status(compact: bool = False) -> None:
     current = active_supervisor()
     
     if compact:
-        if current == HUMAN_CLONE_RECIPIENT:
-            st.caption("🤖 HumanClone Mode")
+        if current in {HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT}:
+            st.caption("🤖 Supervisor Mode")
         else:
             st.caption("👤 Human Mode")
     else:
-        if current == HUMAN_CLONE_RECIPIENT:
-            st.success("🤖 HumanClone Mode Active", icon="🤖")
+        if current in {HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT}:
+            st.success("🤖 Supervisor Mode Active", icon="🤖")
         else:
             st.info("👤 Human Mode Active", icon="👤")
 

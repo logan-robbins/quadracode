@@ -9,7 +9,7 @@ entry point that can be used to launch any type of Quadracode runtime component,
 which is particularly useful for containerized deployments.
 
 Environment Variables:
-    QUADRACODE_PROFILE: Runtime profile (orchestrator, agent, human_clone)
+    QUADRACODE_PROFILE: Runtime profile (orchestrator, agent, supervisor/human_clone)
     QUADRACODE_MOCK_MODE: Set to "true" for mock mode (no external dependencies)
 """
 from __future__ import annotations

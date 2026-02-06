@@ -1,14 +1,14 @@
-"""
-This module is responsible for creating and configuring the FastAPI application.
+"""FastAPI application factory for the Quadracode Agent Registry.
 
-It handles the initialization of all major components, including settings, 
-database connections, and the agent registry service. The `create_app` function 
-serves as the main factory for the application, ensuring that all dependencies 
-are properly wired up before the application starts. This centralized setup 
-simplifies the application's entry point and makes it easier to manage 
-dependencies.
+Uses the modern ``lifespan`` async-context-manager pattern (FastAPI >= 0.95)
+instead of the deprecated ``@app.on_event`` hooks.  All heavyweight
+initialisation (settings, database, service) happens inside the lifespan so
+that importing this module is side-effect-free.
 """
+
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -20,53 +20,54 @@ from .service import AgentRegistryService
 logger = logging.getLogger(__name__)
 
 
-def create_app() -> FastAPI:
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+    """Manage startup and shutdown resources for the registry.
+
+    On startup: load settings, initialise the database schema, wire up the
+    service layer, and mount the API router.
+
+    On shutdown: (currently no teardown needed — SQLite connections close
+    on garbage collection).
     """
-    Factory function to create and configure the FastAPI application.
+    logging.basicConfig(level=logging.INFO, force=True)
 
-    This function orchestrates the entire setup of the agent registry service. 
-    It initializes the application settings, sets up the database schema, 
-    creates an instance of the `AgentRegistryService`, and mounts the API 
-    router. The fully configured FastAPI application instance is then returned.
-
-    Returns:
-        A fully configured `FastAPI` application instance.
-    """
-    logging.basicConfig(level=logging.INFO)
-
-    # Initialize settings, database, and service synchronously
     settings = RegistrySettings()
-    
-    # Log mock mode status
+
     if settings.quadracode_mock_mode:
-        logger.info("QUADRACODE_MOCK_MODE=true: Using in-memory SQLite database")
+        logger.info("QUADRACODE_MOCK_MODE=true: using in-memory SQLite database")
     else:
-        logger.info(f"Using SQLite database at: {settings.database_path}")
-    
+        logger.info("Using SQLite database at: %s", settings.database_path)
+
     db = Database(settings.database_path)
     db.init_schema()
     service = AgentRegistryService(db=db, settings=settings)
 
-    description = "Lightweight registry for Quadracode agents (SQLite-backed)"
-    if settings.quadracode_mock_mode:
-        description += " [MOCK MODE: in-memory database]"
-
-    app = FastAPI(
-        title="Quadracode Agent Registry",
-        description=description,
-        version="1.0.0",
-    )
-
-    # Attach to app state for potential future use
-    app.state.settings = settings
-    app.state.db = db
-    app.state.service = service
+    # Store on app.state for introspection / testing
+    application.state.settings = settings
+    application.state.db = db
+    application.state.service = service
 
     # Mount API routes
-    app.include_router(get_router(service))
+    application.include_router(get_router(service))
 
-    return app
+    logger.info("Agent Registry started on port %d", settings.registry_port)
+    yield
+    logger.info("Agent Registry shutting down")
 
 
-# Create the ASGI app instance for uvicorn
+def create_app() -> FastAPI:
+    """Application factory.
+
+    Returns:
+        A fully configured ``FastAPI`` instance with lifespan management.
+    """
+    return FastAPI(
+        title="Quadracode Agent Registry",
+        description="Lightweight registry for Quadracode agents (SQLite-backed)",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+
+
 app = create_app()

@@ -1,125 +1,117 @@
 """
-This module defines the data contracts that govern the behavior of the 
-Quadracode system when operating in autonomous mode.
+Data contracts governing the behaviour of the Quadracode system when operating
+in autonomous mode.
 
-These Pydantic models are used to structure the communication and state 
-management required for autonomous orchestration. They cover routing directives, 
-progress checkpoints, hypothesis critiques, and escalation procedures. By 
-enforcing a strict schema for these interactions, this module ensures that the 
-autonomous workflow is robust, predictable, and transparent.
+These Pydantic models structure the communication and state management required
+for autonomous orchestration — routing directives, progress checkpoints,
+hypothesis critiques, and escalation procedures.  The strict schemas ensure
+that the autonomous workflow is robust, predictable, and transparent.
 """
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, List, Optional, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, ValidationError, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 def _utc_now() -> str:
+    """Return the current UTC time as a seconds-precision ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-class AutonomousRoutingDirective(BaseModel):
-    """
-    Defines the routing instructions emitted by the autonomous orchestrator.
+# ---------------------------------------------------------------------------
+# Fields common to the routing directive that are safe to extract from an
+# untrusted payload during the two-pass parse in ``from_payload``.
+# ---------------------------------------------------------------------------
+_ROUTING_KNOWN_FIELDS: frozenset[str] = frozenset(
+    {"deliver_to_human", "escalate", "reason", "recovery_attempts"}
+)
 
-    This model is used to signal how a particular message or result should be 
-    handled, such as whether it needs to be delivered to a human for review or 
-    if a fatal error requires escalation. It provides a structured way for the 
-    orchestrator to control the flow of information in the system.
+
+class AutonomousRoutingDirective(BaseModel):
+    """Routing instructions emitted by the autonomous orchestrator.
+
+    Signals how a particular message or result should be handled — e.g.
+    delivered to a human for review, or escalated due to a fatal error.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     deliver_to_human: bool = Field(
         default=False,
-        description="Whether the orchestrator intends to notify the human (e.g., final report).",
+        description="Whether the orchestrator intends to notify the human.",
     )
     escalate: bool = Field(
         default=False,
-        description="Flag indicating a fatal error that must be escalated to the human.",
+        description="Flag indicating a fatal error that must be escalated.",
     )
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         default=None,
-        description="Short description explaining why human delivery/escalation is requested.",
+        description="Short description of why delivery/escalation is requested.",
     )
-    recovery_attempts: List[str] = Field(
+    recovery_attempts: list[str] = Field(
         default_factory=list,
-        description="List of recovery attempts taken before requesting escalation.",
+        description="Recovery attempts taken before requesting escalation.",
     )
 
     @classmethod
-    def from_payload(
-        cls,
-        payload: Any,
-    ) -> Optional["AutonomousRoutingDirective"]:
-        """
-        Safely creates a directive from an arbitrary payload.
+    def from_payload(cls, payload: Any) -> Self | None:
+        """Safely create a directive from an arbitrary payload.
 
-        This class method is designed to be resilient to malformed or 
-        unstructured data. It attempts to parse a dictionary-like payload into 
-        a strongly-typed `AutonomousRoutingDirective`, filtering out any 
-        unrecognized fields.
+        Resilient to malformed or unstructured data.  A two-pass approach is
+        used: first the full dict is tried (with ``extra='ignore'``), then —
+        if that fails — only recognised fields are extracted and retried.
 
         Args:
             payload: The raw payload to parse.
 
         Returns:
-            An instance of `AutonomousRoutingDirective`, or `None` if the 
-            payload is not a valid directive.
+            An :class:`AutonomousRoutingDirective`, or ``None`` if the
+            payload cannot be interpreted as a valid directive.
         """
-
         if not isinstance(payload, dict):
             return None
 
+        # Pass 1: try full dict (extra fields are silently dropped).
         try:
             return cls(**payload)
         except ValidationError:
-            filtered: dict[str, Any] = {}
-            for field in ("deliver_to_human", "escalate", "reason", "recovery_attempts"):
-                if field in payload:
-                    filtered[field] = payload[field]
+            pass
 
-            if not filtered:
-                return None
+        # Pass 2: extract only known fields and retry.
+        filtered = {k: v for k, v in payload.items() if k in _ROUTING_KNOWN_FIELDS}
+        if not filtered:
+            return None
 
-            try:
-                return cls(**filtered)
-            except ValidationError:
-                return None
+        try:
+            return cls(**filtered)
+        except ValidationError:
+            return None
 
     def to_payload(self) -> dict[str, Any]:
-        """
-        Serializes the directive to a JSON-compatible dictionary.
-
-        This method is used to prepare the directive for inclusion in a message 
-        envelope.
+        """Serialize the directive to a JSON-compatible dictionary.
 
         Returns:
             A dictionary representation of the directive.
         """
-
         return self.model_dump()
 
 
 class AutonomousCheckpointRecord(BaseModel):
-    """
-    Represents a structured checkpoint entry recorded during autonomous 
-    operation.
+    """Structured checkpoint entry recorded during autonomous operation.
 
-    Checkpoints are used to track the progress of a long-running autonomous 
-    task. They provide a snapshot of the task's status at a given milestone, 
-    including a summary of the work completed and the planned next steps.
+    Checkpoints track the progress of a long-running autonomous task,
+    providing a snapshot of status at a given milestone including work
+    completed and planned next steps.
     """
 
     milestone: int = Field(..., ge=1)
     status: Literal["in_progress", "complete", "blocked"]
     summary: str = Field(..., min_length=1)
-    next_steps: List[str] = Field(default_factory=list)
-    title: Optional[str] = Field(
+    next_steps: list[str] = Field(default_factory=list)
+    title: str | None = Field(
         default=None,
         description="Optional human-readable milestone title.",
     )
@@ -127,12 +119,7 @@ class AutonomousCheckpointRecord(BaseModel):
 
 
 class CritiqueCategory(str, Enum):
-    """
-    Defines the categorization buckets for hypothesis critiques.
-
-    This enumeration is used to classify critiques based on the aspect of the 
-    system they are addressing.
-    """
+    """Categorization buckets for hypothesis critiques."""
 
     CODE_QUALITY = "code_quality"
     ARCHITECTURE = "architecture"
@@ -141,12 +128,7 @@ class CritiqueCategory(str, Enum):
 
 
 class CritiqueSeverity(str, Enum):
-    """
-    Defines the severity rankings used to prioritize critiques.
-
-    This enumeration allows for the classification of critiques based on their 
-    urgency and impact.
-    """
+    """Severity rankings used to prioritize critiques."""
 
     LOW = "low"
     MODERATE = "moderate"
@@ -155,12 +137,11 @@ class CritiqueSeverity(str, Enum):
 
 
 class HypothesisCritiqueRecord(BaseModel):
-    """
-    Represents a structured critique of a refinement hypothesis.
+    """Structured critique of a refinement hypothesis.
 
-    This model is used to capture detailed feedback on a proposed change or 
-    hypothesis. It includes a summary of the critique, qualitative feedback, 
-    and a categorization based on severity and area of concern.
+    Captures detailed feedback on a proposed change or hypothesis, including
+    a summary, qualitative feedback, and categorization by severity and
+    area of concern.
     """
 
     cycle_id: str = Field(..., min_length=1)
@@ -169,24 +150,20 @@ class HypothesisCritiqueRecord(BaseModel):
     qualitative_feedback: str = Field(..., min_length=1)
     category: CritiqueCategory
     severity: CritiqueSeverity
-    evidence: List[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
     recorded_at: str = Field(default_factory=_utc_now)
 
 
 class AutonomousEscalationRecord(BaseModel):
-    """
+    """Data captured when an autonomous process escalates to a human.
 
-    Represents the data captured when an autonomous process needs to escalate 
-    an issue to a human.
-
-    This model is used to create a detailed record of an escalation event, 
-    including the type of error, a description of the problem, and a list of 
-    any recovery attempts that were made.
+    Creates a detailed record of the escalation event — error type,
+    description, and any recovery attempts that were made.
     """
 
     error_type: str = Field(..., min_length=1)
     description: str = Field(..., min_length=1)
-    recovery_attempts: List[str] = Field(default_factory=list)
+    recovery_attempts: list[str] = Field(default_factory=list)
     is_fatal: bool = Field(default=True)
     timestamp: str = Field(default_factory=_utc_now)
 

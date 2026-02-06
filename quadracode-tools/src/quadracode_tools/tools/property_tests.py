@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -50,11 +50,11 @@ class PropertyTestRequest(BaseModel):
         ...,
         description="Python statements executed for each generated sample. Use `sample` and `target`; raise AssertionError on failure.",
     )
-    preamble: Optional[str] = Field(
+    preamble: str | None = Field(
         default=None,
         description="Optional helper code (imports, fixtures) injected before the property definition.",
     )
-    workspace_root: Optional[str] = Field(
+    workspace_root: str | None = Field(
         default=None,
         description="Workspace directory to run inside (defaults to /workspace).",
     )
@@ -64,12 +64,12 @@ class PropertyTestRequest(BaseModel):
         le=500,
         description="Maximum Hypothesis examples to generate.",
     )
-    deadline_ms: Optional[int] = Field(
+    deadline_ms: int | None = Field(
         default=500,
         ge=100,
         description="Per-example deadline in milliseconds (set to null to disable).",
     )
-    seed: Optional[int] = Field(
+    seed: int | None = Field(
         default=None,
         description="Optional Hypothesis seed for deterministic reproduction.",
     )
@@ -194,7 +194,7 @@ print(json.dumps(result, default=str))
     return script
 
 
-def _run_property_script(script: str, workspace_root: str) -> Dict[str, Any]:
+def _run_property_script(script: str, workspace_root: str) -> dict[str, Any]:
     """Executes the generated property test script in a subprocess and captures its output.
 
     This function writes the provided script content to a temporary file, then runs it
@@ -228,7 +228,7 @@ def _run_property_script(script: str, workspace_root: str) -> Dict[str, Any]:
             pass
 
     stdout = proc.stdout.strip()
-    parsed: Dict[str, Any] | None = None
+    parsed: dict[str, Any] | None = None
     if stdout:
         lines = stdout.splitlines()
         candidate = lines[-1]

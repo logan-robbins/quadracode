@@ -11,7 +11,7 @@ failure modes.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, model_validator
@@ -37,35 +37,35 @@ class ManageRefinementLedgerRequest(BaseModel):
     """
 
     operation: OperationLiteral
-    hypothesis: Optional[str] = Field(
+    hypothesis: str | None = Field(
         default=None,
         description="Description of the new hypothesis (required for propose).",
     )
-    strategy: Optional[str] = Field(
+    strategy: str | None = Field(
         default=None,
         description="Technique or plan that differentiates this hypothesis from previous attempts.",
     )
-    summary: Optional[str] = Field(
+    summary: str | None = Field(
         default=None,
         description="Status/summary text. Required when concluding a hypothesis.",
     )
-    status: Optional[Literal["succeeded", "failed", "abandoned", "in_progress"]] = Field(
+    status: Literal["succeeded", "failed", "abandoned", "in_progress"] | None = Field(
         default=None,
         description="Outcome label when concluding a hypothesis.",
     )
-    cycle_id: Optional[str] = Field(
+    cycle_id: str | None = Field(
         default=None,
         description="Existing ledger cycle identifier to update (for conclude).",
     )
-    dependencies: List[Union[str, int]] = Field(
+    dependencies: list[str | int] = Field(
         default_factory=list,
         description="Cycle identifiers that this hypothesis depends on.",
     )
-    filter: Optional[str] = Field(
+    filter: str | None = Field(
         default=None,
         description="Keyword filter applied during failure queries.",
     )
-    limit: Optional[int] = Field(
+    limit: int | None = Field(
         default=5,
         ge=1,
         le=25,
@@ -75,11 +75,11 @@ class ManageRefinementLedgerRequest(BaseModel):
         default=False,
         description="When querying, include detailed test metadata in results.",
     )
-    cycle_ids: List[Union[str, int]] = Field(
+    cycle_ids: list[str | int] = Field(
         default_factory=list,
         description="Specific cycles to inspect when inferring causal chains.",
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Free-form metadata attached to the request for downstream analytics.",
     )
@@ -105,12 +105,12 @@ class ManageRefinementLedgerRequest(BaseModel):
         return self
 
 
-def _normalize_identifiers(values: List[Union[str, int]]) -> List[str]:
+def _normalize_identifiers(values: list[str | int]) -> list[str]:
     """Cleans and standardizes a list of cycle identifiers.
 
     Ensures that all identifiers are strings and removes any empty or whitespace-only values.
     """
-    normalized: List[str] = []
+    normalized: list[str] = []
     for value in values:
         text = str(value).strip()
         if text:
@@ -118,7 +118,7 @@ def _normalize_identifiers(values: List[Union[str, int]]) -> List[str]:
     return normalized
 
 
-def _format_payload(payload: Dict[str, Any]) -> str:
+def _format_payload(payload: dict[str, Any]) -> str:
     """Serializes the final event payload to a consistent JSON string format."""
     return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -148,7 +148,7 @@ def manage_refinement_ledger(**payload: Any) -> str:  # type: ignore[override]
     dependencies = _normalize_identifiers(request.dependencies)
     cycle_ids = _normalize_identifiers(request.cycle_ids)
 
-    base_payload: Dict[str, Any] = {
+    base_payload: dict[str, Any] = {
         "event": "refinement_ledger",
         "operation": request.operation,
         "metadata": request.metadata,

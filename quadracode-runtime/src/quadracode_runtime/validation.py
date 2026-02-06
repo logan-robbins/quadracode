@@ -2,13 +2,13 @@
 Validation middleware for ensuring the integrity of runtime messages.
 
 This module provides functions to validate incoming `MessageEnvelope` objects,
-particularly those originating from specialized agents like the `HumanClone`.
+particularly those originating from specialized agents like the supervisor.
 By validating message payloads against their expected schemas before they
 enter the core processing logic, the system can prevent malformed data from
 causing downstream errors.
 
-The primary function, `validate_human_clone_envelope`, checks messages sent
-by the HumanClone agent to ensure they conform to the `HumanCloneTrigger` schema.
+The primary function, `validate_supervisor_envelope`, checks messages sent
+by the supervisor agent to ensure they conform to the `HumanCloneTrigger` schema.
 If validation fails, it generates a detailed error response that can be sent
 back to the originator, facilitating correction and resubmission.
 """
@@ -27,11 +27,11 @@ from quadracode_contracts import (
 from .prp import parse_human_clone_trigger
 
 
-def validate_human_clone_envelope(
+def validate_supervisor_envelope(
     envelope: MessageEnvelope,
 ) -> Tuple[bool, MessageEnvelope | None]:
     """
-    Validates the payload of a `MessageEnvelope` sent by a HumanClone agent.
+    Validates the payload of a `MessageEnvelope` sent by the supervisor agent.
 
     This function specifically targets messages where the sender is identified as
     `HUMAN_CLONE_RECIPIENT`. It attempts to parse the message content as a
@@ -44,10 +44,10 @@ def validate_human_clone_envelope(
     Returns:
         A tuple `(is_valid, response_envelope)`.
         - `is_valid`: A boolean that is `True` if the envelope is valid or not
-          from a HumanClone, and `False` if validation fails.
+          from the supervisor, and `False` if validation fails.
         - `response_envelope`: If validation fails (`is_valid` is `False`), this
           contains a new `MessageEnvelope` with a detailed error message,
-          intended to be sent back to the HumanClone. If validation succeeds,
+          intended to be sent back to the supervisor. If validation succeeds,
           this is `None`.
     """
 
@@ -74,3 +74,7 @@ def validate_human_clone_envelope(
         return False, response
 
     return True, None
+
+
+# Backward-compatible alias
+validate_human_clone_envelope = validate_supervisor_envelope

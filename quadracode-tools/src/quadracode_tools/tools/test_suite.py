@@ -20,7 +20,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -39,10 +40,10 @@ class DiscoveredTestCommand:
     description of its origin (e.g., 'pyproject:root').
     """
 
-    command: Tuple[str, ...]
+    command: tuple[str, ...]
     cwd: Path
     description: str
-    environment: Dict[str, str] | None = None
+    environment: dict[str, str] | None = None
 
 
 class RunFullTestSuiteRequest(BaseModel):
@@ -53,7 +54,7 @@ class RunFullTestSuiteRequest(BaseModel):
     end-to-end tests, and execution timeouts.
     """
 
-    workspace_root: Optional[str] = Field(
+    workspace_root: str | None = Field(
         default=None,
         description="Path to the workspace root. Defaults to current working directory.",
     )
@@ -73,7 +74,7 @@ class RunFullTestSuiteRequest(BaseModel):
     )
 
 
-def discover_test_commands(root: Path, *, include_e2e: bool = True) -> List[DiscoveredTestCommand]:
+def discover_test_commands(root: Path, *, include_e2e: bool = True) -> list[DiscoveredTestCommand]:
     """Infers the set of test commands worth running from workspace metadata.
 
     Scans a given workspace directory for common project configuration files that
@@ -86,8 +87,8 @@ def discover_test_commands(root: Path, *, include_e2e: bool = True) -> List[Disc
     Returns a list of `DiscoveredTestCommand` objects, avoiding duplicates.
     """
 
-    commands: List[DiscoveredTestCommand] = []
-    seen: set[Tuple[Tuple[str, ...], Path]] = set()
+    commands: list[DiscoveredTestCommand] = []
+    seen: set[tuple[tuple[str, ...], Path]] = set()
 
     def _register(command: Sequence[str], cwd: Path, description: str) -> None:
         key = (tuple(command), cwd)
@@ -152,7 +153,7 @@ def execute_full_test_suite(
     include_e2e: bool = True,
     timeout_seconds: int = 1800,
     max_output_chars: int = 6000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Runs discovered test commands, capturing structured results and telemetry.
 
     This is the core implementation behind the `run_full_test_suite` tool. It
@@ -167,10 +168,10 @@ or timed_out, the tool will try to spawn a debugger agent.
     root_path = Path(workspace_root or os.environ.get("WORKSPACE_ROOT") or os.getcwd()).resolve()
     commands = discover_test_commands(root_path, include_e2e=include_e2e)
     started_at = datetime.now(timezone.utc)
-    command_results: List[Dict[str, Any]] = []
+    command_results: list[dict[str, Any]] = []
     pass_count = 0
     fail_count = 0
-    coverage_values: List[float] = []
+    coverage_values: list[float] = []
 
     for spec in commands:
         command_env = os.environ.copy()
@@ -228,7 +229,7 @@ or timed_out, the tool will try to spawn a debugger agent.
     if command_results:
         overall_status = "passed" if fail_count == 0 else "failed"
 
-    coverage_summary: Dict[str, float] | None = None
+    coverage_summary: dict[str, float] | None = None
     if coverage_values:
         coverage_summary = {
             "min": min(coverage_values),
@@ -236,7 +237,7 @@ or timed_out, the tool will try to spawn a debugger agent.
             "avg": sum(coverage_values) / len(coverage_values),
         }
 
-    response: Dict[str, Any] = {
+    response: dict[str, Any] = {
         "tool": "run_full_test_suite",
         "workspace_root": str(root_path),
         "overall_status": overall_status,
@@ -274,7 +275,7 @@ def _truncate_output(value: str, limit: int) -> str:
     return value[-limit:]
 
 
-def _extract_coverage(stdout: str, stderr: str) -> Optional[float]:
+def _extract_coverage(stdout: str, stderr: str) -> float | None:
     """Parses stdout/stderr for common code coverage report formats.
 
     Uses a series of regular expressions to find coverage percentages in the text
@@ -297,7 +298,7 @@ def _extract_coverage(stdout: str, stderr: str) -> Optional[float]:
     return None
 
 
-def _spawn_debugger_agent(root: Path) -> Dict[str, Any]:
+def _spawn_debugger_agent(root: Path) -> dict[str, Any]:
     """Spawns a new debugger agent in response to test failures.
 
     When the test suite fails, this function is called to initiate an automated
@@ -308,7 +309,7 @@ def _spawn_debugger_agent(root: Path) -> Dict[str, Any]:
     """
     descriptor = _active_workspace_descriptor()
     workspace_mount = DEFAULT_WORKSPACE_MOUNT
-    env_overrides: Dict[str, str] = {}
+    env_overrides: dict[str, str] = {}
     if descriptor:
         workspace_id = descriptor.get("workspace_id")
         workspace_volume = descriptor.get("volume")
@@ -345,7 +346,7 @@ def _spawn_debugger_agent(root: Path) -> Dict[str, Any]:
     return payload
 
 
-def _active_workspace_descriptor() -> Dict[str, Any] | None:
+def _active_workspace_descriptor() -> dict[str, Any] | None:
     """Retrieves the active workspace descriptor from environment variables.
 
     The workspace descriptor is a JSON string containing metadata about the current

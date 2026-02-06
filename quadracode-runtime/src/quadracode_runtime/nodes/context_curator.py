@@ -312,8 +312,7 @@ class ContextCurator:
                 usage_ratio=f"{usage_ratio:.1f}"
             )
             
-            response = await asyncio.to_thread(
-                llm.invoke,
+            response = await llm.ainvoke(
                 [
                     SystemMessage(content=prompts.curator_system_prompt),
                     HumanMessage(content=prompt)
@@ -336,7 +335,7 @@ class ContextCurator:
                 op = ContextOperation.DISCARD
             else:
                 # Fallback to heuristic if LLM response is unclear
-                LOGGER.warning(f"Unclear curator LLM response for segment {segment['id']}, using heuristic")
+                LOGGER.warning("Unclear curator LLM response for segment %s, using heuristic", segment["id"])
                 if score > 0.7:
                     op = ContextOperation.RETAIN
                 elif score < 0.3:

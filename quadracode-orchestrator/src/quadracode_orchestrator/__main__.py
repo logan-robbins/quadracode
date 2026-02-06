@@ -1,24 +1,37 @@
-"""
-This module serves as the main entry point for running the Quadracode 
-orchestrator service.
+"""Entry point for the Quadracode orchestrator service.
 
-It uses the `run_forever` function from the shared `quadracode_runtime` to start 
-the orchestrator as a persistent, asynchronous service. The orchestrator's 
-behavior is determined by the `PROFILE` object, which is imported from the 
-`profile` module. This script allows the orchestrator to be launched as a 
-standalone process, ready to manage and coordinate agent activities.
+Starts the orchestrator as a persistent, asynchronous service using ``run_forever``
+from ``quadracode_runtime``. Configures logging before launch and handles graceful
+shutdown on keyboard interrupt.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
 
 from quadracode_runtime.runtime import run_forever
 
 from .profile import PROFILE
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
-    asyncio.run(run_forever(PROFILE))
+    """Launch the orchestrator runtime."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        stream=sys.stderr,
+    )
+    logger.info("Starting orchestrator with profile=%s", PROFILE.name)
+    try:
+        asyncio.run(run_forever(PROFILE))
+    except KeyboardInterrupt:
+        logger.info("Orchestrator shutting down (keyboard interrupt)")
+    except Exception:
+        logger.exception("Orchestrator crashed")
+        raise
 
 
 if __name__ == "__main__":

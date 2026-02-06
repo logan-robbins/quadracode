@@ -1,52 +1,39 @@
-"""
-This module defines the configuration settings for the Agent Registry service.
+"""Configuration settings for the Agent Registry service.
 
-It uses Pydantic's `BaseSettings` to create a strongly-typed settings object that 
-can be populated from environment variables. This approach provides a centralized 
-and validated source of configuration for the entire application, covering 
-everything from server settings to database paths and health check parameters.
+Uses Pydantic v2 BaseSettings with SettingsConfigDict for environment-variable-driven
+configuration. All settings are validated at startup.
 """
+
 from pydantic import model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class RegistrySettings(BaseSettings):
-    """
-    Configuration model for the Agent Registry service.
+    """Strongly-typed configuration for the Agent Registry service.
 
-    This class defines all the configurable parameters for the agent registry, 
-    including server settings, database connection details, and health check 
-    thresholds. Pydantic automatically reads these settings from environment 
-    variables, providing a flexible and robust configuration mechanism.
+    Reads from environment variables with no prefix. When ``quadracode_mock_mode``
+    is enabled, the database path is forced to ``":memory:"`` for isolated testing.
 
     Attributes:
-        registry_port: The port on which the registry service will run.
-        database_path: The file path for the SQLite database.
-        agent_timeout: The time in seconds after which an agent is considered 
-                       stale if no heartbeat is received.
-        quadracode_mock_mode: When True, uses in-memory SQLite database for
-                              standalone testing without external dependencies.
+        registry_port: TCP port the HTTP server binds to.
+        database_path: Filesystem path for the SQLite database file.
+        agent_timeout: Seconds without a heartbeat before an agent is marked stale.
+        quadracode_mock_mode: When True, uses in-memory SQLite (no disk dependency).
     """
 
-    # Server
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=False,
+    )
+
     registry_port: int = 8090
-
-    # SQLite database file path (relative or absolute)
-    # When quadracode_mock_mode=True, this is overridden to ":memory:"
     database_path: str = "./registry.db"
-
-    # Health/heartbeat
-    agent_timeout: int = 30  # seconds until an agent is considered stale
-
-    # Mock mode for standalone testing (no external dependencies)
+    agent_timeout: int = 30
     quadracode_mock_mode: bool = False
 
     @model_validator(mode="after")
-    def configure_mock_mode(self) -> "RegistrySettings":
-        """Override database_path to in-memory when mock mode is enabled."""
+    def _configure_mock_mode(self) -> "RegistrySettings":
+        """Force in-memory SQLite when mock mode is enabled."""
         if self.quadracode_mock_mode:
             object.__setattr__(self, "database_path", ":memory:")
         return self
-
-    class Config:
-        env_prefix = ""  # allow direct env var mapping

@@ -16,7 +16,7 @@ from quadracode_runtime.state import (
     make_initial_context_engine_state,
     add_refinement_ledger_entry,
 )
-from quadracode_runtime.validation import validate_human_clone_envelope
+from quadracode_runtime.validation import validate_supervisor_envelope
 
 
 def _make_trigger_payload() -> dict[str, object]:
@@ -57,11 +57,11 @@ def test_prp_trigger_check_converts_message_to_tool_event() -> None:
 
     assert updated["prp_state"] == PRPState.HYPOTHESIZE
     assert updated["exhaustion_mode"] == ExhaustionMode.TEST_FAILURE
-    assert updated["human_clone_requirements"] == ["unit_test_report", "coverage_summary"]
+    assert updated["supervisor_requirements"] == ["unit_test_report", "coverage_summary"]
 
     assert isinstance(updated["messages"][-2], SystemMessage)
     summary_message = updated["messages"][-2]
-    assert "HumanClone Trigger Received" in summary_message.content
+    assert "Supervisor Review Feedback" in summary_message.content
 
     tool_message = updated["messages"][-1]
     assert isinstance(tool_message, ToolMessage)
@@ -70,27 +70,27 @@ def test_prp_trigger_check_converts_message_to_tool_event() -> None:
     assert updated["critique_backlog"], "Critique backlog should track translation output."
 
 
-def test_validate_human_clone_envelope_rejects_bad_payload() -> None:
+def test_validate_supervisor_envelope_rejects_bad_payload() -> None:
     envelope = MessageEnvelope(
         sender=HUMAN_CLONE_RECIPIENT,
         recipient="orchestrator",
         message="please keep going",
         payload={},
     )
-    valid, feedback = validate_human_clone_envelope(envelope)
+    valid, feedback = validate_supervisor_envelope(envelope)
     assert not valid
     assert feedback is not None
     assert feedback.recipient == HUMAN_CLONE_RECIPIENT
     assert "schema_error" in feedback.payload
 
 
-def test_validate_human_clone_envelope_allows_valid_payload() -> None:
+def test_validate_supervisor_envelope_allows_valid_payload() -> None:
     envelope = MessageEnvelope(
         sender=HUMAN_CLONE_RECIPIENT,
         recipient="orchestrator",
         message=json.dumps(_make_trigger_payload()),
         payload={},
     )
-    valid, feedback = validate_human_clone_envelope(envelope)
+    valid, feedback = validate_supervisor_envelope(envelope)
     assert valid
     assert feedback is None

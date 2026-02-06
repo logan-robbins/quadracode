@@ -22,7 +22,6 @@ logging, and compliant with runtime invariants.
 from __future__ import annotations
 
 from copy import deepcopy
-from copy import deepcopy
 from datetime import datetime, timezone
 from enum import Enum
 from typing import (
@@ -437,7 +436,7 @@ class PRPState(str, Enum):
         EXECUTE: The state for planning and executing actions based on the current hypothesis.
         TEST: The state for validating the outcome of the execution phase against defined criteria.
         CONCLUDE: The state for synthesizing the results and determining the success of the hypothesis.
-        PROPOSE: The state for packaging the conclusion into a formal proposal for review (e.g., by a HumanClone).
+        PROPOSE: The state for packaging the conclusion into a formal proposal for supervisor review.
     """
 
     HYPOTHESIZE = "hypothesize"
@@ -464,8 +463,8 @@ class PRPTransition(BaseModel):
         allow_if_exhaustion_in: A set of `ExhaustionMode`s under which this transition is permitted.
                                 If None, it's allowed for any exhaustion mode (unless blocked).
         block_if_exhaustion_in: A set of `ExhaustionMode`s that explicitly forbid this transition.
-        requires_human_clone: A boolean flag indicating if this transition requires
-                              an action or approval from a HumanClone agent.
+        requires_supervisor: A boolean flag indicating if this transition requires
+                              an action or approval from the supervisor agent.
     """
 
     source: PRPState
@@ -473,7 +472,7 @@ class PRPTransition(BaseModel):
     description: str = ""
     allow_if_exhaustion_in: set[ExhaustionMode] | None = Field(default=None)
     block_if_exhaustion_in: set[ExhaustionMode] | None = Field(default=None)
-    requires_human_clone: bool = False
+    requires_supervisor: bool = False
 
 
 class PRPInvalidTransitionError(RuntimeError):
@@ -496,7 +495,7 @@ class PRPInvalidTransitionError(RuntimeError):
         source: PRPState,
         target: PRPState,
         exhaustion_mode: ExhaustionMode,
-        human_clone_triggered: bool,
+        supervisor_triggered: bool,
         reason: str,
         description: str = "",
     ) -> None:
@@ -508,7 +507,7 @@ class PRPInvalidTransitionError(RuntimeError):
             "from_state": source.value,
             "to_state": target.value,
             "exhaustion_mode": exhaustion_mode.value,
-            "human_clone_triggered": human_clone_triggered,
+            "supervisor_triggered": supervisor_triggered,
             "reason": reason,
             "description": description,
         }
@@ -561,7 +560,7 @@ class PRPStateMachine:
         target: PRPState,
         *,
         exhaustion_mode: ExhaustionMode,
-        human_clone_triggered: bool,
+        supervisor_triggered: bool,
     ) -> PRPTransition:
         """
         Checks if a transition is valid based on current runtime conditions.
@@ -569,13 +568,13 @@ class PRPStateMachine:
         This method enforces the guards defined in the `PRPTransition` rules.
         It will raise a `PRPInvalidTransitionError` if the requested transition
         is not defined, is blocked by the current exhaustion mode, or fails to
-        meet other preconditions like `requires_human_clone`.
+        meet other preconditions like `requires_supervisor`.
 
         Args:
             source: The current `PRPState`.
             target: The desired next `PRPState`.
             exhaustion_mode: The active `ExhaustionMode`.
-            human_clone_triggered: A flag indicating if a HumanClone action has occurred.
+            supervisor_triggered: A flag indicating if a supervisor action has occurred.
 
         Returns:
             The `PRPTransition` object if the transition is valid.
@@ -589,7 +588,7 @@ class PRPStateMachine:
                 source=source,
                 target=target,
                 exhaustion_mode=exhaustion_mode,
-                human_clone_triggered=human_clone_triggered,
+                supervisor_triggered=supervisor_triggered,
                 reason="transition_not_defined",
             )
 
@@ -600,7 +599,7 @@ class PRPStateMachine:
                 source=source,
                 target=target,
                 exhaustion_mode=exhaustion_mode,
-                human_clone_triggered=human_clone_triggered,
+                supervisor_triggered=supervisor_triggered,
                 reason="exhaustion_not_allowed",
                 description=transition.description,
             )
@@ -612,18 +611,18 @@ class PRPStateMachine:
                 source=source,
                 target=target,
                 exhaustion_mode=exhaustion_mode,
-                human_clone_triggered=human_clone_triggered,
+                supervisor_triggered=supervisor_triggered,
                 reason="exhaustion_blocked",
                 description=transition.description,
             )
 
-        if transition.requires_human_clone and not human_clone_triggered:
+        if transition.requires_supervisor and not supervisor_triggered:
             raise PRPInvalidTransitionError(
                 source=source,
                 target=target,
                 exhaustion_mode=exhaustion_mode,
-                human_clone_triggered=human_clone_triggered,
-                reason="human_clone_required",
+                supervisor_triggered=supervisor_triggered,
+                reason="supervisor_required",
                 description=transition.description,
             )
 
@@ -677,7 +676,7 @@ DEFAULT_PRP_TRANSITIONS: List[PRPTransition] = [
     PRPTransition(
         source=PRPState.CONCLUDE,
         target=PRPState.PROPOSE,
-        description="Package conclusions into a proposal for HumanClone review.",
+        description="Package conclusions into a proposal for supervisor review.",
     ),
     PRPTransition(
         source=PRPState.CONCLUDE,
@@ -692,7 +691,7 @@ DEFAULT_PRP_TRANSITIONS: List[PRPTransition] = [
         source=PRPState.PROPOSE,
         target=PRPState.HYPOTHESIZE,
         description="Reviewer rejection demands a new hypothesis cycle.",
-        requires_human_clone=True,
+        requires_supervisor=True,
     ),
 ]
 
@@ -862,8 +861,8 @@ class QuadraCodeState(ContextEngineState, total=False):
         exhaustion_recovery_log: A log of attempts to recover from exhaustion states.
         refinement_memory_block: A synthesized block of text summarizing recent refinements for prompt injection.
         prp_telemetry: A detailed log of events and metrics related to the PRP.
-        human_clone_requirements: A list of conditions or information needed from a HumanClone agent.
-        human_clone_trigger: Data related to the event that triggered a need for HumanClone intervention.
+        supervisor_requirements: A list of conditions or information needed from the supervisor agent.
+        supervisor_trigger: Data related to the event that triggered a need for supervisor intervention.
         last_test_suite_result: The result of the last full test suite run.
         last_property_test_result: The result of the last property-based test.
         property_test_results: A list of recent property-based test outcomes.
@@ -900,8 +899,8 @@ class QuadraCodeState(ContextEngineState, total=False):
     exhaustion_recovery_log: List[Dict[str, Any]]
     refinement_memory_block: str
     prp_telemetry: List[Dict[str, Any]]
-    human_clone_requirements: List[str]
-    human_clone_trigger: Dict[str, Any]
+    supervisor_requirements: List[str]
+    supervisor_trigger: Dict[str, Any]
     last_test_suite_result: Dict[str, Any]
     last_property_test_result: Dict[str, Any]
     property_test_results: List[Dict[str, Any]]
@@ -991,8 +990,8 @@ def make_initial_context_engine_state(
             "exhaustion_recovery_log": [],
             "refinement_memory_block": "",
             "prp_telemetry": [],
-            "human_clone_requirements": [],
-            "human_clone_trigger": {},
+            "supervisor_requirements": [],
+            "supervisor_trigger": {},
             "last_test_suite_result": {},
             "last_property_test_result": {},
             "property_test_results": [],
@@ -1541,7 +1540,7 @@ def record_test_suite_result(state: QuadraCodeState, result: Dict[str, Any]) -> 
     result to the current refinement ledger entry, and publishes telemetry.
     Crucially, if the tests fail, it sets the `exhaustion_mode` to
     `TEST_FAILURE`, triggering a PRP cycle to address the issue. It also
-    clears the invariant that requires testing after a HumanClone rejection.
+    clears the invariant that requires testing after a supervisor rejection.
 
     Args:
         state: The `QuadraCodeState` to update.
@@ -1761,7 +1760,7 @@ def apply_prp_transition(
     target_state: PRPState,
     *,
     exhaustion_mode: ExhaustionMode | str | None = None,
-    human_clone_triggered: bool = False,
+    supervisor_triggered: bool = False,
     telemetry_callback: Callable[[str, Dict[str, Any]], None] | None = None,
     strict: bool = False,
 ) -> Dict[str, Any]:
@@ -1779,7 +1778,7 @@ def apply_prp_transition(
         target_state: The desired destination `PRPState`.
         exhaustion_mode: The current `ExhaustionMode` to validate against. If not
                          provided, it's read from the state.
-        human_clone_triggered: Flag indicating if a HumanClone action occurred.
+        supervisor_triggered: Flag indicating if a supervisor action occurred.
         telemetry_callback: An optional callback for custom telemetry handling.
         strict: If `True`, raises `PRPInvalidTransitionError` on failure. If `False`,
                 logs the error and returns gracefully.
@@ -1824,7 +1823,7 @@ def apply_prp_transition(
             current_state,
             target_state,
             exhaustion_mode=exhaustion,
-            human_clone_triggered=human_clone_triggered,
+            supervisor_triggered=supervisor_triggered,
         )
     except PRPInvalidTransitionError as exc:
         _record(
@@ -1852,7 +1851,7 @@ def apply_prp_transition(
 
     if current_state == PRPState.PROPOSE and target_state == PRPState.HYPOTHESIZE:
         updates["prp_cycle_count"] = int(state.get("prp_cycle_count", 0)) + 1
-        # HumanClone rejection path requires a test before concluding/proposing again
+        # Supervisor rejection path requires a test before concluding/proposing again
         mark_rejection_requires_tests(state)
 
     state.update(updates)
@@ -1862,9 +1861,9 @@ def apply_prp_transition(
         "from_state": current_state.value,
         "to_state": target_state.value,
         "exhaustion_mode": exhaustion.value,
-        "human_clone_triggered": human_clone_triggered,
+        "supervisor_triggered": supervisor_triggered,
         "description": rule.description,
-        "requires_human_clone": rule.requires_human_clone,
+        "requires_supervisor": rule.requires_supervisor,
     }
     telemetry_log = state.setdefault("prp_telemetry", [])
     if isinstance(telemetry_log, list):
@@ -1879,7 +1878,7 @@ def apply_prp_transition(
             "from_state": current_state.value,
             "to_state": target_state.value,
             "description": rule.description,
-            "requires_human_clone": rule.requires_human_clone,
+            "requires_supervisor": rule.requires_supervisor,
         },
         state_update=updates,
     )

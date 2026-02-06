@@ -9,7 +9,6 @@ only needs to call the `get_tools()` function to access the entire toolset.
 """
 from __future__ import annotations
 
-from typing import List
 from langchain_core.tools import BaseTool
 
 # Local tools
@@ -39,7 +38,7 @@ from .tools.test_suite import run_full_test_suite
 from .tools.context_engine import inspect_context_engine
 
 
-def get_tools() -> List[BaseTool]:
+def get_tools() -> list[BaseTool]:
     """Assembles and returns a list of all standard Quadracode agent tools.
 
     This function acts as a registry for all the core tools that a Quadracode agent

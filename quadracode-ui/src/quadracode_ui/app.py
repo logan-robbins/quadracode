@@ -12,7 +12,7 @@ Supports QUADRACODE_MOCK_MODE=true for standalone testing:
 
 import streamlit as st
 
-from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT
+from quadracode_contracts import HUMAN_CLONE_RECIPIENT, HUMAN_RECIPIENT, SUPERVISOR_RECIPIENT
 from quadracode_ui.components.mode_toggle import render_mode_toggle
 from quadracode_ui.config import (
     AGENT_REGISTRY_URL,
@@ -20,9 +20,8 @@ from quadracode_ui.config import (
     REDIS_HOST,
     REDIS_PORT,
 )
-from quadracode_ui.utils.persistence import save_workspace_descriptor
 from quadracode_ui.utils.redis_client import get_redis_client, test_redis_connection
-from quadracode_ui.utils.workspace_utils import create_workspace, ensure_default_workspace
+from quadracode_ui.utils.workspace_utils import ensure_default_workspace
 
 
 # Page configuration must come first
@@ -66,11 +65,7 @@ if MOCK_MODE:
 elif success:
     # Ensure default workspace is registered
     # This picks up the 'workspace-default' service from docker-compose
-    if not client.exists("qc:workspace:descriptor:default"):
-        with st.spinner("Registering default workspace..."):
-            ws_success, ws_descriptor, _ = create_workspace("default")
-            if ws_success and ws_descriptor:
-                save_workspace_descriptor(client, "default", ws_descriptor)
+    ensure_default_workspace(client)
 
 # Header
 st.title("🚀 Quadracode UI")
@@ -106,8 +101,8 @@ with status_col2:
 
 with status_col3:
     mode = st.session_state.get("supervisor_recipient", HUMAN_RECIPIENT)
-    if mode == HUMAN_CLONE_RECIPIENT:
-        st.info("Mode: HumanClone\n\nAutonomous", icon="🤖")
+    if mode in {HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT}:
+        st.info("Mode: Supervisor\n\nAutonomous", icon="🤖")
     else:
         st.info("Mode: Human\n\nDirect Control", icon="👤")
 
@@ -191,21 +186,21 @@ link_col1, link_col2, link_col3, link_col4 = st.columns(4)
 
 with link_col1:
     if st.button("💬 Go to Chat", use_container_width=True, type="primary"):
-        st.switch_page("pages/1_💬_Chat.py")
+        st.switch_page("pages/1_Chat.py")
 
 with link_col2:
     if st.button("📡 Mailbox Monitor", use_container_width=True):
-        st.switch_page("pages/2_📡_Mailbox_Monitor.py")
+        st.switch_page("pages/2_Mailbox_Monitor.py")
 
 with link_col3:
     if st.button("📁 Workspaces", use_container_width=True):
-        st.switch_page("pages/3_📁_Workspaces.py")
+        st.switch_page("pages/3_Workspaces.py")
 
 with link_col4:
     if st.button("📊 Dashboard", use_container_width=True):
-        st.switch_page("pages/4_📊_Dashboard.py")
+        st.switch_page("pages/4_Dashboard.py")
 
-        st.divider()
+st.divider()
 
 # System information
 with st.expander("ℹ️ System Information", expanded=False):

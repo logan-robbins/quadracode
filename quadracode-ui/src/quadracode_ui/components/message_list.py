@@ -27,8 +27,8 @@ def render_message_list(history: list[dict[str, Any]], show_payload: bool = Fals
         with st.chat_message(display_role):
             # Color-coded sender badge
             if sender:
-                if sender in {"human", "human_clone"}:
-                    badge_color = "#1E88E5"  # Blue for human/human_clone
+                if sender in {"human", "human_clone", "supervisor"}:
+                    badge_color = "#1E88E5"  # Blue for human/supervisor
                     icon = "👤" if sender == "human" else "🤖"
                 elif sender == "orchestrator":
                     badge_color = "#7B1FA2"  # Purple for orchestrator
@@ -120,7 +120,7 @@ def render_message_card(
     with cols[1]:
         sender = message_dict.get("sender", "unknown")
         # Color code by sender type
-        if sender in {"human", "human_clone"}:
+        if sender in {"human", "human_clone", "supervisor"}:
             st.markdown(f"🔵 **{sender}**")
         elif sender == "orchestrator":
             st.markdown(f"🟣 **{sender}**")

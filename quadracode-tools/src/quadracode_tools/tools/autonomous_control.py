@@ -12,7 +12,7 @@ necessary.
 from __future__ import annotations
 
 import json
-from typing import List, Optional, Literal
+from typing import Literal
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -39,8 +39,8 @@ class AutonomousCheckpointRequest(BaseModel):
     milestone: int = Field(..., ge=1)
     status: Literal["in_progress", "complete", "blocked"]
     summary: str = Field(..., min_length=1)
-    next_steps: List[str] = Field(default_factory=list)
-    title: Optional[str] = Field(
+    next_steps: list[str] = Field(default_factory=list)
+    title: str | None = Field(
         default=None,
         description="Optional human-readable milestone name.",
     )
@@ -58,7 +58,7 @@ class AutonomousEscalationRequest(BaseModel):
 
     error_type: str = Field(..., min_length=1)
     description: str = Field(..., min_length=1)
-    recovery_attempts: List[str] = Field(default_factory=list)
+    recovery_attempts: list[str] = Field(default_factory=list)
     is_fatal: bool = Field(
         default=True,
         description="Whether this error is fatal and requires human intervention.",
@@ -81,7 +81,7 @@ class HypothesisCritiqueRequest(BaseModel):
     qualitative_feedback: str = Field(..., min_length=1)
     category: Literal["code_quality", "architecture", "test_coverage", "performance"]
     severity: Literal["low", "moderate", "high", "critical"]
-    evidence: List[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
 
 
 class FinalReviewRequest(BaseModel):
@@ -95,12 +95,12 @@ class FinalReviewRequest(BaseModel):
     """
 
     summary: str = Field(..., min_length=1)
-    recovery_attempts: List[str] = Field(default_factory=list)
-    artifacts: List[str] = Field(
+    recovery_attempts: list[str] = Field(default_factory=list)
+    artifacts: list[str] = Field(
         default_factory=list,
         description="Artifacts that should be highlighted for HumanClone review.",
     )
-    workspace_root: Optional[str] = Field(
+    workspace_root: str | None = Field(
         default=None,
         description="Workspace root override for the test suite tool.",
     )
@@ -108,7 +108,7 @@ class FinalReviewRequest(BaseModel):
         default=True,
         description="Run end-to-end suites if discovery finds them.",
     )
-    coverage_goal: Optional[float] = Field(
+    coverage_goal: float | None = Field(
         default=None,
         ge=0,
         le=100,
@@ -126,7 +126,7 @@ def autonomous_checkpoint(
     milestone: int,
     status: str,
     summary: str,
-    next_steps: List[str] | None = None,
+    next_steps: list[str] | None = None,
     title: str | None = None,
 ) -> str:
     """Records a structured progress update for a specific milestone in an autonomous task.
@@ -148,7 +148,7 @@ def autonomous_checkpoint(
     return _format_output(
         {
             "event": "checkpoint",
-            "record": record.dict(),
+            "record": record.model_dump(),
         }
     )
 
@@ -157,7 +157,7 @@ def autonomous_checkpoint(
 def autonomous_escalate(
     error_type: str,
     description: str,
-    recovery_attempts: List[str] | None = None,
+    recovery_attempts: list[str] | None = None,
     is_fatal: bool = True,
 ) -> str:
     """Signals that an autonomous agent is blocked and requires human intervention.
@@ -201,7 +201,7 @@ def autonomous_escalate(
         {
             "event": "escalation",
             "status": "escalate",
-            "record": record.dict(),
+            "record": record.model_dump(),
             "routing": routing.to_payload(),
         }
     )
@@ -215,7 +215,7 @@ def hypothesis_critique(
     qualitative_feedback: str,
     category: str,
     severity: str,
-    evidence: List[str] | None = None,
+    evidence: list[str] | None = None,
 ) -> str:
     """Allows an agent to perform a structured self-critique of its own hypothesis.
 
@@ -238,7 +238,7 @@ def hypothesis_critique(
     return _format_output(
         {
             "event": "hypothesis_critique",
-            "record": record.dict(),
+            "record": record.model_dump(),
         }
     )
 
@@ -246,8 +246,8 @@ def hypothesis_critique(
 @tool(args_schema=FinalReviewRequest)
 def request_final_review(
     summary: str,
-    recovery_attempts: List[str] | None = None,
-    artifacts: List[str] | None = None,
+    recovery_attempts: list[str] | None = None,
+    artifacts: list[str] | None = None,
     workspace_root: str | None = None,
     include_e2e: bool = True,
     coverage_goal: float | None = None,
@@ -285,7 +285,7 @@ def request_final_review(
     )
     payload: dict[str, object] = {
         "event": "final_review_request",
-        "record": record.dict(),
+        "record": record.model_dump(),
         "tests": tests,
         "artifacts": artifacts or [],
     }

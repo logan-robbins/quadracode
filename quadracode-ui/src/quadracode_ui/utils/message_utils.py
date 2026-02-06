@@ -16,6 +16,7 @@ from quadracode_contracts import (
     HUMAN_CLONE_RECIPIENT,
     HUMAN_RECIPIENT,
     ORCHESTRATOR_RECIPIENT,
+    SUPERVISOR_RECIPIENT,
     MessageEnvelope,
 )
 from quadracode_contracts.messaging import mailbox_key
@@ -28,7 +29,7 @@ def active_supervisor() -> str:
     Defaults to `HUMAN_RECIPIENT` if the value in the session state is invalid.
     """
     value = st.session_state.get("supervisor_recipient")
-    if value in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT}:
+    if value in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT}:
         return value
     return HUMAN_RECIPIENT
 
@@ -40,7 +41,7 @@ def set_supervisor(recipient: str, chat_id: str | None = None) -> None:
     Updates the global `supervisor_recipient` in the session state and also
     associates the supervisor with a chat ID if provided.
     """
-    target = recipient if recipient in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT} else HUMAN_RECIPIENT
+    target = recipient if recipient in {HUMAN_RECIPIENT, HUMAN_CLONE_RECIPIENT, SUPERVISOR_RECIPIENT} else HUMAN_RECIPIENT
     st.session_state.supervisor_recipient = target
     supervisors = st.session_state.get("chat_supervisors")
     if not isinstance(supervisors, dict):
@@ -69,14 +70,14 @@ def send_message(
         client: The Redis client.
         message: The text content of the message.
         chat_id: The chat ID for the message.
-        mode: The mode ('human' or 'human_clone').
+        mode: The mode ('human' or 'supervisor').
         autonomous_settings: Optional autonomous mode settings.
 
     Returns:
         The `ticket_id` for the sent message, used for tracking.
     """
     ticket_id = uuid.uuid4().hex
-    supervisor = HUMAN_CLONE_RECIPIENT if mode == "human_clone" else HUMAN_RECIPIENT
+    supervisor = SUPERVISOR_RECIPIENT if mode in {"supervisor", "human_clone"} else HUMAN_RECIPIENT
 
     payload = {
         "chat_id": chat_id,

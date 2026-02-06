@@ -60,7 +60,7 @@ def save_chat_metadata(
     Args:
         client: Redis client instance.
         chat_id: The chat ID.
-        supervisor: The supervisor mode (human or human_clone).
+        supervisor: The supervisor mode (human or supervisor/human_clone).
         autonomous_settings: Optional autonomous mode settings.
 
     Returns:
@@ -277,7 +277,7 @@ def load_message_history(
                 
                 # Determine role based on sender
                 sender = envelope.sender
-                if sender in {"human", "human_clone"}:
+                if sender in {"human", "human_clone", "supervisor"}:
                     role = "user"
                 else:
                     role = "assistant"

@@ -151,8 +151,7 @@ class ContextScorer:
             context=context_text
         )
         
-        response = await asyncio.to_thread(
-            llm.invoke,
+        response = await llm.ainvoke(
             [
                 SystemMessage(content=prompts.scorer_system_prompt),
                 HumanMessage(content=prompt)
@@ -196,8 +195,8 @@ class ContextScorer:
                 LOGGER.warning("Could not parse LLM scorer response, falling back to heuristic")
                 return await self._evaluate_heuristic(state)
         except (json.JSONDecodeError, ValueError, KeyError) as e:
-            LOGGER.warning(f"Error parsing LLM scorer response: {e}, falling back to heuristic")
-            LOGGER.warning(f"Response was: {response_text[:500]}")
+            LOGGER.warning("Error parsing LLM scorer response: %s, falling back to heuristic", e)
+            LOGGER.debug("Response was: %s", response_text[:500])
             return await self._evaluate_heuristic(state)
         
         state["context_quality_components"] = asdict(breakdown)

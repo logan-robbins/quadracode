@@ -45,20 +45,20 @@ def _bool_env(var_name: str, default: bool = False) -> bool:
 MOCK_MODE = _bool_env("QUADRACODE_MOCK_MODE", False)
 
 # Redis configuration
-REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+REDIS_HOST: str = os.environ.get("REDIS_HOST", "127.0.0.1")
+REDIS_PORT: int = _int_env("REDIS_PORT", 6379)
 
 # Agent Registry configuration
-AGENT_REGISTRY_URL = os.environ.get("AGENT_REGISTRY_URL", "")
+AGENT_REGISTRY_URL: str = os.environ.get("AGENT_REGISTRY_URL", "")
 
 # UI mode configuration
-UI_BARE = os.environ.get("UI_BARE", "0") == "1"
+UI_BARE: bool = _bool_env("UI_BARE")
 
 # Streams configuration
-CONTEXT_METRICS_STREAM = os.environ.get("CONTEXT_METRICS_STREAM", "qc:context:metrics")
-CONTEXT_METRICS_LIMIT = int(os.environ.get("CONTEXT_METRICS_LIMIT", "200"))
-AUTONOMOUS_EVENTS_STREAM = os.environ.get("AUTONOMOUS_EVENTS_STREAM", "qc:autonomous:events")
-AUTONOMOUS_EVENTS_LIMIT = int(os.environ.get("AUTONOMOUS_EVENTS_LIMIT", "200"))
+CONTEXT_METRICS_STREAM: str = os.environ.get("CONTEXT_METRICS_STREAM", "qc:context:metrics")
+CONTEXT_METRICS_LIMIT: int = _int_env("CONTEXT_METRICS_LIMIT", 200)
+AUTONOMOUS_EVENTS_STREAM: str = os.environ.get("AUTONOMOUS_EVENTS_STREAM", "qc:autonomous:events")
+AUTONOMOUS_EVENTS_LIMIT: int = _int_env("AUTONOMOUS_EVENTS_LIMIT", 200)
 
 # Workspace configuration
 WORKSPACE_EXPORT_ROOT = Path(os.environ.get("QUADRACODE_WORKSPACE_EXPORT_ROOT", "./workspace_exports")).expanduser()
@@ -68,8 +68,8 @@ WORKSPACE_STREAM_PREFIX = os.environ.get("QUADRACODE_WORKSPACE_STREAM_PREFIX", "
 WORKSPACE_EVENTS_LIMIT = _int_env("QUADRACODE_WORKSPACE_EVENTS_LIMIT", 50)
 
 # UI Settings
-UI_POLL_INTERVAL_MS = int(os.environ.get("UI_POLL_INTERVAL_MS", "2000"))
-UI_AUTO_REFRESH = os.environ.get("UI_AUTO_REFRESH", "true").lower() == "true"
-UI_MESSAGE_PAGE_SIZE = int(os.environ.get("UI_MESSAGE_PAGE_SIZE", "50"))
+UI_POLL_INTERVAL_MS: int = _int_env("UI_POLL_INTERVAL_MS", 2000)
+UI_AUTO_REFRESH: bool = _bool_env("UI_AUTO_REFRESH", True)
+UI_MESSAGE_PAGE_SIZE: int = _int_env("UI_MESSAGE_PAGE_SIZE", 50)
 
 

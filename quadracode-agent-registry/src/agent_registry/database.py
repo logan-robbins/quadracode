@@ -1,110 +1,108 @@
-"""
-This module provides a lightweight, thread-safe access layer for the SQLite 
-database that underpins the Quadracode Agent Registry.
+"""Thread-safe SQLite data-access layer for the Agent Registry.
 
-It encapsulates all SQL operations, offering a clean, high-level API for the 
-rest of the application. The `Database` class manages connections, schema 
-initialization, and all CRUD (Create, Read, Update, Delete) operations for agent 
-records. By centralizing data access, this module ensures consistency and makes 
-the application easier to maintain and test.
+Provides connection management, schema initialisation with idempotent migrations,
+and parameterised CRUD operations.  A per-operation threading lock serialises
+writes while allowing safe concurrent reads on separate connections.
+
+For in-memory databases (mock mode), a shared-cache URI keeps all connections
+pointed at the same in-memory instance.
 """
+
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
+from collections.abc import Generator
 from datetime import datetime
-from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id       TEXT PRIMARY KEY,
+    host           TEXT NOT NULL,
+    port           INTEGER NOT NULL,
+    status         TEXT NOT NULL,
+    registered_at  TEXT NOT NULL,
+    last_heartbeat TEXT,
+    hotpath        INTEGER NOT NULL DEFAULT 0,
+    metrics        TEXT
+)
+"""
+
+_MIGRATIONS: list[str] = [
+    "ALTER TABLE agents ADD COLUMN hotpath INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE agents ADD COLUMN metrics TEXT",
+]
 
 
 class Database:
-    """
-    Manages all interactions with the SQLite database for the agent registry.
-
-    This class provides a set of methods for initializing the database schema 
-    and performing CRUD operations on agent records. It uses a context manager 
-    for connection handling to ensure that connections are properly managed and 
-    thread-safe.
-
-    For in-memory databases (path=":memory:"), a shared connection with URI mode
-    is used to ensure all operations see the same data.
+    """Manages all interactions with the SQLite database for agent records.
 
     Attributes:
-        path: The file path to the SQLite database.
+        path: Filesystem path to the SQLite file, or ``":memory:"``.
     """
 
-    def __init__(self, path: str):
-        """
-        Initializes the Database instance with the path to the SQLite file.
-
-        Args:
-            path: The file path for the SQLite database. Use ":memory:" for
-                  an in-memory database (mock mode).
-        """
+    def __init__(self, path: str) -> None:
         self.path = path
         self._is_memory = path == ":memory:"
         self._lock = threading.Lock()
-        
-        # For in-memory databases, use a shared connection with URI mode
-        # This ensures all operations see the same database
+
         if self._is_memory:
             self._shared_uri = "file:quadracode_registry?mode=memory&cache=shared"
-            # Keep one connection alive to prevent the database from being destroyed
-            self._keeper = sqlite3.connect(self._shared_uri, uri=True, check_same_thread=False)
+            self._keeper = sqlite3.connect(
+                self._shared_uri, uri=True, check_same_thread=False
+            )
             self._keeper.row_factory = sqlite3.Row
         else:
             self._shared_uri = None
             self._keeper = None
 
-    @contextmanager
-    def connect(self):
-        """
-        Provides a thread-safe connection to the SQLite database.
+        logger.info(
+            "Database initialised: path=%s, in_memory=%s", self.path, self._is_memory
+        )
 
-        This context manager handles the opening and closing of the database 
-        connection, as well as transaction management (commit/rollback). It 
-        also configures the connection to return rows as `sqlite3.Row` objects, 
-        which allows for dictionary-like access to columns.
+    @contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection, None, None]:
+        """Yield a thread-safe SQLite connection with auto-commit/rollback.
+
+        The lock is held only during the execute+commit window so that
+        connection creation does not serialise unnecessarily.
         """
-        with self._lock:
-            if self._is_memory:
-                # Use the shared URI connection for in-memory databases
-                con = sqlite3.connect(self._shared_uri, uri=True, check_same_thread=False)
-            else:
-                con = sqlite3.connect(self.path, check_same_thread=False)
-            try:
-                con.row_factory = sqlite3.Row
+        if self._is_memory:
+            con = sqlite3.connect(
+                self._shared_uri, uri=True, check_same_thread=False  # type: ignore[arg-type]
+            )
+        else:
+            con = sqlite3.connect(self.path, check_same_thread=False)
+        con.row_factory = sqlite3.Row
+        try:
+            with self._lock:
                 yield con
                 con.commit()
-            finally:
-                con.close()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+
+    # Keep the public name `connect` as an alias for backwards compat (tests).
+    connect = _connect
 
     def init_schema(self) -> None:
-        """
-        Initializes the database schema if it doesn't already exist.
+        """Create the ``agents`` table and apply idempotent column migrations."""
+        with self._connect() as con:
+            con.execute(_SCHEMA_SQL)
+            for migration in _MIGRATIONS:
+                try:
+                    con.execute(migration)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+        logger.info("Database schema initialised")
 
-        This method creates the `agents` table with all the necessary columns. 
-        It is designed to be idempotent, so it can be safely called every time 
-        the application starts. It also includes a non-destructive schema 
-        migration to add the `hotpath` column if it's missing.
-        """
-        with self.connect() as con:
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agents (
-                    agent_id TEXT PRIMARY KEY,
-                    host TEXT NOT NULL,
-                    port INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    registered_at TEXT NOT NULL,
-                    last_heartbeat TEXT,
-                    hotpath INTEGER NOT NULL DEFAULT 0
-                )
-                """
-            )
-            try:
-                con.execute("ALTER TABLE agents ADD COLUMN hotpath INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                # Column already exists; ignore
-                pass
+    # ------------------------------------------------------------------
+    # CRUD
+    # ------------------------------------------------------------------
 
     def upsert_agent(
         self,
@@ -115,35 +113,33 @@ class Database:
         now: datetime,
         hotpath: bool = False,
     ) -> None:
-        """
-        Inserts a new agent or updates an existing one.
+        """Insert or update an agent record.
 
-        This method uses an "upsert" operation (`INSERT ... ON CONFLICT`) to 
-        either create a new agent record or update the details of an existing 
-        one. This is a robust way to handle agent registrations, as it avoids 
-        race conditions and simplifies the application logic.
+        On conflict the host/port/status/timestamps are refreshed.  The
+        ``hotpath`` flag is only upgraded (once set, re-registration does not
+        clear it).
 
         Args:
-            agent_id: The unique identifier for the agent.
-            host: The hostname or IP address of the agent.
-            port: The port number on which the agent is listening.
-            now: The current timestamp, used for `registered_at` and 
-                 `last_heartbeat`.
-            hotpath: A boolean indicating if the agent should be on the hotpath.
+            agent_id: Unique identifier for the agent.
+            host: Hostname or IP address of the agent.
+            port: Service port the agent listens on.
+            now: Current UTC timestamp for registration and heartbeat.
+            hotpath: Whether the agent should be pinned to the hotpath.
         """
-        with self.connect() as con:
-            # Try insert; if exists, update host/port and registered_at
+        with self._connect() as con:
             con.execute(
                 """
-                INSERT INTO agents (agent_id, host, port, status, registered_at, last_heartbeat, hotpath)
+                INSERT INTO agents
+                    (agent_id, host, port, status, registered_at, last_heartbeat, hotpath)
                 VALUES (?, ?, ?, 'healthy', ?, ?, ?)
                 ON CONFLICT(agent_id) DO UPDATE SET
-                    host=excluded.host,
-                    port=excluded.port,
-                    status='healthy',
-                    registered_at=excluded.registered_at,
-                    last_heartbeat=excluded.last_heartbeat,
-                    hotpath=CASE WHEN agents.hotpath=1 THEN 1 ELSE excluded.hotpath END
+                    host           = excluded.host,
+                    port           = excluded.port,
+                    status         = 'healthy',
+                    registered_at  = excluded.registered_at,
+                    last_heartbeat = excluded.last_heartbeat,
+                    hotpath        = CASE WHEN agents.hotpath = 1 THEN 1
+                                         ELSE excluded.hotpath END
                 """,
                 (
                     agent_id,
@@ -154,121 +150,90 @@ class Database:
                     1 if hotpath else 0,
                 ),
             )
+        logger.debug("Upserted agent %s at %s:%d", agent_id, host, port)
 
-    def update_heartbeat(self, *, agent_id: str, status: str, at: datetime, metrics: str | None = None) -> bool:
-        """
-        Updates the heartbeat timestamp for a given agent.
-
-        This method is called when an agent sends a heartbeat to the registry. 
-        It updates the `last_heartbeat` and `status` fields for the specified 
-        agent.
+    def update_heartbeat(
+        self,
+        *,
+        agent_id: str,
+        status: str,
+        at: datetime,
+        metrics: str | None = None,
+    ) -> bool:
+        """Update heartbeat timestamp and status for *agent_id*.
 
         Args:
-            agent_id: The ID of the agent to update.
-            status: The new status of the agent (e.g., 'healthy').
-            at: The timestamp of the heartbeat.
+            agent_id: The agent to update.
+            status: New status value (e.g. ``"healthy"``).
+            at: Timestamp of the heartbeat.
+            metrics: JSON-encoded metrics payload, or ``None``.
 
         Returns:
-            True if the update was successful, False otherwise.
+            ``True`` if the agent was found and updated.
         """
-        with self.connect() as con:
+        with self._connect() as con:
             cur = con.execute(
-                "UPDATE agents SET status = ?, last_heartbeat = ?, metrics = ? WHERE agent_id = ?",
-                (status, at.isoformat(), metrics if metrics else "{}", agent_id),
+                "UPDATE agents SET status = ?, last_heartbeat = ?, metrics = ? "
+                "WHERE agent_id = ?",
+                (status, at.isoformat(), metrics or "{}", agent_id),
             )
-            return cur.rowcount > 0
-
-    def init_schema(self) -> None:
-        """
-        Initializes the database schema if it doesn't already exist.
-        """
-        with self.connect() as con:
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agents (
-                    agent_id TEXT PRIMARY KEY,
-                    host TEXT NOT NULL,
-                    port INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    registered_at TEXT NOT NULL,
-                    last_heartbeat TEXT,
-                    hotpath INTEGER NOT NULL DEFAULT 0,
-                    metrics TEXT
-                )
-                """
-            )
-            # Migrations
-            try:
-                con.execute("ALTER TABLE agents ADD COLUMN hotpath INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                con.execute("ALTER TABLE agents ADD COLUMN metrics TEXT")
-            except sqlite3.OperationalError:
-                pass
+            updated = cur.rowcount > 0
+        if not updated:
+            logger.warning("Heartbeat for unknown agent %s", agent_id)
+        return updated
 
     def delete_agent(self, *, agent_id: str) -> bool:
-        """
-        Deletes an agent from the registry.
-
-        Args:
-            agent_id: The ID of the agent to delete.
+        """Delete an agent record.
 
         Returns:
-            True if the deletion was successful, False otherwise.
+            ``True`` if a row was actually deleted.
         """
-        with self.connect() as con:
-            cur = con.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
-            return cur.rowcount > 0
+        with self._connect() as con:
+            cur = con.execute(
+                "DELETE FROM agents WHERE agent_id = ?", (agent_id,)
+            )
+            deleted = cur.rowcount > 0
+        if deleted:
+            logger.info("Deleted agent %s", agent_id)
+        return deleted
 
-    def fetch_agent(self, *, agent_id: str) -> Optional[sqlite3.Row]:
-        """
-        Fetches a single agent from the database.
-
-        Args:
-            agent_id: The ID of the agent to fetch.
+    def fetch_agent(self, *, agent_id: str) -> sqlite3.Row | None:
+        """Fetch a single agent by ID.
 
         Returns:
-            A `sqlite3.Row` object representing the agent, or `None` if not 
-            found.
+            A ``sqlite3.Row`` or ``None`` if not found.
         """
-        with self.connect() as con:
-            cur = con.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,))
-            row = cur.fetchone()
-            return row
+        with self._connect() as con:
+            cur = con.execute(
+                "SELECT * FROM agents WHERE agent_id = ?", (agent_id,)
+            )
+            return cur.fetchone()
 
-    def fetch_agents(self, *, hotpath_only: bool = False) -> List[sqlite3.Row]:
-        """
-        Fetches a list of all agents, with an option to filter for hotpath agents.
-
-        Args:
-            hotpath_only: If True, only returns agents on the hotpath.
+    def fetch_agents(self, *, hotpath_only: bool = False) -> list[sqlite3.Row]:
+        """Fetch all agents, optionally filtered to hotpath-only.
 
         Returns:
-            A list of `sqlite3.Row` objects, each representing an agent.
+            List of ``sqlite3.Row`` objects ordered by ``registered_at`` descending.
         """
-        with self.connect() as con:
+        with self._connect() as con:
             if hotpath_only:
                 cur = con.execute(
-                    "SELECT * FROM agents WHERE hotpath = 1 ORDER BY registered_at DESC"
+                    "SELECT * FROM agents WHERE hotpath = 1 "
+                    "ORDER BY registered_at DESC"
                 )
             else:
-                cur = con.execute("SELECT * FROM agents ORDER BY registered_at DESC")
-            rows = cur.fetchall()
-            return list(rows)
+                cur = con.execute(
+                    "SELECT * FROM agents ORDER BY registered_at DESC"
+                )
+            return list(cur.fetchall())
 
     def set_hotpath(self, *, agent_id: str, hotpath: bool) -> bool:
-        """
-        Sets the hotpath status for a given agent.
-
-        Args:
-            agent_id: The ID of the agent to modify.
-            hotpath: The new hotpath status (True or False).
+        """Set the hotpath flag for an agent.
 
         Returns:
-            True if the update was successful, False otherwise.
+            ``True`` if the agent was found and updated.
         """
-        with self.connect() as con:
+        with self._connect() as con:
             cur = con.execute(
                 "UPDATE agents SET hotpath = ? WHERE agent_id = ?",
                 (1 if hotpath else 0, agent_id),

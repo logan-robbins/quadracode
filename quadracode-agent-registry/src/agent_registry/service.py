@@ -1,19 +1,13 @@
-"""
-This module encapsulates the core business logic for the Quadracode Agent 
-Registry.
+"""Business logic for the Quadracode Agent Registry.
 
-The `AgentRegistryService` class orchestrates all agent management operations, 
-acting as an intermediary between the API layer and the database. It handles the 
-logic for registration, health monitoring (heartbeats), and agent lifecycle 
-management. By separating the business logic into this service layer, the API 
-endpoints remain lightweight and focused on handling HTTP requests, while the 
-service class manages the more complex state transitions and data validation.
+The ``AgentRegistryService`` sits between the API layer and the database,
+owning all domain rules: registration, heartbeat processing, health
+classification, hotpath protection, and statistics aggregation.
 """
-from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
-from typing import List, Optional
+import logging
+from datetime import datetime, timedelta, timezone
 
 from .config import RegistrySettings
 from .database import Database
@@ -26,52 +20,48 @@ from .schemas import (
     RegistryStats,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AgentRegistryService:
-    """
-    Provides the business logic for managing agent registrations.
-
-    This service class contains all the methods necessary to handle the 
-    registration, health tracking, and lifecycle of agents. It is initialized 
-    with a database connection and the application settings, which it uses to 
-    persist agent data and enforce health policies.
+    """Encapsulates all agent-management business logic.
 
     Attributes:
-        db: An instance of the `Database` class for data access.
-        settings: An instance of `RegistrySettings` for configuration.
+        db: SQLite data-access layer.
+        settings: Validated service configuration.
     """
 
-    def __init__(self, db: Database, settings: RegistrySettings):
-        """
-        Initializes the AgentRegistryService.
-
-        Args:
-            db: The database access layer.
-            settings: The application configuration settings.
-        """
+    def __init__(self, db: Database, settings: RegistrySettings) -> None:
         self.db = db
         self.settings = settings
 
-    def register(self, payload: AgentRegistrationRequest) -> AgentInfo:
-        """
-        Registers a new agent or updates an existing one.
+    # ------------------------------------------------------------------
+    # Public operations
+    # ------------------------------------------------------------------
 
-        This method takes a registration payload, persists it to the database 
-        using an upsert operation, and returns the complete agent information.
+    def register(self, payload: AgentRegistrationRequest) -> AgentInfo:
+        """Register a new agent or re-register an existing one.
 
         Args:
-            payload: The registration request from the agent.
+            payload: Registration request with agent identity and location.
 
         Returns:
-            The full agent information, including server-generated timestamps.
+            Full ``AgentInfo`` with server-assigned timestamps.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self.db.upsert_agent(
             agent_id=payload.agent_id,
             host=payload.host,
             port=payload.port,
             now=now,
             hotpath=payload.hotpath,
+        )
+        logger.info(
+            "Agent registered: %s at %s:%d (hotpath=%s)",
+            payload.agent_id,
+            payload.host,
+            payload.port,
+            payload.hotpath,
         )
         return AgentInfo(
             agent_id=payload.agent_id,
@@ -84,133 +74,51 @@ class AgentRegistryService:
         )
 
     def heartbeat(self, hb: AgentHeartbeat) -> bool:
-        """
-        Processes a heartbeat from an agent.
-
-        This method updates the agent's last heartbeat timestamp and status in 
-        the database.
+        """Process an agent heartbeat.
 
         Args:
-            hb: The heartbeat payload from the agent.
+            hb: Heartbeat payload with status and optional metrics.
 
         Returns:
-            True if the heartbeat was successfully recorded, False otherwise.
+            ``True`` if the heartbeat was recorded, ``False`` if agent unknown.
         """
         metrics_json = json.dumps(hb.metrics) if hb.metrics else None
         return self.db.update_heartbeat(
-            agent_id=hb.agent_id, 
-            status=hb.status.value, 
+            agent_id=hb.agent_id,
+            status=hb.status.value,
             at=hb.reported_at,
-            metrics=metrics_json
+            metrics=metrics_json,
         )
 
-    def _row_to_agent(self, row) -> AgentInfo:
-        """
-        Converts a database row into an `AgentInfo` Pydantic model.
-
-        This private helper method handles the transformation from a `sqlite3.Row` 
-        object to a strongly-typed `AgentInfo` model, including parsing date/time 
-        strings.
-
-        Args:
-            row: The `sqlite3.Row` object from the database.
-
-        Returns:
-            An `AgentInfo` model instance.
-        """
-        # Handle possible NULL for last_heartbeat
-        last_hb = None
-        if row["last_heartbeat"]:
-            last_hb = datetime.fromisoformat(row["last_heartbeat"])  # type: ignore[arg-type]
-
-        metrics = None
-        if "metrics" in row.keys() and row["metrics"]:
-             try:
-                 metrics = json.loads(row["metrics"])
-             except Exception:
-                 metrics = None
-
-        return AgentInfo(
-            agent_id=row["agent_id"],
-            host=row["host"],
-            port=row["port"],
-            status=AgentStatus(row["status"]),
-            registered_at=datetime.fromisoformat(row["registered_at"]),
-            last_heartbeat=last_hb,
-            hotpath=bool(row["hotpath"]),
-            metrics=metrics,
-        )
-
-    @staticmethod
-    def _to_utc(dt: datetime | None) -> datetime | None:
-        """
-        Converts a naive datetime object to a timezone-aware UTC datetime.
-
-        This static helper ensures that all datetime comparisons are done in a 
-        consistent timezone (UTC).
+    def list_agents(
+        self,
+        healthy_only: bool = False,
+        hotpath_only: bool = False,
+    ) -> AgentListResponse:
+        """List agents with optional health or hotpath filtering.
 
         Args:
-            dt: The datetime object to convert.
+            healthy_only: When ``True``, exclude agents that have timed out.
+            hotpath_only: When ``True``, only return hotpath-pinned agents.
 
         Returns:
-            A timezone-aware datetime object, or None if the input was None.
-        """
-        if dt is None:
-            return None
-        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-    def _is_healthy(self, agent: AgentInfo) -> bool:
-        """
-        Determines if an agent is currently healthy.
-
-        An agent is considered healthy if its status is 'healthy' and its last 
-        heartbeat was received within the configured timeout period.
-
-        Args:
-            agent: The agent to check.
-
-        Returns:
-            True if the agent is healthy, False otherwise.
-        """
-        if agent.status != AgentStatus.HEALTHY:
-            return False
-        heartbeat = self._to_utc(agent.last_heartbeat)
-        if heartbeat is None:
-            return False
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.settings.agent_timeout)
-        return heartbeat >= cutoff
-
-    def list_agents(self, healthy_only: bool = False, hotpath_only: bool = False) -> AgentListResponse:
-        """
-        Lists all registered agents, with optional filtering.
-
-        This method retrieves all agents from the database and can filter them 
-        based on health status or hotpath assignment.
-
-        Args:
-            healthy_only: If True, only returns healthy agents.
-            hotpath_only: If True, only returns agents on the hotpath.
-
-        Returns:
-            A response object containing the list of agents and filter metadata.
+            Response envelope containing the filtered agent list.
         """
         rows = self.db.fetch_agents(hotpath_only=hotpath_only)
         agents = [self._row_to_agent(r) for r in rows]
         if healthy_only:
             agents = [a for a in agents if self._is_healthy(a)]
-        return AgentListResponse(agents=agents, healthy_only=healthy_only, hotpath_only=hotpath_only)
+        return AgentListResponse(
+            agents=agents,
+            healthy_only=healthy_only,
+            hotpath_only=hotpath_only,
+        )
 
-    def get_agent(self, agent_id: str) -> Optional[AgentInfo]:
-        """
-        Retrieves a single agent by its ID.
-
-        Args:
-            agent_id: The ID of the agent to retrieve.
+    def get_agent(self, agent_id: str) -> AgentInfo | None:
+        """Retrieve a single agent by ID.
 
         Returns:
-            The agent's information, or None if the agent is not found.
+            ``AgentInfo`` or ``None`` if not found.
         """
         row = self.db.fetch_agent(agent_id=agent_id)
         if not row:
@@ -218,52 +126,54 @@ class AgentRegistryService:
         return self._row_to_agent(row)
 
     def remove_agent(self, agent_id: str, *, force: bool = False) -> bool:
-        """
-        Removes an agent from the registry.
+        """Remove an agent from the registry.
 
-        This method includes a safety check to prevent the accidental removal 
-        of a hotpath agent, unless the `force` flag is set.
+        Hotpath agents cannot be removed unless *force* is ``True``.
 
         Args:
-            agent_id: The ID of the agent to remove.
-            force: If True, allows the removal of a hotpath agent.
+            agent_id: ID of the agent to remove.
+            force: Bypass hotpath protection.
 
         Returns:
-            True if the agent was successfully removed, False otherwise.
+            ``True`` if an agent was deleted.
+
+        Raises:
+            ValueError: If the agent is hotpath-pinned and *force* is ``False``.
         """
         current = self.get_agent(agent_id)
         if current and current.hotpath and not force:
             raise ValueError("hotpath_agent")
-        return self.db.delete_agent(agent_id=agent_id)
+        deleted = self.db.delete_agent(agent_id=agent_id)
+        if deleted:
+            logger.info("Agent removed: %s (force=%s)", agent_id, force)
+        return deleted
 
     def set_hotpath(self, agent_id: str, hotpath: bool) -> AgentInfo:
-        """
-        Sets the hotpath status for an agent.
+        """Set or clear the hotpath flag for an agent.
 
         Args:
-            agent_id: The ID of the agent to modify.
-            hotpath: The new hotpath status.
+            agent_id: ID of the agent to modify.
+            hotpath: Desired hotpath state.
 
         Returns:
-            The updated agent information.
+            Updated ``AgentInfo``.
+
+        Raises:
+            ValueError: If the agent does not exist.
         """
-        updated = self.db.set_hotpath(agent_id=agent_id, hotpath=hotpath)
-        if not updated:
+        if not self.db.set_hotpath(agent_id=agent_id, hotpath=hotpath):
             raise ValueError("agent_not_found")
         agent = self.get_agent(agent_id)
         if not agent:
             raise ValueError("agent_not_found")
+        logger.info("Agent %s hotpath set to %s", agent_id, hotpath)
         return agent
 
     def stats(self) -> RegistryStats:
-        """
-        Calculates and returns statistics about the registry.
-
-        This method provides a summary of the registry's state, including the 
-        total number of agents and their health distribution.
+        """Compute aggregate registry statistics.
 
         Returns:
-            A `RegistryStats` object with the current statistics.
+            Snapshot of total, healthy, and unhealthy agent counts.
         """
         rows = self.db.fetch_agents()
         agents = [self._row_to_agent(r) for r in rows]
@@ -274,3 +184,62 @@ class AgentRegistryService:
             healthy_agents=healthy,
             unhealthy_agents=total - healthy,
         )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _row_to_agent(self, row: object) -> AgentInfo:
+        """Convert a ``sqlite3.Row`` into an ``AgentInfo`` model.
+
+        Args:
+            row: Database row with dict-style column access.
+
+        Returns:
+            Populated ``AgentInfo`` instance.
+        """
+        last_hb: datetime | None = None
+        if row["last_heartbeat"]:  # type: ignore[index]
+            last_hb = datetime.fromisoformat(row["last_heartbeat"])  # type: ignore[index]
+
+        metrics: dict | None = None
+        if "metrics" in row.keys() and row["metrics"]:  # type: ignore[union-attr]
+            try:
+                metrics = json.loads(row["metrics"])  # type: ignore[index]
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(
+                    "Malformed metrics JSON for agent %s, ignoring",
+                    row["agent_id"],  # type: ignore[index]
+                )
+
+        return AgentInfo(
+            agent_id=row["agent_id"],  # type: ignore[index]
+            host=row["host"],  # type: ignore[index]
+            port=row["port"],  # type: ignore[index]
+            status=AgentStatus(row["status"]),  # type: ignore[index]
+            registered_at=datetime.fromisoformat(row["registered_at"]),  # type: ignore[index]
+            last_heartbeat=last_hb,
+            hotpath=bool(row["hotpath"]),  # type: ignore[index]
+            metrics=metrics,
+        )
+
+    @staticmethod
+    def _to_utc(dt: datetime | None) -> datetime | None:
+        """Ensure *dt* is timezone-aware in UTC."""
+        if dt is None:
+            return None
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _is_healthy(self, agent: AgentInfo) -> bool:
+        """Return ``True`` if *agent* is healthy and has a recent heartbeat."""
+        if agent.status != AgentStatus.HEALTHY:
+            return False
+        heartbeat = self._to_utc(agent.last_heartbeat)
+        if heartbeat is None:
+            return False
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=self.settings.agent_timeout
+        )
+        return heartbeat >= cutoff

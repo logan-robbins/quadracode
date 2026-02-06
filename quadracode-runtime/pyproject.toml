@@ -16,7 +16,8 @@ dependencies = [
     # LangGraph
     "langgraph>=1.0",
     "langgraph-cli[inmem]>=0.4",
-    "langgraph-checkpoint-sqlite>=3",
+    "langgraph-checkpoint-postgres>=3.0",
+    "psycopg[binary]>=3.1",
     # Local workspace packages
     "quadracode-tools",
     "quadracode-contracts",
@@ -40,3 +41,8 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

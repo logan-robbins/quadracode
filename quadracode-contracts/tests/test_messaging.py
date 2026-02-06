@@ -8,6 +8,7 @@ from quadracode_contracts.messaging import (
     ORCHESTRATOR_RECIPIENT,
     HUMAN_RECIPIENT,
     HUMAN_CLONE_RECIPIENT,
+    SUPERVISOR_RECIPIENT,
     mailbox_key,
     mailbox_recipient,
     agent_mailbox,
@@ -26,6 +27,7 @@ class TestConstants:
         assert ORCHESTRATOR_RECIPIENT == "orchestrator"
         assert HUMAN_RECIPIENT == "human"
         assert HUMAN_CLONE_RECIPIENT == "human_clone"
+        assert SUPERVISOR_RECIPIENT == "human_clone"  # alias points to same value
 
 
 class TestMailboxFunctions:

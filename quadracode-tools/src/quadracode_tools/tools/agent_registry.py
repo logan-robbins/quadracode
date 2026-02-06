@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 import httpx
 from langchain_core.tools import tool
@@ -60,29 +60,29 @@ class AgentRegistryRequest(BaseModel):
         le=500,
         description="Maximum number of agents to include in list summaries.",
     )
-    agent_id: Optional[str] = Field(
+    agent_id: str | None = Field(
         default=None,
         description="Target agent identifier (required for single-agent operations).",
     )
-    host: Optional[str] = Field(
+    host: str | None = Field(
         default=None,
         description="Agent host when registering a new agent.",
     )
-    port: Optional[int] = Field(
+    port: int | None = Field(
         default=None,
         ge=0,
         le=65535,
         description="Agent port when registering a new agent.",
     )
-    status: Optional[Literal["healthy", "unhealthy"]] = Field(
+    status: Literal["healthy", "unhealthy"] | None = Field(
         default=None,
         description="Reported status for heartbeat calls (defaults to healthy).",
     )
-    reported_at: Optional[datetime] = Field(
+    reported_at: datetime | None = Field(
         default=None,
         description="Heartbeat timestamp (defaults to current UTC time).",
     )
-    hotpath: Optional[bool] = Field(
+    hotpath: bool | None = Field(
         default=None,
         description="Desired hotpath flag for update_hotpath operations.",
     )
@@ -238,9 +238,9 @@ def agent_registry_tool(
                 return f"Registered agent {params.agent_id} ({params.host}:{params.port})."
 
             if params.operation == "heartbeat":
-                reported_at = params.reported_at or datetime.utcnow()
+                reported_at = params.reported_at or datetime.now(timezone.utc)
                 if reported_at.tzinfo is not None:
-                    reported_at = reported_at.astimezone(timezone.utc).replace(tzinfo=None)
+                    reported_at = reported_at.astimezone(timezone.utc)
                 heartbeat_body = {
                     "agent_id": params.agent_id,
                     "status": params.status or "healthy",

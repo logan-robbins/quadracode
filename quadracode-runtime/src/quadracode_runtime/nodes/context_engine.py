@@ -288,7 +288,7 @@ class ContextEngine:
         # will handle the RemoveMessage objects we added to the list.
         # The reducer will remove messages with matching IDs and keep the rest.
         
-        LOGGER.info(f"pre_process returning: {len(state.get('context_segments', []))} context_segments")
+        LOGGER.debug("pre_process returning: %d context_segments", len(state.get("context_segments", [])))
         return state
 
     async def post_process(self, state: QuadraCodeState) -> Dict[str, Any]:
@@ -420,10 +420,7 @@ class ContextEngine:
         self._record_stage_observability(state, "govern_context")
         
         # Return the full state to ensure all updates are preserved
-        segments = state.get('context_segments', [])
-        LOGGER.info(f"govern_context returning: {len(segments)} context_segments")
-        for seg in segments:
-            LOGGER.info(f"  - {seg.get('id')}: {seg.get('type')}")
+        LOGGER.debug("govern_context returning: %d context_segments", len(state.get("context_segments", [])))
         return state
 
     async def handle_tool_response(
@@ -674,7 +671,7 @@ class ContextEngine:
                     evidence["property_status"] = property_status
 
         if reason is None:
-            requirements = state.get("human_clone_requirements")
+            requirements = state.get("supervisor_requirements")
             if isinstance(requirements, list):
                 outstanding = [str(item) for item in requirements if str(item).strip()]
                 if outstanding:
@@ -821,7 +818,7 @@ class ContextEngine:
             SystemMessage(content=system_prompt),
             HumanMessage(content=formatted_input),
         ]
-        response = await asyncio.to_thread(llm.invoke, messages)
+        response = await llm.ainvoke(messages)
         return self._parse_plan_response(response.content)
 
     async def _apply_governor_plan(
@@ -939,7 +936,6 @@ class ContextEngine:
                 "context_window_used": state.get("context_window_used", 0),
             },
         )
-        await self._emit_externalization_metrics(state)
         await self._emit_externalization_metrics(state)
         return state
 
@@ -1936,14 +1932,14 @@ class ContextEngine:
         state: QuadraCodeState,
         target_state: PRPState,
         *,
-        human_clone_triggered: bool = False,
+        supervisor_triggered: bool = False,
         strict: bool = False,
     ) -> None:
         apply_prp_transition(
             state,
             target_state,
             exhaustion_mode=state.get("exhaustion_mode"),
-            human_clone_triggered=human_clone_triggered,
+            supervisor_triggered=supervisor_triggered,
             strict=strict,
         )
 

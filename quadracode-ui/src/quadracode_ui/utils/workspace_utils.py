@@ -4,14 +4,18 @@ Workspace management utilities for Quadracode UI.
 Provides functions for workspace lifecycle operations and file access.
 """
 
+import hashlib
 import json
+import logging
 import shlex
-import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import redis
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from quadracode_tools.tools.workspace import (
     workspace_copy_from,
@@ -91,39 +95,21 @@ def create_workspace(workspace_id: str) -> tuple[bool, dict[str, Any] | None, st
     if success and isinstance(data, dict):
         descriptor = data.get("workspace")
         if isinstance(descriptor, dict):
-            # Optionally create a README file for initial content
-            # This helps users understand the workspace is ready and provides a starting point
+            # Seed a lightweight README so the workspace isn't empty.
+            created_time = descriptor.get("created", datetime.now(UTC).isoformat())
+            readme = (
+                f"# Workspace: {workspace_id}\n\n"
+                f"Created: {created_time}\n\n"
+                "## Layout\n\n"
+                "- `/workspace/` — execution root\n"
+                "- `/workspace/logs/` — command logs\n"
+            )
+            safe_readme = shlex.quote(readme)
             try:
-                from datetime import datetime
-                created_time = descriptor.get('created', datetime.now().isoformat())
-                readme_content = f"""# Workspace: {workspace_id}
+                exec_in_workspace(workspace_id, f"printf %s {safe_readme} > /workspace/README.md")
+            except Exception:  # noqa: BLE001
+                pass  # Non-critical — workspace creation still succeeds
 
-This workspace was created on {created_time}.
-
-## Directory Structure
-
-- `/workspace/` - Main workspace directory  
-- `/workspace/logs/` - Command execution logs
-
-## Getting Started
-
-You can:
-1. Add files to this workspace
-2. Execute commands  
-3. Create snapshots to track changes
-4. Export workspace contents
-
-## Notes
-
-This workspace is isolated and provides a sandboxed environment for agent operations.
-"""
-                # Use printf instead of echo to handle multiline content properly
-                command = f'printf "{readme_content.replace('"', '\\"').replace("\n", "\\n")}" > /workspace/README.md'
-                exec_in_workspace(workspace_id, command)
-            except Exception:
-                # Don't fail workspace creation if README creation fails
-                pass
-            
             return True, descriptor, None
         return True, None, "Workspace created but descriptor was not returned."
     
@@ -411,26 +397,19 @@ def get_file_metadata(workspace_id: str, file_path: str) -> dict[str, Any]:
         A dictionary containing file metadata (size, modified_time, type).
     """
     safe_path = shlex.quote(file_path)
-    # Use stat to get file metadata (macOS compatible format)
-    command = f"stat -f '%z,%m,%HT' {safe_path} 2>&1 || stat -c '%s,%Y,%F' {safe_path} 2>&1"
-    success, stdout, _ = exec_in_workspace(workspace_id, command)
-    
-    if not success or not stdout:
-        return {
-            "size": 0,
-            "modified_time": "",
-            "file_type": "unknown",
-        }
-    
+    # Use stat to get file metadata (Linux format — workspace containers are Linux)
+    command = f"stat -c '%s,%Y,%F' {safe_path} 2>&1"
+    ok, stdout, _ = exec_in_workspace(workspace_id, command)
+
+    if not ok or not stdout:
+        return {"size": 0, "modified_time": "", "file_type": "unknown"}
+
     parts = stdout.strip().split(",")
     if len(parts) >= 2:
         try:
             size = int(parts[0])
             modified_timestamp = int(parts[1])
             file_type = parts[2] if len(parts) > 2 else "file"
-            
-            # Convert timestamp to readable format
-            from datetime import UTC, datetime
             modified_time = datetime.fromtimestamp(modified_timestamp, tz=UTC).isoformat()
             
             return {
@@ -486,16 +465,13 @@ def get_file_icon(file_path: str) -> str:
 def create_workspace_snapshot(workspace_id: str) -> tuple[bool, dict[str, Any] | None, str | None]:
     """
     Creates a snapshot of all files in a workspace with checksums.
-    
+
     Args:
         workspace_id: The ID of the workspace to snapshot.
-    
+
     Returns:
         A tuple of (success, snapshot_data, error_message).
     """
-    from datetime import datetime, timezone
-    import hashlib
-    
     try:
         # Get all files in the workspace
         files = list_workspace_files(workspace_id)
@@ -506,7 +482,7 @@ def create_workspace_snapshot(workspace_id: str) -> tuple[bool, dict[str, Any] |
         # Create snapshot metadata
         snapshot = {
             "workspace_id": workspace_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "files": {},
             "total_files": 0,
             "total_size": 0,
@@ -522,12 +498,10 @@ def create_workspace_snapshot(workspace_id: str) -> tuple[bool, dict[str, Any] |
             success, content = read_workspace_file(workspace_id, file_path)
             if not success:
                 continue  # Skip files we can't read
-            
-            # Get file metadata
+
             metadata = get_file_metadata(workspace_id, file_path)
-            
-            # Compute checksum
-            content_bytes = content.encode('utf-8', errors='replace')
+
+            content_bytes = content.encode("utf-8", errors="replace")
             checksum = hashlib.sha256(content_bytes).hexdigest()
             
             # Store file info
@@ -542,8 +516,9 @@ def create_workspace_snapshot(workspace_id: str) -> tuple[bool, dict[str, Any] |
         
         return True, snapshot, None
         
-    except Exception as e:
-        return False, None, f"Failed to create snapshot: {str(e)}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create workspace snapshot for %s: %s", workspace_id, exc)
+        return False, None, f"Failed to create snapshot: {exc}"
 
 
 def save_workspace_snapshot(
@@ -575,7 +550,8 @@ def save_workspace_snapshot(
         client.zadd(f"qc:workspace:snapshot_list:{workspace_id}", {snapshot_id: score})
         
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to save snapshot for workspace %s", workspace_id)
         return False
 
 
@@ -607,9 +583,9 @@ def load_workspace_snapshots(client: redis.Redis, workspace_id: str) -> list[dic
                 snapshot_data["snapshot_id"] = snapshot_id
                 snapshots.append(snapshot_data)
     
-    except Exception:
-        pass  # Return empty list on error
-    
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to load snapshots for workspace %s", workspace_id)
+
     return snapshots
 
 
@@ -634,7 +610,8 @@ def delete_workspace_snapshot(client: redis.Redis, workspace_id: str, snapshot_i
         client.zrem(f"qc:workspace:snapshot_list:{workspace_id}", snapshot_id)
         
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to delete snapshot %s for workspace %s", snapshot_id, workspace_id)
         return False
 
 
@@ -741,18 +718,22 @@ def get_file_diff(workspace_id: str, file_path: str, snapshot: dict[str, Any]) -
 def ensure_default_workspace(client: redis.Redis) -> bool:
     """
     Ensures that the 'default' workspace is registered in Redis.
+
     This corresponds to the 'workspace-default' service in docker-compose.
+    Uses ``load_workspace_descriptor`` from persistence to check the
+    canonical key prefix (``qc:workspace:descriptors:``).
     """
-    from quadracode_ui.utils.persistence import save_workspace_descriptor
-    
-    # Check if already registered
-    if client.exists("qc:workspace:descriptor:default"):
+    from quadracode_ui.utils.persistence import (
+        load_workspace_descriptor,
+        save_workspace_descriptor,
+    )
+
+    if load_workspace_descriptor(client, "default") is not None:
         return True
-        
-    # Attempt to register
+
     success, descriptor, _ = create_workspace("default")
     if success and descriptor:
         save_workspace_descriptor(client, "default", descriptor)
         return True
-        
+
     return False

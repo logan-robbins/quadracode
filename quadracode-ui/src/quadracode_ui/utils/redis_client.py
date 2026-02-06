@@ -7,8 +7,7 @@ Supports QUADRACODE_MOCK_MODE for standalone testing with fakeredis.
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Union
+from datetime import UTC, datetime
 
 import redis
 import streamlit as st
@@ -20,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _seed_mock_data(client: "redis.Redis") -> None:
     """Seeds mock data into fakeredis for demonstration purposes."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     
     # Seed sample mailbox messages
     sample_messages = [

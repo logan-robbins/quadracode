@@ -1,14 +1,14 @@
 """
-This module defines the `prp_trigger_check` graph node, which is responsible for 
-intercepting responses from the HumanClone and converting them into PRP 
+This module defines the `prp_trigger_check` graph node, which is responsible for
+intercepting responses from the supervisor and converting them into PRP
 (Plan-Refine-Play) triggers.
 
-The HumanClone is a specialized component that provides skeptical feedback to the 
-orchestrator. When it rejects a piece of work, it emits a structured 
-`HumanCloneTrigger`. This node parses that trigger, updates the system state to 
-reflect the rejection, and then synthesizes a `hypothesis_critique` tool message. 
-This process effectively translates the abstract feedback from the HumanClone into 
-a concrete, actionable critique that can be processed by the autonomous loop, 
+The supervisor is a specialized component that provides skeptical feedback to the
+orchestrator. When it rejects a piece of work, it emits a structured
+`HumanCloneTrigger`. This node parses that trigger, updates the system state to
+reflect the rejection, and then synthesizes a `hypothesis_critique` tool message.
+This process effectively translates the abstract feedback from the supervisor into
+a concrete, actionable critique that can be processed by the autonomous loop,
 driving the next cycle of refinement.
 """
 
@@ -35,22 +35,22 @@ from ..workspace_integrity import capture_workspace_snapshot
 
 
 def _ensure_state_defaults(state: QuadraCodeState) -> None:
-    state.setdefault("human_clone_requirements", [])
-    state.setdefault("human_clone_trigger", {})
+    state.setdefault("supervisor_requirements", [])
+    state.setdefault("supervisor_trigger", {})
 
 
 def _render_summary(trigger: HumanCloneTrigger) -> str:
     lines = [
-        "HumanClone Trigger Received:",
-        f"- Cycle iteration: {trigger.cycle_iteration}",
-        f"- Exhaustion mode: {trigger.exhaustion_mode.value}",
+        "Supervisor Review Feedback:",
+        f"- Cycle: {trigger.cycle_iteration}",
+        f"- Assessment: {trigger.exhaustion_mode.value}",
     ]
     if trigger.required_artifacts:
-        lines.append("- Required artifacts:")
+        lines.append("- Required deliverables:")
         for artifact in trigger.required_artifacts:
             lines.append(f"  * {artifact}")
     if trigger.rationale:
-        lines.append(f"- Rationale: {trigger.rationale}")
+        lines.append(f"- Feedback: {trigger.rationale}")
     return "\n".join(lines)
 
 
@@ -73,7 +73,7 @@ def _make_tool_message(state: QuadraCodeState, trigger: HumanCloneTrigger) -> To
         "record": {
             "cycle_id": cycle_id,
             "hypothesis": hypothesis,
-            "critique_summary": f"Cycle {cycle_id} rejected by HumanClone",
+            "critique_summary": f"Cycle {cycle_id} rejected in review",
             "qualitative_feedback": qualitative_feedback,
             "category": category,
             "severity": severity,
@@ -81,13 +81,13 @@ def _make_tool_message(state: QuadraCodeState, trigger: HumanCloneTrigger) -> To
             "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },
     }
-    tool_call_id = f"human_clone_trigger::{trigger.cycle_iteration}"
+    tool_call_id = f"review_trigger::{trigger.cycle_iteration}"
     return ToolMessage(
         content=json.dumps(record, separators=(",", ":")),
         name="hypothesis_critique",
         tool_call_id=tool_call_id,
         additional_kwargs={
-            "source": "human_clone",
+            "source": "supervisor_review",
             "trigger": trigger.model_dump(),
         },
     )
@@ -98,26 +98,26 @@ def _apply_trigger_to_state(
     trigger: HumanCloneTrigger,
 ) -> None:
     _ensure_state_defaults(state)
-    state["human_clone_trigger"] = trigger.model_dump()
-    state["human_clone_requirements"] = list(trigger.required_artifacts)
+    state["supervisor_trigger"] = trigger.model_dump()
+    state["supervisor_requirements"] = list(trigger.required_artifacts)
     state["exhaustion_mode"] = ExhaustionMode(trigger.exhaustion_mode.value)
 
     apply_prp_transition(
         state,
         PRPState.HYPOTHESIZE,
         exhaustion_mode=state["exhaustion_mode"],
-        human_clone_triggered=True,
+        supervisor_triggered=True,
     )
 
 
 async def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
     """
-    Intercepts and processes responses from the HumanClone.
+    Intercepts and processes responses from the supervisor.
 
-    This function acts as a conditional node in the graph. It checks if the last 
-    message in the state is from the HumanClone. If it is, the function parses 
-    the message as a `HumanCloneTrigger`, updates the state to reflect the 
-    trigger's directives, and then creates a `hypothesis_critique` tool message 
+    This function acts as a conditional node in the graph. It checks if the last
+    message in the state is from the supervisor. If it is, the function parses
+    the message as a `HumanCloneTrigger`, updates the state to reflect the
+    trigger's directives, and then creates a `hypothesis_critique` tool message
     to be processed by the autonomous loop.
 
     Args:
@@ -148,7 +148,7 @@ async def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
 
     summary = SystemMessage(
         content=_render_summary(trigger),
-        additional_kwargs={"source": "human_clone_trigger"},
+        additional_kwargs={"source": "review_trigger"},
     )
     tool_message = _make_tool_message(state, trigger)
 
@@ -161,7 +161,7 @@ async def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
         metrics = updated_state.setdefault("metrics_log", [])
         metrics.append(
             {
-                "event": "human_clone_trigger",
+                "event": "supervisor_trigger",
                 "payload": {
                     "trigger": trigger.model_dump(),
                     "autonomous_event": event_record,
@@ -184,8 +184,8 @@ async def prp_trigger_check(state: QuadraCodeState) -> QuadraCodeState:
     await asyncio.to_thread(
         capture_workspace_snapshot,
         updated_state,
-        reason="human_clone_rejection",
-        stage="human_clone_review",
+        reason="supervisor_rejection",
+        stage="supervisor_review",
         exhaustion_mode=exhaustion_mode,
         metadata={
             "cycle_iteration": trigger.cycle_iteration,

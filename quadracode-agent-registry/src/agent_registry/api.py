@@ -1,138 +1,177 @@
-"""
-This module defines the FastAPI routes for the Quadracode Agent Registry.
+"""FastAPI HTTP endpoints for the Quadracode Agent Registry.
 
-It creates a FastAPI APIRouter and attaches endpoints for all agent management 
-operations, including registration, health checks (heartbeats), listing, and 
-hotpath management. The router is designed to be dynamically included in the main 
-FastAPI application, with dependencies such as the `AgentRegistryService` 
-injected at runtime. This modular approach keeps the API definitions separate 
-from the application's core logic.
+Defines an ``APIRouter`` with typed ``response_model`` declarations on every
+endpoint and structured error responses.  The service dependency is injected
+via closure from the application factory.
 """
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter, HTTPException, status
 
 from .schemas import (
     AgentHeartbeat,
     AgentInfo,
     AgentListResponse,
     AgentRegistrationRequest,
+    ErrorDetail,
+    HealthResponse,
     HotpathUpdateRequest,
     RegistryStats,
+    StatusResponse,
 )
 from .service import AgentRegistryService
 
 
 def get_router(service: AgentRegistryService) -> APIRouter:
-    """
-    Creates and configures the API router for the agent registry service.
-
-    This function initializes a FastAPI APIRouter and defines all the HTTP 
-    endpoints for interacting with the agent registry. It wires each endpoint to 
-    the corresponding method in the `AgentRegistryService`, which encapsulates 
-    the business logic.
+    """Build the agent-registry API router.
 
     Args:
-        service: An instance of `AgentRegistryService` that provides the 
-                 business logic for agent registration and management.
+        service: Business-logic layer injected from the app factory.
 
     Returns:
-        A configured `APIRouter` instance with all the agent registry 
-        endpoints.
+        Configured ``APIRouter`` with all registry endpoints.
     """
     router = APIRouter()
 
-    @router.get("/health")
-    def health_check():
-        """Provides a simple health check endpoint for the service."""
-        return {"status": "healthy"}
+    @router.get(
+        "/health",
+        response_model=HealthResponse,
+        tags=["monitoring"],
+        summary="Service health check",
+    )
+    def health_check() -> HealthResponse:
+        """Lightweight liveness probe for load-balancer / Docker HEALTHCHECK."""
+        return HealthResponse()
 
-    @router.post("/agents/register")
-    def register_agent(reg: AgentRegistrationRequest):
-        """
-        Registers a new agent with the registry.
+    @router.post(
+        "/agents/register",
+        response_model=AgentInfo,
+        status_code=status.HTTP_201_CREATED,
+        tags=["agents"],
+        summary="Register an agent",
+        responses={422: {"model": ErrorDetail}},
+    )
+    def register_agent(reg: AgentRegistrationRequest) -> AgentInfo:
+        """Register (or re-register) an agent with the registry."""
+        return service.register(reg)
 
-        This endpoint accepts an `AgentRegistrationRequest` and uses the 
-        `AgentRegistryService` to persist the new agent's information.
-        """
-        service.register(reg)
-        return {"status": "success"}
-
-    @router.post("/agents/{agent_id}/heartbeat")
-    def agent_heartbeat(agent_id: str, hb: AgentHeartbeat):
-        """
-        Receives a heartbeat from a registered agent to keep it alive.
-
-        This endpoint is used by agents to signal that they are still active. 
-        If an agent is not found, it returns a 404 error.
-        """
+    @router.post(
+        "/agents/{agent_id}/heartbeat",
+        response_model=StatusResponse,
+        tags=["agents"],
+        summary="Agent heartbeat",
+        responses={404: {"model": ErrorDetail}},
+    )
+    def agent_heartbeat(agent_id: str, hb: AgentHeartbeat) -> StatusResponse:
+        """Record a heartbeat for a registered agent."""
         hb.agent_id = agent_id
         if not service.heartbeat(hb):
-            raise HTTPException(status_code=404, detail="Agent not found")
-        return {"status": "success"}
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found",
+            )
+        return StatusResponse(status="success")
 
-    @router.get("/agents", response_model=AgentListResponse)
-    def list_agents(healthy_only: bool = False, hotpath_only: bool = False):
-        """
-        Lists all registered agents, with optional filters.
+    @router.get(
+        "/agents",
+        response_model=AgentListResponse,
+        tags=["agents"],
+        summary="List agents",
+    )
+    def list_agents(
+        healthy_only: bool = False,
+        hotpath_only: bool = False,
+    ) -> AgentListResponse:
+        """List all registered agents with optional health/hotpath filters."""
+        return service.list_agents(
+            healthy_only=healthy_only, hotpath_only=hotpath_only
+        )
 
-        This endpoint allows clients to retrieve a list of all agents, with 
-        options to filter for only healthy agents or those on the hotpath.
-        """
-        return service.list_agents(healthy_only=healthy_only, hotpath_only=hotpath_only)
-
-    @router.get("/agents/hotpath", response_model=AgentListResponse)
-    def list_hotpath_agents():
-        """Lists all agents currently assigned to the hotpath."""
+    @router.get(
+        "/agents/hotpath",
+        response_model=AgentListResponse,
+        tags=["agents"],
+        summary="List hotpath agents",
+    )
+    def list_hotpath_agents() -> AgentListResponse:
+        """List agents currently pinned to the hotpath."""
         return service.list_agents(healthy_only=False, hotpath_only=True)
 
-    @router.get("/agents/{agent_id}", response_model=AgentInfo)
-    def get_agent(agent_id: str):
-        """
-        Retrieves detailed information for a specific agent.
-
-        If the agent is not found in the registry, this endpoint returns a 404 
-        error.
-        """
+    @router.get(
+        "/agents/{agent_id}",
+        response_model=AgentInfo,
+        tags=["agents"],
+        summary="Get agent details",
+        responses={404: {"model": ErrorDetail}},
+    )
+    def get_agent(agent_id: str) -> AgentInfo:
+        """Retrieve detailed information for a specific agent."""
         agent = service.get_agent(agent_id)
         if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found",
+            )
         return agent
 
-    @router.delete("/agents/{agent_id}")
-    def unregister_agent(agent_id: str, force: bool = False):
-        """
-        Unregisters an agent from the registry.
+    @router.delete(
+        "/agents/{agent_id}",
+        response_model=StatusResponse,
+        tags=["agents"],
+        summary="Unregister an agent",
+        responses={
+            404: {"model": ErrorDetail},
+            409: {"model": ErrorDetail},
+        },
+    )
+    def unregister_agent(
+        agent_id: str, force: bool = False
+    ) -> StatusResponse:
+        """Remove an agent from the registry.
 
-        This endpoint removes an agent's registration. It includes a `force` 
-        parameter to bypass certain safety checks, but will not remove a 
-        hotpath agent unless forced.
+        Hotpath agents are protected; pass ``force=true`` to override.
         """
         try:
             if not service.remove_agent(agent_id, force=force):
-                raise HTTPException(status_code=404, detail="Agent not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found",
+                )
         except ValueError as exc:
             if str(exc) == "hotpath_agent":
-                raise HTTPException(status_code=409, detail="Cannot remove hotpath agent")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Cannot remove hotpath agent without force=true",
+                ) from exc
             raise
-        return {"status": "success"}
+        return StatusResponse(status="success")
 
-    @router.post("/agents/{agent_id}/hotpath", response_model=AgentInfo)
-    def set_hotpath(agent_id: str, request: HotpathUpdateRequest):
-        """
-        Assigns or unassigns an agent to the hotpath.
-
-        This endpoint is used to designate a specific agent as the primary 
-        handler for high-priority tasks.
-        """
+    @router.post(
+        "/agents/{agent_id}/hotpath",
+        response_model=AgentInfo,
+        tags=["agents"],
+        summary="Set hotpath status",
+        responses={404: {"model": ErrorDetail}},
+    )
+    def set_hotpath(agent_id: str, request: HotpathUpdateRequest) -> AgentInfo:
+        """Assign or remove an agent from the hotpath."""
         try:
             return service.set_hotpath(agent_id, request.hotpath)
         except ValueError as exc:
             if str(exc) == "agent_not_found":
-                raise HTTPException(status_code=404, detail="Agent not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found",
+                ) from exc
             raise
 
-    @router.get("/stats", response_model=RegistryStats)
-    def get_stats():
-        """Retrieves statistics about the agent registry."""
+    @router.get(
+        "/stats",
+        response_model=RegistryStats,
+        tags=["monitoring"],
+        summary="Registry statistics",
+    )
+    def get_stats() -> RegistryStats:
+        """Aggregate statistics about the agent registry."""
         return service.stats()
 
     return router

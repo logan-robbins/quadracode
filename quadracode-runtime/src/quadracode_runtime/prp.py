@@ -1,12 +1,12 @@
 """
-This module provides shared helper functions for integrations with the Perpetual 
+This module provides shared helper functions for integrations with the Perpetual
 Refinement Protocol (PRP).
 
-The PRP is a core concept in the Quadracode system, representing the continuous 
-cycle of planning, refining, and executing tasks. This module contains utilities 
-that are used by various components of the runtime to interact with the PRP, such 
-as the `parse_human_clone_trigger` function, which is responsible for parsing the 
-structured feedback from the HumanClone.
+The PRP is a core concept in the Quadracode system, representing the continuous
+cycle of planning, refining, and executing tasks. This module contains utilities
+that are used by various components of the runtime to interact with the PRP, such
+as the `parse_human_clone_trigger` function, which is responsible for parsing the
+structured feedback from the supervisor.
 """
 
 from __future__ import annotations

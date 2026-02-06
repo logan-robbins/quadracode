@@ -1,7 +1,7 @@
 """
 This module is responsible for defining and loading the runtime profiles for the
 different components of the Quadracode system, such as the orchestrator, agents,
-and the HumanClone.
+and the supervisor (formerly HumanClone).
 
 A `RuntimeProfile` is a dataclass that encapsulates the core configuration for a
 runtime component, including its name, default identity, system prompt, and a
@@ -50,7 +50,7 @@ def _supervisor_recipient() -> str:
         "QUADRACODE_SUPERVISOR"
     )
     normalized = (value or "").strip().lower()
-    if normalized in {HUMAN_CLONE_RECIPIENT, "human_clone"}:
+    if normalized in {HUMAN_CLONE_RECIPIENT, "human_clone", "supervisor"}:
         return HUMAN_CLONE_RECIPIENT
     # Fallback to actual human by default
     return HUMAN_RECIPIENT
@@ -231,16 +231,19 @@ class AgentRecipientPolicy(RecipientPolicy):
         return recipients
 
 @dataclass(frozen=True)
-class HumanCloneRecipientPolicy(RecipientPolicy):
+class SupervisorRecipientPolicy(RecipientPolicy):
     """
-    A specialized recipient policy for the HumanClone.
+    A specialized recipient policy for the supervisor (HumanClone).
 
-    This policy ensures that the HumanClone's responses are always routed back 
+    This policy ensures that the supervisor's responses are always routed back
     to the orchestrator.
     """
 
     def resolve(self, envelope, payload) -> List[str]:  # type: ignore[override]
         return [ORCHESTRATOR_RECIPIENT]
+
+# Backward-compatible alias
+HumanCloneRecipientPolicy = SupervisorRecipientPolicy
 
 @dataclass(frozen=True)
 class RuntimeProfile:
@@ -304,37 +307,39 @@ def _make_agent_profile() -> RuntimeProfile:
         ),
     )
 
-HUMAN_CLONE_PROFILE_CACHE: RuntimeProfile | None = None
-
-HUMAN_CLONE_PROFILE_CACHE: RuntimeProfile | None = None
+SUPERVISOR_PROFILE_CACHE: RuntimeProfile | None = None
 
 
-def _make_human_clone_profile() -> RuntimeProfile:
-    """Constructs the HumanClone profile."""
+def _make_supervisor_profile() -> RuntimeProfile:
+    """Constructs the supervisor (HumanClone) profile."""
     try:
         from quadracode_orchestrator.prompts.human_clone import (
             HUMAN_CLONE_SYSTEM_PROMPT,
         )
     except ImportError as exc:  # pragma: no cover - orchestrator optional
         raise RuntimeError(
-            "HumanClone profile requires quadracode_orchestrator package to be installed"
+            "Supervisor profile requires quadracode_orchestrator package to be installed"
         ) from exc
     return RuntimeProfile(
-        name="human_clone",
+        name="supervisor",
         default_identity=HUMAN_CLONE_RECIPIENT,
         system_prompt=HUMAN_CLONE_SYSTEM_PROMPT,
-        policy=HumanCloneRecipientPolicy(),
+        policy=SupervisorRecipientPolicy(),
     )
 
 
-def get_human_clone_profile() -> RuntimeProfile:
+def get_supervisor_profile() -> RuntimeProfile:
     """
-    Returns a cached instance of the HumanClone profile.
+    Returns a cached instance of the supervisor profile.
     """
-    global HUMAN_CLONE_PROFILE_CACHE
-    if HUMAN_CLONE_PROFILE_CACHE is None:
-        HUMAN_CLONE_PROFILE_CACHE = _make_human_clone_profile()
-    return HUMAN_CLONE_PROFILE_CACHE
+    global SUPERVISOR_PROFILE_CACHE
+    if SUPERVISOR_PROFILE_CACHE is None:
+        SUPERVISOR_PROFILE_CACHE = _make_supervisor_profile()
+    return SUPERVISOR_PROFILE_CACHE
+
+# Backward-compatible aliases
+_make_human_clone_profile = _make_supervisor_profile
+get_human_clone_profile = get_supervisor_profile
 
 
 ORCHESTRATOR_PROFILE = _make_orchestrator_profile()
@@ -361,6 +366,6 @@ def load_profile(name: str) -> RuntimeProfile:
         return _make_orchestrator_profile()
     if name == "agent":
         return _make_agent_profile()
-    if name == "human_clone":
-        return get_human_clone_profile()
+    if name in {"supervisor", "human_clone"}:
+        return get_supervisor_profile()
     raise ValueError(f"Unknown runtime profile: {name}")

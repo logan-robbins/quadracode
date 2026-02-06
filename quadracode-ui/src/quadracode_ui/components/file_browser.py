@@ -2,7 +2,7 @@
 File browser component for workspace file exploration.
 """
 
-from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -196,10 +196,9 @@ def render_file_content(
         modified_time = metadata.get("modified_time", "")
         if modified_time:
             try:
-                from datetime import datetime
                 dt = datetime.fromisoformat(modified_time.replace("Z", "+00:00"))
                 time_display = dt.strftime("%Y-%m-%d %H:%M")
-            except Exception:
+            except (ValueError, AttributeError):
                 time_display = "unknown"
         else:
             time_display = "unknown"

@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -50,7 +51,7 @@ WORKSPACE_REDIS_URL = os.environ.get(
     os.environ.get("QUADRACODE_METRICS_REDIS_URL", "redis://redis:6379/0"),
 )
 _WORKSPACE_EVENTS_DISABLED = False
-_WORKSPACE_REDIS_CLIENT: Optional["redis.Redis"] = None  # type: ignore[name-defined]
+_WORKSPACE_REDIS_CLIENT: "redis.Redis" | None = None  # type: ignore[name-defined]
 _WORKSPACE_EVENTS_LOCK = Lock()
 
 
@@ -72,11 +73,11 @@ class WorkspaceBaseRequest(BaseModel):
 
 class WorkspaceCreateRequest(WorkspaceBaseRequest):
     """Schema for creating a new workspace, allowing image and network customization."""
-    image: Optional[str] = Field(
+    image: str | None = Field(
         default=None,
         description="Docker image to use for the workspace container (overrides default).",
     )
-    network: Optional[str] = Field(
+    network: str | None = Field(
         default=None,
         description="Optional Docker network for the workspace container.",
     )
@@ -85,15 +86,15 @@ class WorkspaceCreateRequest(WorkspaceBaseRequest):
 class WorkspaceExecRequest(WorkspaceBaseRequest):
     """Schema for executing a command within a workspace, with environment and timeout controls."""
     command: str = Field(..., description="Shell command to execute inside the workspace container.")
-    working_dir: Optional[str] = Field(
+    working_dir: str | None = Field(
         default=None,
         description="Working directory for the command (defaults to /workspace).",
     )
-    environment: Optional[Dict[str, str]] = Field(
+    environment: dict[str, str] | None = Field(
         default=None,
         description="Optional environment variables for the command.",
     )
-    timeout: Optional[float] = Field(
+    timeout: float | None = Field(
         default=None,
         description="Optional timeout in seconds for the command.",
     )
@@ -109,7 +110,7 @@ class WorkspaceExecRequest(WorkspaceBaseRequest):
 class WorkspaceCopyToRequest(WorkspaceBaseRequest):
     """Schema for copying a file or directory from the host into the workspace."""
     source_path: str = Field(..., description="Path on the host to copy into the workspace.")
-    destination_path: Optional[str] = Field(
+    destination_path: str | None = Field(
         default=None,
         description="Destination path inside the workspace (defaults to /workspace).",
     )
@@ -150,7 +151,7 @@ class WorkspaceResources:
     container: str
 
 
-def _get_workspace_event_client() -> Optional["redis.Redis"]:  # type: ignore[name-defined]
+def _get_workspace_event_client() -> "redis.Redis" | None:  # type: ignore[name-defined]
     """Initializes and returns a Redis client for publishing workspace events.
 
     This function manages a singleton Redis client instance. If the `redis` library
@@ -180,7 +181,7 @@ def _get_workspace_event_client() -> Optional["redis.Redis"]:  # type: ignore[na
     return _WORKSPACE_REDIS_CLIENT
 
 
-def _publish_workspace_event(workspace_id: str, event: str, payload: Dict[str, Any]) -> None:
+def _publish_workspace_event(workspace_id: str, event: str, payload: dict[str, Any]) -> None:
     """Publishes a structured event to a Redis stream for a given workspace.
 
     These events provide an auditable log of all significant workspace activities,
@@ -218,9 +219,9 @@ def _workspace_resources(workspace_id: str) -> WorkspaceResources:
 def ensure_workspace(
     workspace_id: str,
     *,
-    image: Optional[str] = None,
-    network: Optional[str] = None,
-) -> Tuple[bool, Optional[WorkspaceDescriptor], Optional[str]]:
+    image: str | None = None,
+    network: str | None = None,
+) -> tuple[bool, WorkspaceDescriptor | None, str | None]:
     """Ensures that a workspace's Docker volume and container exist and are running.
 
     This is a critical idempotency function. It checks for the existence of the
@@ -244,7 +245,7 @@ def ensure_workspace(
 
     container_preexists = _container_exists(resources.container)
     container_was_running = False
-    container_data: Optional[Dict[str, Any]] = None
+    container_data: dict[str, Any] | None = None
 
     if container_preexists:
         container_data = _inspect_container(resources.container)
@@ -274,7 +275,7 @@ def ensure_workspace(
         workspace_id,
         event_name,
         {
-            "workspace": descriptor.dict(),
+            "workspace": descriptor.model_dump(),
             "volume_created": not volume_preexists,
             "container_preexists": container_preexists,
             "previously_running": container_was_running,
@@ -287,7 +288,7 @@ def ensure_workspace(
 def _run_docker(
     args: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """A wrapper around `subprocess.run` for executing Docker CLI commands.
@@ -317,7 +318,7 @@ def _run_docker(
 def _run_docker_json(
     args: Sequence[str],
     *,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
 ) -> Any:
     """Executes a Docker command and parses its stdout as a JSON object."""
     result = _run_docker(args, timeout=timeout)
@@ -342,13 +343,13 @@ def _container_exists(name: str) -> bool:
     return result.returncode == 0
 
 
-def _container_running(data: Dict[str, Any]) -> bool:
+def _container_running(data: dict[str, Any]) -> bool:
     """Determines if a container is running based on its inspection data."""
     state = data.get("State", {})
     return bool(state.get("Running"))
 
 
-def _inspect_container(name: str) -> Dict[str, Any]:
+def _inspect_container(name: str) -> dict[str, Any]:
     """Returns the `docker inspect` output for a container."""
     data = _run_docker_json(["container", "inspect", name])
     if not data:
@@ -356,7 +357,7 @@ def _inspect_container(name: str) -> Dict[str, Any]:
     return data[0]
 
 
-def _inspect_volume(name: str) -> Dict[str, Any]:
+def _inspect_volume(name: str) -> dict[str, Any]:
     """Returns the `docker inspect` output for a volume."""
     data = _run_docker_json(["volume", "inspect", name])
     if not data:
@@ -364,7 +365,7 @@ def _inspect_volume(name: str) -> Dict[str, Any]:
     return data[0]
 
 
-def _format_timestamp(raw: Optional[str]) -> str:
+def _format_timestamp(raw: str | None) -> str:
     """Normalizes a Docker timestamp string to a consistent ISO 8601 format in UTC."""
     if not raw:
         return _now_iso()
@@ -378,7 +379,7 @@ def _format_timestamp(raw: Optional[str]) -> str:
 
 def _workspace_descriptor(
     resources: WorkspaceResources,
-    container_data: Optional[Dict[str, Any]] = None,
+    container_data: dict[str, Any] | None = None,
 ) -> WorkspaceDescriptor:
     """Constructs a `WorkspaceDescriptor` Pydantic model from container inspection data.
 
@@ -408,7 +409,7 @@ def _workspace_descriptor(
     return descriptor
 
 
-def _start_container(resources: WorkspaceResources, image: str, network: Optional[str]) -> None:
+def _start_container(resources: WorkspaceResources, image: str, network: str | None) -> None:
     """Starts a new Docker container for a workspace with the correct volume mounts and environment."""
     command = [
         "run",
@@ -444,7 +445,7 @@ def _write_logs_to_workspace(
     stdout_text: str,
     stderr_text: str,
     log_prefix: str,
-) -> tuple[str, str, Optional[str]]:
+) -> tuple[str, str, str | None]:
     """Copies stdout and stderr from a command execution into the workspace's log directory.
 
     This function first writes the output streams to temporary files on the host,
@@ -461,7 +462,7 @@ def _write_logs_to_workspace(
         stderr_file.write(stderr_text.encode("utf-8"))
         stderr_tmp = Path(stderr_file.name)
 
-    combined_tmp: Optional[Path]
+    combined_tmp: Path | None
     try:
         with tempfile.NamedTemporaryFile(
             delete=False, prefix="qc-workspace-", suffix=".log", mode="w", encoding="utf-8"
@@ -502,7 +503,7 @@ def _json_error(message: str, **payload: Any) -> str:
 
 
 @tool(args_schema=WorkspaceCreateRequest)
-def workspace_create(workspace_id: str, image: Optional[str] = None, network: Optional[str] = None) -> str:
+def workspace_create(workspace_id: str, image: str | None = None, network: str | None = None) -> str:
     """Creates and starts a sandboxed Docker workspace for a given `workspace_id`.
 
     This tool is the entry point for initializing a new workspace. It is idempotent:
@@ -515,10 +516,10 @@ def workspace_create(workspace_id: str, image: Optional[str] = None, network: Op
     if not success or descriptor is None:
         return _json_error(error or "Failed to provision workspace", workspace_id=workspace_id)
 
-    return _json_success(workspace=descriptor.dict(), message="workspace_ready")
+    return _json_success(workspace=descriptor.model_dump(), message="workspace_ready")
 
 
-def _build_exec_command(command: str) -> List[str]:
+def _build_exec_command(command: str) -> list[str]:
     """Wraps a shell command to ensure it runs in a login shell with pipefail semantics."""
     return ["bash", "-lc", f"set -o pipefail; {command}"]
 
@@ -527,9 +528,9 @@ def _build_exec_command(command: str) -> List[str]:
 def workspace_exec(
     workspace_id: str,
     command: str,
-    working_dir: Optional[str] = None,
-    environment: Optional[Dict[str, str]] = None,
-    timeout: Optional[float] = None,
+    working_dir: str | None = None,
+    environment: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Executes a shell command inside a specified workspace container.
 
@@ -549,7 +550,7 @@ def workspace_exec(
         return _json_error(error or f"Workspace {workspace_id} is unavailable", workspace_id=workspace_id)
     descriptor = descriptor_obj
 
-    exec_args: List[str] = ["exec", "-i"]
+    exec_args: list[str] = ["exec", "-i"]
     exec_args.extend(["-w", exec_cwd])
     if environment:
         for key, value in environment.items():
@@ -561,7 +562,7 @@ def workspace_exec(
     try:
         result = _run_docker(exec_args, timeout=timeout)
     except WorkspaceError as exc:
-        return _json_error(str(exc), workspace=descriptor.dict())
+        return _json_error(str(exc), workspace=descriptor.model_dump())
     finished_at = datetime.now(timezone.utc)
     duration = (finished_at - started_at).total_seconds()
 
@@ -571,9 +572,9 @@ def workspace_exec(
     stderr_bytes = len(stderr.encode("utf-8"))
 
     log_prefix = f"exec-{started_at.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
-    stdout_log: Optional[str] = None
-    stderr_log: Optional[str] = None
-    bundle_log: Optional[str] = None
+    stdout_log: str | None = None
+    stderr_log: str | None = None
+    bundle_log: str | None = None
     try:
         _prepare_logs_directory(resources)
         stdout_log, stderr_log, bundle_log = _write_logs_to_workspace(
@@ -603,7 +604,7 @@ def workspace_exec(
         log_bundle_path=bundle_log,
     )
 
-    event_payload: Dict[str, Any] = {
+    event_payload: dict[str, Any] = {
         "command": command,
         "working_dir": exec_cwd,
         "environment_keys": env_keys,
@@ -625,7 +626,7 @@ def workspace_exec(
     return json.dumps(
         {
             "success": result.returncode == 0,
-            "workspace_command": command_result.dict(),
+            "workspace_command": command_result.model_dump(),
         },
         indent=2,
     )
@@ -635,7 +636,7 @@ def workspace_exec(
 def workspace_copy_to(
     workspace_id: str,
     source_path: str,
-    destination_path: Optional[str] = None,
+    destination_path: str | None = None,
 ) -> str:
     """Copies a file or directory from the host machine into the workspace.
 
@@ -649,7 +650,7 @@ def workspace_copy_to(
     host_path = Path(source_path)
     if not host_path.exists():
         return _json_error("Source path does not exist", source_path=str(host_path))
-    bytes_transferred: Optional[int] = None
+    bytes_transferred: int | None = None
     if host_path.is_file():
         bytes_transferred = host_path.stat().st_size
 
@@ -678,7 +679,7 @@ def workspace_copy_to(
             "bytes_transferred": bytes_transferred,
         },
     )
-    return json.dumps({"success": True, "workspace_copy": result.dict()}, indent=2)
+    return json.dumps({"success": True, "workspace_copy": result.model_dump()}, indent=2)
 
 
 @tool(args_schema=WorkspaceCopyFromRequest)
@@ -706,7 +707,7 @@ def workspace_copy_from(
     except WorkspaceError as exc:
         return _json_error(str(exc), workspace_id=workspace_id)
 
-    bytes_transferred: Optional[int] = None
+    bytes_transferred: int | None = None
     if destination.exists() and destination.is_file():
         bytes_transferred = destination.stat().st_size
 
@@ -725,7 +726,7 @@ def workspace_copy_from(
             "bytes_transferred": bytes_transferred,
         },
     )
-    return json.dumps({"success": True, "workspace_copy": result.dict()}, indent=2)
+    return json.dumps({"success": True, "workspace_copy": result.model_dump()}, indent=2)
 
 
 @tool(args_schema=WorkspaceDestroyRequest)
@@ -743,7 +744,7 @@ def workspace_destroy(
     resources = _workspace_resources(workspace_id)
     container_removed = False
     volume_removed = False
-    errors: List[str] = []
+    errors: list[str] = []
 
     if _container_exists(resources.container):
         result = _run_docker(["container", "rm", "-f", resources.container])
@@ -800,9 +801,9 @@ def workspace_info(
     except WorkspaceError as exc:
         return _json_error(str(exc), workspace_id=workspace_id)
 
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "success": True,
-        "workspace": descriptor.dict(),
+        "workspace": descriptor.model_dump(),
         "container": {
             "container_id": container_data.get("Id"),
             "state": container_data.get("State"),
@@ -831,7 +832,7 @@ def workspace_info(
     return json.dumps(info, indent=2)
 
 
-def _estimate_volume_usage(volume: str) -> Optional[int]:
+def _estimate_volume_usage(volume: str) -> int | None:
     """Calculates the disk usage of a Docker volume in bytes.
 
     This helper function runs a temporary Alpine Linux container with the target

@@ -3,6 +3,7 @@ x-python-env: &python-env
   MCP_REDIS_TRANSPORT: streamable_http
   PYTHONUNBUFFERED: "1"
   QUADRACODE_LOG_LEVEL: ${QUADRACODE_LOG_LEVEL:-INFO}
+  DATABASE_URL: postgresql://quadracode:quadracode@postgres:5432/quadracode
 
 x-python-service: &python-service
   env_file:
@@ -29,6 +30,8 @@ x-orchestrator-base: &orchestrator-base
       condition: service_healthy
     redis-mcp:
       condition: service_healthy
+    postgres:
+      condition: service_healthy
     agent-registry:
       condition: service_started
   volumes:
@@ -50,6 +53,8 @@ x-agent-base: &agent-base
     redis:
       condition: service_healthy
     redis-mcp:
+      condition: service_healthy
+    postgres:
       condition: service_healthy
   volumes:
     - shared-data:/shared
@@ -100,6 +105,24 @@ services:
         ]
       interval: 5s
       timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quadracode
+      POSTGRES_PASSWORD: quadracode
+      POSTGRES_DB: quadracode
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quadracode -d quadracode"]
+      interval: 5s
+      timeout: 3s
       retries: 20
       start_period: 5s
     restart: unless-stopped
@@ -198,8 +221,8 @@ services:
     command: ["python", "-m", "quadracode_runtime"]
     environment:
       <<: *python-env
-      QUADRACODE_PROFILE: human_clone
-      QUADRACODE_ID: human_clone
+      QUADRACODE_PROFILE: supervisor  # backward-compat: "human_clone" also accepted
+      QUADRACODE_ID: human_clone  # external mailbox key — kept for Redis stream compat
       QUADRACODE_GRAPH_RECURSION_LIMIT: "200"
     volumes:
       - shared-data:/shared
@@ -290,6 +313,7 @@ services:
 
 volumes:
   redis-data:
+  postgres-data:
   shared-data:
   mcp-remote-cache:
   qc-ws-default:

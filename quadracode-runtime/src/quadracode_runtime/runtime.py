@@ -38,10 +38,10 @@ from quadracode_contracts import (
 from quadracode_tools.tools.workspace import ensure_workspace
 
 from .graph import (
-    CHECKPOINTER,
     GRAPH_RECURSION_LIMIT,
-    USE_CUSTOM_CHECKPOINTER,
+    _is_local_dev_mode,
     build_graph,
+    create_checkpointer,
 )
 from .logging_utils import configure_logging
 from .messaging import RedisMCPMessaging
@@ -49,7 +49,7 @@ from .mock_mode import is_mock_mode, configure_mock_mode
 from .profiles import RuntimeProfile, is_autonomous_mode_enabled
 from .state import ExhaustionMode, RuntimeState
 from .registry import AgentRegistryIntegration
-from .validation import validate_human_clone_envelope
+from .validation import validate_supervisor_envelope
 
 # Configure mock mode early if enabled
 configure_mock_mode()
@@ -388,25 +388,32 @@ class RuntimeRunner:
         batch_size: int = 5,
     ) -> None:
         """
-        Initializes the `RuntimeRunner`.
+        Initializes the ``RuntimeRunner``.
+
+        The LangGraph and checkpointer are **not** built here — they require
+        an async context and are created in :meth:`start`.
 
         Args:
-            profile: The `RuntimeProfile` for this runtime instance.
+            profile: The ``RuntimeProfile`` for this runtime instance.
             poll_interval: The interval in seconds for polling the message bus.
             batch_size: The maximum number of messages to process in each poll.
         """
-        # Allow mock mode to bypass persistence requirement
-        if not USE_CUSTOM_CHECKPOINTER and not is_mock_mode():
-            raise RuntimeError(
-                "Quadracode runtime requires persistence. Disable QUADRACODE_LOCAL_DEV_MODE "
-                "or run inside Docker before starting runtime services. "
-                "Alternatively, set QUADRACODE_MOCK_MODE=true for testing."
-            )
+        # Guard: in production (container), warn if no DATABASE_URL and not mock
+        if not _is_local_dev_mode() and not is_mock_mode():
+            database_url = os.environ.get("DATABASE_URL", "").strip()
+            if not database_url:
+                LOGGER.warning(
+                    "Running in production mode without DATABASE_URL — "
+                    "checkpoints will NOT survive restarts. "
+                    "Set DATABASE_URL for persistent checkpointing, or "
+                    "QUADRACODE_MOCK_MODE=true for testing."
+                )
         self._profile = profile
         self._poll_interval = poll_interval
         self._batch_size = batch_size
         self._identity = os.environ.get(IDENTITY_ENV_VAR, profile.default_identity)
-        self._graph = build_graph(profile.system_prompt)
+        self._graph = None  # Built in start() after async checkpointer init
+        self._checkpointer = None  # Set in start()
         self._messaging: RedisMCPMessaging | None = None
         self._messaging_start_timeout = _read_timeout_env(
             "QUADRACODE_MESSAGING_START_TIMEOUT", 60.0
@@ -437,10 +444,22 @@ class RuntimeRunner:
         """
         Starts the main event loop.
 
-        This method initializes the messaging client and the agent registry 
-        integration, and then enters a continuous loop of reading and processing 
-        messages from the Redis message bus.
+        Initializes the checkpointer (Postgres or MemorySaver), builds the
+        LangGraph, connects to Redis messaging, and enters the continuous
+        message processing loop.
         """
+        # Initialize checkpointer (async — needs running event loop)
+        self._checkpointer = await create_checkpointer()
+        LOGGER.info(
+            "Checkpointer ready: %s", type(self._checkpointer).__name__
+        )
+
+        # Build graph with the initialized checkpointer
+        self._graph = build_graph(
+            self._profile.system_prompt, checkpointer=self._checkpointer
+        )
+        LOGGER.info("LangGraph compiled with checkpointer")
+
         messaging = await _await_with_timeout(
             RedisMCPMessaging.create(),
             "Redis messaging initialization",
@@ -474,7 +493,7 @@ class RuntimeRunner:
         envelope: MessageEnvelope,
     ) -> None:
         """Handles a single message from the message bus."""
-        valid, feedback = validate_human_clone_envelope(envelope)
+        valid, feedback = validate_supervisor_envelope(envelope)
         if not valid:
             if feedback:
                 await messaging.publish(feedback.recipient, feedback)
@@ -537,16 +556,16 @@ class RuntimeRunner:
 
         config = {"configurable": configurable, "recursion_limit": GRAPH_RECURSION_LIMIT}
 
-        has_checkpoint = CHECKPOINTER.get_tuple(config) is not None
-        LOGGER.info(f"Processing envelope: has_checkpoint={has_checkpoint}, include_history={not has_checkpoint}")
-        LOGGER.info(f"Payload keys: {list(payload.keys())}")
-        LOGGER.info(f"Payload.messages type: {type(payload.get('messages'))}, len: {len(payload.get('messages', []))}")
+        has_checkpoint = (await self._checkpointer.aget_tuple(config)) is not None
+        LOGGER.info("Processing envelope: has_checkpoint=%s, include_history=%s", has_checkpoint, not has_checkpoint)
+        LOGGER.debug("Payload keys: %s", list(payload.keys()))
+        LOGGER.debug("Payload.messages type: %s, len: %d", type(payload.get("messages")), len(payload.get("messages", [])))
         messages = _extract_messages(
             payload,
             envelope,
             include_history=not has_checkpoint,
         )
-        LOGGER.info(f"Extracted {len(messages)} messages")
+        LOGGER.info("Extracted %d messages", len(messages))
         state: RuntimeState = {"messages": messages, "thread_id": thread_id}
         state["_last_envelope_sender"] = envelope.sender
 
@@ -799,11 +818,11 @@ class RuntimeRunner:
 
         success, descriptor_model, error = ensure_workspace(thread_id, image=image, network=network)
         if not success or descriptor_model is None:
-            LOGGER.error(f"[workspace] unable to provision workspace for {thread_id}: {error}")
+            LOGGER.error("[workspace] unable to provision workspace for %s: %s", thread_id, error)
             return
 
-        LOGGER.info(f"[workspace] provisioned successfully for {thread_id}: {descriptor_model.container}")
-        descriptor_dict = descriptor_model.dict()
+        LOGGER.info("[workspace] provisioned successfully for %s: %s", thread_id, descriptor_model.container)
+        descriptor_dict = descriptor_model.model_dump()
         if network:
             descriptor_dict.setdefault("network", network)
         if image:
@@ -904,33 +923,33 @@ def _extract_messages(
     include_history: bool,
 ) -> Sequence[BaseMessage]:
     """Extracts a sequence of `BaseMessage` objects from the payload."""
-    LOGGER.debug(f"_extract_messages: include_history={include_history}, payload_keys={list(payload.keys())}")
+    LOGGER.debug("_extract_messages: include_history=%s, payload_keys=%s", include_history, list(payload.keys()))
     
     if include_history:
         state_payload = payload.get("state")
         if isinstance(state_payload, dict):
             messages_raw = state_payload.get("messages")
             if isinstance(messages_raw, list):
-                LOGGER.debug(f"Found messages in state.messages: {len(messages_raw)} items")
+                LOGGER.debug("Found messages in state.messages: %d items", len(messages_raw))
                 try:
                     result = messages_from_dict(messages_raw)
-                    LOGGER.debug(f"Successfully parsed {len(result)} messages from state")
+                    LOGGER.debug("Successfully parsed %d messages from state", len(result))
                     return result
                 except Exception as e:  # noqa: BLE001
-                    LOGGER.warning(f"Failed to parse messages from state: {e}")
+                    LOGGER.warning("Failed to parse messages from state: %s", e)
 
         messages_raw = payload.get("messages")
         if isinstance(messages_raw, list):
-            LOGGER.debug(f"Found messages in payload: {len(messages_raw)} items")
+            LOGGER.debug("Found messages in payload: %d items", len(messages_raw))
             try:
                 result = messages_from_dict(messages_raw)
-                LOGGER.debug(f"Successfully parsed {len(result)} messages from payload")
+                LOGGER.debug("Successfully parsed %d messages from payload", len(result))
                 return result
             except Exception as e:  # noqa: BLE001
-                LOGGER.warning(f"Failed to parse messages from payload: {e}")
+                LOGGER.warning("Failed to parse messages from payload: %s", e)
 
     if envelope.message:
-        LOGGER.debug(f"Using envelope.message as fallback: {envelope.message[:50]}")
+        LOGGER.debug("Using envelope.message as fallback: %s", envelope.message[:50])
         return [HumanMessage(content=envelope.message)]
 
     if not include_history:

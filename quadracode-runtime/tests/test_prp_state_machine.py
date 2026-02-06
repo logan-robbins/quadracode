@@ -25,16 +25,16 @@ def test_prp_happy_path_transitions():
     assert state["prp_state"] == PRPState.PROPOSE
 
 
-def test_prp_requires_human_clone_to_restart_cycle():
+def test_prp_requires_supervisor_to_restart_cycle():
     state = make_initial_context_engine_state()
     state["prp_state"] = PRPState.PROPOSE
     cycle_before = state.get("prp_cycle_count", 0)
 
-    # Missing HumanClone trigger should record invalid transition
+    # Missing supervisor trigger should record invalid transition
     result = apply_prp_transition(
         state,
         PRPState.HYPOTHESIZE,
-        human_clone_triggered=False,
+        supervisor_triggered=False,
     )
     assert result == {}
     assert state["prp_state"] == PRPState.PROPOSE
@@ -44,7 +44,7 @@ def test_prp_requires_human_clone_to_restart_cycle():
     )
 
     # With trigger, transition succeeds and increments cycle counter
-    apply_prp_transition(state, PRPState.HYPOTHESIZE, human_clone_triggered=True)
+    apply_prp_transition(state, PRPState.HYPOTHESIZE, supervisor_triggered=True)
     assert state["prp_state"] == PRPState.HYPOTHESIZE
     assert state["prp_cycle_count"] == cycle_before + 1
 

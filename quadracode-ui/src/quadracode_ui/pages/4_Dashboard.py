@@ -3,11 +3,15 @@ System Dashboard page for Quadracode UI.
 
 This page provides system-wide metrics, agent registry status, and observability.
 Supports QUADRACODE_MOCK_MODE for standalone testing with mock data.
+
+Uses ``@st.fragment(run_every=…)`` for non-blocking auto-refresh of the
+dashboard tabs instead of a blocking ``time.sleep`` loop.
 """
 
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pandas as pd
@@ -18,9 +22,9 @@ import streamlit as st
 from quadracode_ui.config import (
     AGENT_REGISTRY_URL,
     AUTONOMOUS_EVENTS_LIMIT,
+    AUTONOMOUS_EVENTS_STREAM,
     CONTEXT_METRICS_LIMIT,
     CONTEXT_METRICS_STREAM,
-    AUTONOMOUS_EVENTS_STREAM,
     MOCK_MODE,
     UI_BARE,
 )
@@ -38,7 +42,6 @@ if not success:
     st.error(f"❌ Unable to connect to Redis: {error}")
     st.stop()
 
-# Show mock mode indicator
 if MOCK_MODE:
     st.info("🧪 **Mock Mode Active** - Using simulated data for demonstration")
 
@@ -47,571 +50,423 @@ st.title("📊 System Dashboard")
 st.caption("Overview of system health, metrics, and agent activity")
 
 
-def _get_mock_agent_registry_data() -> dict:
+# ---------------------------------------------------------------------------
+# Data-loading helpers
+# ---------------------------------------------------------------------------
+
+def _get_mock_agent_registry_data() -> dict[str, Any]:
     """Returns mock agent registry data for demonstration."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return {
         "agents": [
             {
-                "agent_id": "orchestrator",
-                "status": "healthy",
-                "type": "orchestrator",
-                "last_heartbeat": now,
-                "hotpath": False,
-                "port": 8123,
+                "agent_id": "orchestrator", "status": "healthy", "type": "orchestrator",
+                "last_heartbeat": now, "hotpath": False, "port": 8123,
                 "capabilities": ["coordination", "task_dispatch"],
             },
             {
-                "agent_id": "agent-a1b2c3",
-                "status": "healthy",
-                "type": "worker",
-                "last_heartbeat": now,
-                "hotpath": True,
-                "port": 8124,
+                "agent_id": "agent-a1b2c3", "status": "healthy", "type": "worker",
+                "last_heartbeat": now, "hotpath": True, "port": 8124,
                 "capabilities": ["code_execution", "file_operations"],
             },
             {
-                "agent_id": "agent-d4e5f6",
-                "status": "idle",
-                "type": "worker",
-                "last_heartbeat": now,
-                "hotpath": False,
-                "port": 8125,
+                "agent_id": "agent-d4e5f6", "status": "idle", "type": "worker",
+                "last_heartbeat": now, "hotpath": False, "port": 8125,
                 "capabilities": ["research", "summarization"],
             },
         ],
         "stats": {
-            "total_agents": 3,
-            "healthy_agents": 2,
-            "idle_agents": 1,
-            "unhealthy_agents": 0,
+            "total_agents": 3, "healthy_agents": 2,
+            "idle_agents": 1, "unhealthy_agents": 0,
         },
         "error": None,
     }
 
 
-# Helper functions
 @st.cache_data(ttl=5.0, show_spinner=False)
-def fetch_agent_registry_data():
-    """Fetches agent registry data."""
-    # In mock mode, return simulated data
+def fetch_agent_registry_data() -> dict[str, Any]:
+    """Fetches agent registry data from the agent registry API."""
     if MOCK_MODE:
         return _get_mock_agent_registry_data()
-    
+
     if UI_BARE or not AGENT_REGISTRY_URL:
         return {"agents": [], "stats": None, "error": "Registry not configured"}
-    
+
     base = AGENT_REGISTRY_URL.rstrip("/")
-    result = {"agents": [], "stats": None, "error": None}
-    
+    result: dict[str, Any] = {"agents": [], "stats": None, "error": None}
+
     try:
         agents_resp = httpx.get(f"{base}/agents", timeout=2.0)
         agents_resp.raise_for_status()
         result["agents"] = agents_resp.json().get("agents", [])
-    except Exception as exc:
+    except httpx.HTTPError as exc:
         result["error"] = f"Failed to load agents: {exc}"
         return result
-    
+
     try:
         stats_resp = httpx.get(f"{base}/stats", timeout=2.0)
         stats_resp.raise_for_status()
         result["stats"] = stats_resp.json()
-    except Exception as exc:
+    except httpx.HTTPError as exc:
         result["error"] = f"Failed to load stats: {exc}"
-    
+
     return result
 
 
-def load_context_metrics(limit: int = 100):
-    """Loads context metrics from Redis."""
+def load_context_metrics(limit: int = 100) -> list[dict[str, Any]]:
+    """Loads context metrics from the ``qc:context:metrics`` Redis stream."""
     try:
         raw_entries = client.xrevrange(CONTEXT_METRICS_STREAM, count=limit)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
-    
-    parsed = []
+
+    parsed: list[dict[str, Any]] = []
     for entry_id, fields in raw_entries:
         try:
             payload = json.loads(fields.get("payload", "{}"))
         except json.JSONDecodeError:
             payload = {}
-        
         parsed.append({
             "id": entry_id,
             "event": fields.get("event", "unknown"),
             "timestamp": fields.get("timestamp", ""),
             "payload": payload,
         })
-    
     return list(reversed(parsed))
 
 
-def load_autonomous_events(limit: int = 100):
-    """Loads autonomous events from Redis."""
+def load_autonomous_events(limit: int = 100) -> list[dict[str, Any]]:
+    """Loads autonomous events from the ``qc:autonomous:events`` Redis stream."""
     try:
         raw_entries = client.xrevrange(AUTONOMOUS_EVENTS_STREAM, count=limit)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
-    
-    parsed = []
+
+    parsed: list[dict[str, Any]] = []
     for entry_id, fields in raw_entries:
         try:
             payload = json.loads(fields.get("payload", "{}"))
         except json.JSONDecodeError:
             payload = {}
-        
         parsed.append({
             "id": entry_id,
             "event": fields.get("event", "unknown"),
             "timestamp": fields.get("timestamp", ""),
             "payload": payload,
         })
-    
     return list(reversed(parsed))
 
 
-# Tabs
-overview_tab, agents_tab, metrics_tab, autonomous_tab = st.tabs([
-    "🏠 Overview",
-    "🤖 Agents",
-    "📈 Context Metrics",
-    "🔄 Autonomous",
-])
-
-with overview_tab:
-    st.subheader("System Overview")
-    
-    # Fetch agent data
-    registry_data = fetch_agent_registry_data()
-    
-    # Metrics cards
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    
-    with metric_col1:
-        total_agents = len(registry_data.get("agents", []))
-        st.metric("Total Agents", total_agents)
-    
-    with metric_col2:
-        stats = registry_data.get("stats") or {}
-        healthy = stats.get("healthy_agents", 0)
-        st.metric("Healthy Agents", healthy)
-    
-    with metric_col3:
-        # Count workspace descriptors from session state
-        workspace_count = len(st.session_state.get("workspace_descriptors", {}))
-        st.metric("Active Workspaces", workspace_count)
-    
-    with metric_col4:
-        # Redis connection status
-        redis_status = "✅ Connected" if success else "❌ Disconnected"
-        st.metric("Redis Status", redis_status)
-    
-    st.divider()
-    
-    # Agent Registry Status
-    st.subheader("Agent Registry")
-    
-    if registry_data.get("error"):
-        st.warning(registry_data["error"])
-    else:
-        agents = registry_data.get("agents", [])
-        if agents:
-            # Create agents table
-            agent_data = []
-            for agent in agents:
-                agent_data.append({
-                    "Agent ID": agent.get("agent_id", ""),
-                    "Status": agent.get("status", ""),
-                    "Type": agent.get("type", ""),
-                    "Last Heartbeat": agent.get("last_heartbeat", ""),
-                })
-            
-            df = pd.DataFrame(agent_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No agents registered")
-
-with agents_tab:
-    st.subheader("Agent Registry Details")
-    
-    registry_data = fetch_agent_registry_data()
-    
-    if registry_data.get("error"):
-        st.error(registry_data["error"])
-    else:
-        agents = registry_data.get("agents", [])
-        
-        if not agents:
-            st.info("No agents registered in the system")
-        else:
-            # Agent status distribution
-            status_col, type_col = st.columns(2)
-            
-            with status_col:
-                st.markdown("**Agent Status Distribution**")
-                status_counts = Counter(agent.get("status", "unknown") for agent in agents)
-                status_data = pd.DataFrame([
-                    {"Status": k, "Count": v} for k, v in status_counts.items()
-                ])
-                fig = px.pie(
-                    status_data,
-                    names="Status",
-                    values="Count",
-                    title="Agent Status",
-                    hole=0.3,  # Donut chart
-                    color_discrete_sequence=px.colors.qualitative.Set3,
-                )
-                fig.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with type_col:
-                st.markdown("**Agent Type Distribution**")
-                type_counts = Counter(agent.get("type", "unknown") for agent in agents)
-                type_data = pd.DataFrame([
-                    {"Type": k, "Count": v} for k, v in type_counts.items()
-                ])
-                fig = px.bar(
-                    type_data,
-                    x="Type",
-                    y="Count",
-                    title="Agent Types",
-                    color="Type",
-                    color_discrete_sequence=px.colors.qualitative.Pastel,
-                )
-                fig.update_layout(showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-            
-            st.divider()
-            
-            # Agent activity drill-down
-            st.subheader("Agent Activity Drill-Down")
-
-            # Agent selector
-            agent_ids = [agent.get("agent_id", "unknown") for agent in agents]
-            selected_agent = st.selectbox(
-                "Select agent to view details",
-                options=agent_ids,
-                key="agent_selector",
-            )
-
-            if selected_agent:
-                agent_info = next((a for a in agents if a.get("agent_id") == selected_agent), None)
-                
-                if agent_info:
-                    # Agent metadata cards
-                    agent_col1, agent_col2, agent_col3, agent_col4 = st.columns(4)
-                    
-                    with agent_col1:
-                        st.metric("Status", agent_info.get("status", "unknown"))
-                    
-                    with agent_col2:
-                        st.metric("Type", agent_info.get("type", "unknown"))
-                    
-                    with agent_col3:
-                        last_hb = agent_info.get("last_heartbeat", "")
-                        if last_hb:
-                            try:
-                                from datetime import UTC, datetime
-                                hb_time = datetime.fromisoformat(last_hb.replace("Z", "+00:00"))
-                                time_ago = datetime.now(UTC) - hb_time
-                                if time_ago.total_seconds() < 60:
-                                    hb_display = f"{int(time_ago.total_seconds())}s ago"
-                                elif time_ago.total_seconds() < 3600:
-                                    hb_display = f"{int(time_ago.total_seconds() / 60)}m ago"
-                                else:
-                                    hb_display = f"{int(time_ago.total_seconds() / 3600)}h ago"
-                            except Exception:
-                                hb_display = "unknown"
-                        else:
-                            hb_display = "never"
-                        st.metric("Last Heartbeat", hb_display)
-                    
-                    with agent_col4:
-                        hotpath = "✅ Yes" if agent_info.get("hotpath") else "❌ No"
-                        st.metric("Hotpath", hotpath)
-                    
-                    st.divider()
-                    
-                    # Agent configuration and metadata
-                    config_col1, config_col2 = st.columns(2)
-                    
-                    with config_col1:
-                        st.markdown("**Agent Configuration**")
-                        config_data = {
-                            k: v for k, v in agent_info.items()
-                            if k not in ["agent_id", "status", "type", "last_heartbeat", "hotpath"]
-                        }
-                        if config_data:
-                            st.json(config_data)
-                        else:
-                            st.caption("No additional configuration")
-                    
-                    with config_col2:
-                        st.markdown("**Full Agent Data**")
-                        st.json(agent_info)
-            
-            st.divider()
-            
-            # All agents summary table
-            st.subheader("All Agents Summary")
-            for agent in agents:
-                with st.expander(f"🤖 {agent.get('agent_id', 'unknown')}", expanded=False):
-                    st.json(agent)
-
-with metrics_tab:
-    st.subheader("Context Engineering Metrics")
-    st.caption("Metrics emitted by the context engineering node")
-    
-    limit = st.slider(
-        "History depth",
-        min_value=50,
-        max_value=CONTEXT_METRICS_LIMIT,
-        value=min(150, CONTEXT_METRICS_LIMIT),
-        key="metrics_limit",
-    )
-    
-    if st.button("🔄 Refresh Metrics", key="refresh_metrics"):
-        st.cache_data.clear()
-        st.rerun()
-    
-    metrics = load_context_metrics(limit=int(limit))
-    
-    if not metrics:
-        st.info("No context metrics emitted yet")
-    else:
-        # Latest metrics summary
-        latest = metrics[-1]
-        latest_payload = latest.get("payload", {})
-        
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        
-        with summary_col1:
-            quality = latest_payload.get("quality_score")
-            quality_str = f"{quality:.2f}" if isinstance(quality, (int, float)) else "n/a"
-            st.metric("Latest Quality Score", quality_str)
-        
-        with summary_col2:
-            focus = latest_payload.get("focus_metric") or "—"
-            st.metric("Latest Focus Metric", focus)
-        
-        with summary_col3:
-            window = latest_payload.get("context_window_used", 0)
-            st.metric("Latest Context Tokens", window)
-        
-        st.divider()
-        
-        # Quality trend chart
-        quality_data = []
-        for entry in metrics:
-            quality = entry["payload"].get("quality_score")
-            if quality is not None:
-                quality_data.append({
-                    "timestamp": entry["timestamp"],
-                    "quality": quality,
-                })
-        
-        if quality_data:
-            st.subheader("Quality Score Trend")
-            df = pd.DataFrame(quality_data)
-            fig = px.line(
-                df,
-                x="timestamp",
-                y="quality",
-                title="Quality Score Over Time",
-                markers=True,
-            )
-            fig.update_layout(
-                hovermode='x unified',
-                xaxis_title="Time",
-                yaxis_title="Quality Score",
-            )
-            fig.update_traces(
-                line_color='#00cc96',
-                line_width=2,
-                marker=dict(size=6),
-            )
-            st.plotly_chart(fig, use_container_width=True, key="quality_chart")
-        
-        # Context window usage
-        window_data = []
-        for entry in metrics:
-            tokens = entry["payload"].get("context_window_used")
-            if tokens is not None:
-                window_data.append({
-                    "timestamp": entry["timestamp"],
-                    "tokens": tokens,
-                })
-        
-        if window_data:
-            st.subheader("Context Window Usage")
-            df = pd.DataFrame(window_data)
-            fig = px.area(
-                df,
-                x="timestamp",
-                y="tokens",
-                title="Context Tokens Over Time",
-            )
-            fig.update_layout(
-                hovermode='x unified',
-                xaxis_title="Time",
-                yaxis_title="Tokens Used",
-            )
-            fig.update_traces(
-                fillcolor='rgba(99, 110, 250, 0.3)',
-                line_color='#636efa',
-                line_width=2,
-            )
-            st.plotly_chart(fig, use_container_width=True, key="context_chart")
-        
-        # Operation distribution
-        operations = Counter(
-            entry["payload"].get("operation")
-            for entry in metrics
-            if entry.get("event") == "tool_response" and entry["payload"].get("operation")
-        )
-        
-        if operations:
-            st.subheader("Operation Distribution")
-            op_data = pd.DataFrame([
-                {"Operation": k, "Count": v}
-                for k, v in sorted(operations.items(), key=lambda x: x[1], reverse=True)
-            ])
-            fig = px.bar(op_data, x="Operation", y="Count", title="Tool Operations")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Raw metrics
-        with st.expander("Raw Metrics Data", expanded=False):
-            st.json(metrics[-50:])
-
-with autonomous_tab:
-    st.subheader("Autonomous Mode Events")
-    st.caption("Checkpoints, critiques, and escalations during autonomous operations")
-    
-    limit = st.slider(
-        "Event history depth",
-        min_value=50,
-        max_value=AUTONOMOUS_EVENTS_LIMIT,
-        value=min(150, AUTONOMOUS_EVENTS_LIMIT),
-        key="autonomous_limit",
-    )
-    
-    if st.button("🔄 Refresh Events", key="refresh_autonomous"):
-        st.cache_data.clear()
-        st.rerun()
-    
-    events = load_autonomous_events(limit=int(limit))
-    
-    if not events:
-        st.info("No autonomous events recorded yet")
-    else:
-        # Latest event
-        latest = events[-1]
-        st.subheader("Latest Event")
-        
-        event_col1, event_col2, event_col3 = st.columns(3)
-        
-        with event_col1:
-            st.metric("Type", latest.get("event", "unknown"))
-        
-        with event_col2:
-            st.metric("Timestamp", latest.get("timestamp", "")[:19])
-        
-        with event_col3:
-            payload = latest.get("payload", {})
-            thread_id = payload.get("thread_id") if isinstance(payload, dict) else None
-            st.metric("Thread", thread_id or "—")
-        
-        st.divider()
-        
-        # Event type distribution
-        event_counts = Counter(e.get("event", "unknown") for e in events)
-        st.subheader("Event Counts")
-        count_data = pd.DataFrame([
-            {"Event Type": k, "Count": v}
-            for k, v in sorted(event_counts.items())
-        ])
-        st.dataframe(count_data, use_container_width=True, hide_index=True)
-        
-        # Enhanced event timeline
-        st.subheader("Event Timeline")
-        timeline_data = []
-        event_colors = {
-            "checkpoint": "#00cc96",
-            "critique": "#ef553b",
-            "escalation": "#ffa15a",
-            "prp_transition": "#ab63fa",
-            "approval": "#19d3f3",
-            "rejection": "#ff6692",
-        }
-        
-        for event in events:
-            event_type = event.get("event", "unknown")
-            timeline_data.append({
-                "Timestamp": event.get("timestamp", ""),
-                "Event": event_type,
-                "Color": event_colors.get(event_type, "#636efa"),
-            })
-        
-        df = pd.DataFrame(timeline_data)
-        
-        # Create interactive timeline
-        fig = go.Figure()
-        
-        for event_type in df["Event"].unique():
-            event_df = df[df["Event"] == event_type]
-            fig.add_trace(go.Scatter(
-                x=event_df["Timestamp"],
-                y=event_df["Event"],
-                mode='markers',
-                name=event_type,
-                marker=dict(
-                    size=12,
-                    color=event_df["Color"].iloc[0] if not event_df.empty else "#636efa",
-                    line=dict(width=1, color='white'),
-                ),
-                text=event_type,
-                hovertemplate='<b>%{y}</b><br>%{x}<extra></extra>',
-            ))
-        
-        fig.update_layout(
-            title="Autonomous Event Timeline",
-            height=400,
-            hovermode='closest',
-            showlegend=True,
-            xaxis_title="Time",
-            yaxis_title="Event Type",
-        )
-        st.plotly_chart(fig, use_container_width=True, key="timeline_chart")
-        
-        # Raw events
-        with st.expander("Raw Events Data", expanded=False):
-            st.json(events[-50:])
-
-# Sidebar - Refresh controls
+# ---------------------------------------------------------------------------
+# Sidebar controls (outside fragment so changes trigger full reruns)
+# ---------------------------------------------------------------------------
 with st.sidebar:
     st.header("Dashboard Controls")
-    
+
     if st.button("🔄 Refresh All Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    
+
     st.divider()
-    
+
     st.subheader("Auto-refresh")
     auto_refresh = st.checkbox("Enable auto-refresh", value=False)
-    
+    refresh_interval: int = 10
+
     if auto_refresh:
         refresh_interval = st.slider(
             "Refresh interval (seconds)",
-            min_value=5,
-            max_value=60,
-            value=10,
-            step=5,
+            min_value=5, max_value=60, value=10, step=5,
         )
         st.caption(f"Refreshing every {refresh_interval} seconds")
-        
-        import time
-        time.sleep(refresh_interval)
-        st.rerun()
+
+# ---------------------------------------------------------------------------
+# Dashboard tabs wrapped in a fragment for non-blocking auto-refresh.
+# When auto-refresh is enabled the fragment auto-reruns every
+# ``refresh_interval`` seconds, re-fetching all data from Redis /
+# agent-registry and redrawing the charts.
+# ---------------------------------------------------------------------------
+_auto_interval = refresh_interval if auto_refresh else None
 
 
+@st.fragment(run_every=_auto_interval)
+def _render_dashboard() -> None:  # noqa: C901 – page-level display function
+    """Render all dashboard tabs (overview, agents, metrics, autonomous)."""
+
+    overview_tab, agents_tab, metrics_tab, autonomous_tab = st.tabs([
+        "🏠 Overview", "🤖 Agents", "📈 Context Metrics", "🔄 Autonomous",
+    ])
+
+    # ---- Overview ----
+    with overview_tab:
+        st.subheader("System Overview")
+        registry_data = fetch_agent_registry_data()
+
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Total Agents", len(registry_data.get("agents", [])))
+        with m2:
+            stats = registry_data.get("stats") or {}
+            st.metric("Healthy Agents", stats.get("healthy_agents", 0))
+        with m3:
+            st.metric("Active Workspaces", len(st.session_state.get("workspace_descriptors", {})))
+        with m4:
+            st.metric("Redis Status", "✅ Connected" if success else "❌ Disconnected")
+
+        st.divider()
+        st.subheader("Agent Registry")
+
+        if registry_data.get("error"):
+            st.warning(registry_data["error"])
+        else:
+            agents = registry_data.get("agents", [])
+            if agents:
+                df = pd.DataFrame([
+                    {
+                        "Agent ID": a.get("agent_id", ""),
+                        "Status": a.get("status", ""),
+                        "Type": a.get("type", ""),
+                        "Last Heartbeat": a.get("last_heartbeat", ""),
+                    }
+                    for a in agents
+                ])
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No agents registered")
+
+    # ---- Agents ----
+    with agents_tab:
+        st.subheader("Agent Registry Details")
+        registry_data = fetch_agent_registry_data()
+
+        if registry_data.get("error"):
+            st.error(registry_data["error"])
+        else:
+            agents = registry_data.get("agents", [])
+            if not agents:
+                st.info("No agents registered in the system")
+            else:
+                status_col, type_col = st.columns(2)
+                with status_col:
+                    st.markdown("**Agent Status Distribution**")
+                    sc = Counter(a.get("status", "unknown") for a in agents)
+                    fig = px.pie(
+                        pd.DataFrame([{"Status": k, "Count": v} for k, v in sc.items()]),
+                        names="Status", values="Count", title="Agent Status",
+                        hole=0.3, color_discrete_sequence=px.colors.qualitative.Set3,
+                    )
+                    fig.update_traces(textposition="inside", textinfo="percent+label")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with type_col:
+                    st.markdown("**Agent Type Distribution**")
+                    tc = Counter(a.get("type", "unknown") for a in agents)
+                    fig = px.bar(
+                        pd.DataFrame([{"Type": k, "Count": v} for k, v in tc.items()]),
+                        x="Type", y="Count", title="Agent Types", color="Type",
+                        color_discrete_sequence=px.colors.qualitative.Pastel,
+                    )
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.divider()
+                st.subheader("Agent Activity Drill-Down")
+
+                agent_ids = [a.get("agent_id", "unknown") for a in agents]
+                selected_agent = st.selectbox(
+                    "Select agent to view details", options=agent_ids, key="agent_selector",
+                )
+
+                if selected_agent:
+                    agent_info = next((a for a in agents if a.get("agent_id") == selected_agent), None)
+                    if agent_info:
+                        ac1, ac2, ac3, ac4 = st.columns(4)
+                        with ac1:
+                            st.metric("Status", agent_info.get("status", "unknown"))
+                        with ac2:
+                            st.metric("Type", agent_info.get("type", "unknown"))
+                        with ac3:
+                            last_hb = agent_info.get("last_heartbeat", "")
+                            hb_display = "never"
+                            if last_hb:
+                                try:
+                                    hb_time = datetime.fromisoformat(last_hb.replace("Z", "+00:00"))
+                                    secs = (datetime.now(UTC) - hb_time).total_seconds()
+                                    if secs < 60:
+                                        hb_display = f"{int(secs)}s ago"
+                                    elif secs < 3600:
+                                        hb_display = f"{int(secs / 60)}m ago"
+                                    else:
+                                        hb_display = f"{int(secs / 3600)}h ago"
+                                except (ValueError, AttributeError):
+                                    hb_display = "unknown"
+                            st.metric("Last Heartbeat", hb_display)
+                        with ac4:
+                            st.metric("Hotpath", "✅ Yes" if agent_info.get("hotpath") else "❌ No")
+
+                        st.divider()
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            st.markdown("**Agent Configuration**")
+                            extra = {
+                                k: v for k, v in agent_info.items()
+                                if k not in {"agent_id", "status", "type", "last_heartbeat", "hotpath"}
+                            }
+                            st.json(extra) if extra else st.caption("No additional configuration")
+                        with cc2:
+                            st.markdown("**Full Agent Data**")
+                            st.json(agent_info)
+
+                st.divider()
+                st.subheader("All Agents Summary")
+                for agent in agents:
+                    with st.expander(f"🤖 {agent.get('agent_id', 'unknown')}", expanded=False):
+                        st.json(agent)
+
+    # ---- Context Metrics ----
+    with metrics_tab:
+        st.subheader("Context Engineering Metrics")
+        st.caption("Metrics emitted by the context engineering node")
+
+        depth = st.slider(
+            "History depth", min_value=50, max_value=CONTEXT_METRICS_LIMIT,
+            value=min(150, CONTEXT_METRICS_LIMIT), key="metrics_limit",
+        )
+
+        if st.button("🔄 Refresh Metrics", key="refresh_metrics"):
+            st.cache_data.clear()
+            st.rerun()
+
+        metrics = load_context_metrics(limit=int(depth))
+
+        if not metrics:
+            st.info("No context metrics emitted yet")
+        else:
+            latest_payload = metrics[-1].get("payload", {})
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                q = latest_payload.get("quality_score")
+                st.metric("Latest Quality Score", f"{q:.2f}" if isinstance(q, (int, float)) else "n/a")
+            with sc2:
+                st.metric("Latest Focus Metric", latest_payload.get("focus_metric") or "—")
+            with sc3:
+                st.metric("Latest Context Tokens", latest_payload.get("context_window_used", 0))
+
+            st.divider()
+
+            quality_data = [
+                {"timestamp": e["timestamp"], "quality": e["payload"]["quality_score"]}
+                for e in metrics if e["payload"].get("quality_score") is not None
+            ]
+            if quality_data:
+                st.subheader("Quality Score Trend")
+                fig = px.line(pd.DataFrame(quality_data), x="timestamp", y="quality",
+                              title="Quality Score Over Time", markers=True)
+                fig.update_layout(hovermode="x unified", xaxis_title="Time", yaxis_title="Quality Score")
+                fig.update_traces(line_color="#00cc96", line_width=2, marker={"size": 6})
+                st.plotly_chart(fig, use_container_width=True, key="quality_chart")
+
+            window_data = [
+                {"timestamp": e["timestamp"], "tokens": e["payload"]["context_window_used"]}
+                for e in metrics if e["payload"].get("context_window_used") is not None
+            ]
+            if window_data:
+                st.subheader("Context Window Usage")
+                fig = px.area(pd.DataFrame(window_data), x="timestamp", y="tokens",
+                              title="Context Tokens Over Time")
+                fig.update_layout(hovermode="x unified", xaxis_title="Time", yaxis_title="Tokens Used")
+                fig.update_traces(fillcolor="rgba(99, 110, 250, 0.3)", line_color="#636efa", line_width=2)
+                st.plotly_chart(fig, use_container_width=True, key="context_chart")
+
+            operations = Counter(
+                e["payload"].get("operation")
+                for e in metrics
+                if e.get("event") == "tool_response" and e["payload"].get("operation")
+            )
+            if operations:
+                st.subheader("Operation Distribution")
+                fig = px.bar(
+                    pd.DataFrame([{"Operation": k, "Count": v}
+                                  for k, v in sorted(operations.items(), key=lambda x: x[1], reverse=True)]),
+                    x="Operation", y="Count", title="Tool Operations",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Raw Metrics Data", expanded=False):
+                st.json(metrics[-50:])
+
+    # ---- Autonomous ----
+    with autonomous_tab:
+        st.subheader("Autonomous Mode Events")
+        st.caption("Checkpoints, critiques, and escalations during autonomous operations")
+
+        edepth = st.slider(
+            "Event history depth", min_value=50, max_value=AUTONOMOUS_EVENTS_LIMIT,
+            value=min(150, AUTONOMOUS_EVENTS_LIMIT), key="autonomous_limit",
+        )
+
+        if st.button("🔄 Refresh Events", key="refresh_autonomous"):
+            st.cache_data.clear()
+            st.rerun()
+
+        events = load_autonomous_events(limit=int(edepth))
+
+        if not events:
+            st.info("No autonomous events recorded yet")
+        else:
+            latest = events[-1]
+            st.subheader("Latest Event")
+            ec1, ec2, ec3 = st.columns(3)
+            with ec1:
+                st.metric("Type", latest.get("event", "unknown"))
+            with ec2:
+                st.metric("Timestamp", latest.get("timestamp", "")[:19])
+            with ec3:
+                p = latest.get("payload", {})
+                st.metric("Thread", (p.get("thread_id") if isinstance(p, dict) else None) or "—")
+
+            st.divider()
+
+            event_counts = Counter(e.get("event", "unknown") for e in events)
+            st.subheader("Event Counts")
+            st.dataframe(
+                pd.DataFrame([{"Event Type": k, "Count": v} for k, v in sorted(event_counts.items())]),
+                use_container_width=True, hide_index=True,
+            )
+
+            st.subheader("Event Timeline")
+            event_colors = {
+                "checkpoint": "#00cc96", "critique": "#ef553b",
+                "escalation": "#ffa15a", "prp_transition": "#ab63fa",
+                "approval": "#19d3f3", "rejection": "#ff6692",
+            }
+            tl = pd.DataFrame([
+                {
+                    "Timestamp": e.get("timestamp", ""),
+                    "Event": e.get("event", "unknown"),
+                    "Color": event_colors.get(e.get("event", ""), "#636efa"),
+                }
+                for e in events
+            ])
+
+            fig = go.Figure()
+            for et in tl["Event"].unique():
+                edf = tl[tl["Event"] == et]
+                fig.add_trace(go.Scatter(
+                    x=edf["Timestamp"], y=edf["Event"], mode="markers", name=et,
+                    marker={"size": 12, "color": edf["Color"].iloc[0] if not edf.empty else "#636efa",
+                            "line": {"width": 1, "color": "white"}},
+                    text=et, hovertemplate="<b>%{y}</b><br>%{x}<extra></extra>",
+                ))
+            fig.update_layout(
+                title="Autonomous Event Timeline", height=400,
+                hovermode="closest", showlegend=True,
+                xaxis_title="Time", yaxis_title="Event Type",
+            )
+            st.plotly_chart(fig, use_container_width=True, key="timeline_chart")
+
+            with st.expander("Raw Events Data", expanded=False):
+                st.json(events[-50:])
+
+
+_render_dashboard()
